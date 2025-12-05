@@ -1,0 +1,169 @@
+from app.core.enums import UserRole
+
+# Canonical roles and simple permission/limit mappings for the MVP
+ADMIN = "admin"
+AP_CLERK = "ap_clerk"
+MANAGER = "manager"
+CFO = "cfo"
+APPROVER = "approver"  # generic approver role (can map to manager/CFO)
+AUDITOR = "auditor"
+SYSTEM = "system"
+
+# All allowed roles (for validation)
+ALL_ROLES = [ADMIN, AP_CLERK, MANAGER, CFO, APPROVER, AUDITOR, SYSTEM]
+
+# Simple permission keys -- use these in policies/permission checks
+PERM_CREATE_INVOICE = "invoices.create"
+PERM_VIEW_INVOICE = "invoices.view"
+PERM_UPDATE_INVOICE = "invoices.update"
+PERM_DELETE_INVOICE = "invoices.delete"
+PERM_APPROVE_INVOICE = "invoices.approve"
+PERM_REJECT_INVOICE = "invoices.reject"
+PERM_MARK_PAID_INVOICE = "invoices.mark_paid"
+
+PERM_MANAGE_VENDORS = "vendors.manage"
+PERM_VIEW_VENDORS = "vendors.view"
+
+PERM_MANAGE_USERS = "users.manage"
+PERM_VIEW_USERS = "users.view"
+
+PERM_VIEW_AUDIT = "audit.view"
+PERM_MANAGE_POLICIES = "policies.manage"
+
+PERM_MANAGE_WORKFLOW = "workflow.manage"
+
+# Role -> permission keys (admin has ALL permissions)
+ROLE_PERMISSIONS = {
+    ADMIN: [
+        # Invoices - ALL
+        PERM_CREATE_INVOICE,
+        PERM_VIEW_INVOICE,
+        PERM_UPDATE_INVOICE,
+        PERM_DELETE_INVOICE,
+        PERM_APPROVE_INVOICE,
+        PERM_REJECT_INVOICE,
+        PERM_MARK_PAID_INVOICE,
+        # Vendors - ALL
+        PERM_MANAGE_VENDORS,
+        PERM_VIEW_VENDORS,
+        # Users - ALL
+        PERM_MANAGE_USERS,
+        PERM_VIEW_USERS,
+        # Audit - ALL
+        PERM_VIEW_AUDIT,
+        # Policies - ALL
+        PERM_MANAGE_POLICIES,
+        # Workflow - ALL
+        PERM_MANAGE_WORKFLOW,
+    ],
+    AP_CLERK: [
+        PERM_CREATE_INVOICE,
+        PERM_VIEW_INVOICE,
+        PERM_UPDATE_INVOICE,
+        PERM_VIEW_VENDORS,
+    ],
+    MANAGER: [
+        PERM_VIEW_INVOICE,
+        PERM_APPROVE_INVOICE,
+        PERM_REJECT_INVOICE,
+        PERM_VIEW_VENDORS,
+    ],
+    CFO: [
+        PERM_VIEW_INVOICE,
+        PERM_APPROVE_INVOICE,
+        PERM_REJECT_INVOICE,
+        PERM_MARK_PAID_INVOICE,
+        PERM_VIEW_VENDORS,
+        PERM_VIEW_AUDIT,
+    ],
+    APPROVER: [
+        PERM_VIEW_INVOICE,
+        PERM_APPROVE_INVOICE,
+        PERM_REJECT_INVOICE,
+    ],
+    AUDITOR: [
+        PERM_VIEW_INVOICE,
+        PERM_VIEW_VENDORS,
+        PERM_VIEW_USERS,
+        PERM_VIEW_AUDIT,
+    ],
+    SYSTEM: [
+        PERM_VIEW_INVOICE,
+    ],
+}
+
+# Approval limits (currency amounts in smallest unit or base currency)
+# Use these in policy evaluation: Manager approves <= 250k, CFO > 250k
+APPROVAL_LIMITS = {
+    ADMIN: None,  # Unlimited
+    MANAGER: 250_000,
+    CFO: None,  # Unlimited
+}
+
+# Canonical roles (extend anytime)
+ROLES = {
+    "admin": {
+        "display_name": "Administrator",
+        "description": "Full system access - all permissions",
+        "permissions": ["*"],  # Wildcard = all
+    },
+    "ap_clerk": {
+        "display_name": "AP Clerk",
+        "description": "Create and manage invoices",
+        "permissions": ["invoices.create", "invoices.view", "invoices.update", "vendors.view"],
+    },
+    "manager": {
+        "display_name": "Manager",
+        "description": "Approve invoices up to 250k",
+        "permissions": ["invoices.view", "invoices.approve", "invoices.reject", "vendors.view"],
+    },
+    "cfo": {
+        "display_name": "CFO",
+        "description": "Approve all invoices and view financials",
+        "permissions": ["invoices.view", "invoices.approve", "invoices.reject", "invoices.mark_paid", "audit.view"],
+    },
+    "approver": {
+        "display_name": "Approver",
+        "description": "Generic approver role",
+        "permissions": ["invoices.view", "invoices.approve", "invoices.reject"],
+    },
+    "auditor": {
+        "display_name": "Auditor",
+        "description": "Read-only access to all audit logs",
+        "permissions": ["invoices.view", "vendors.view", "users.view", "audit.view"],
+    },
+    "user": {
+        "display_name": "User",
+        "description": "Basic read access",
+        "permissions": ["invoices.view"],
+    },
+    "system": {
+        "display_name": "System",
+        "description": "System-level operations",
+        "permissions": [],
+    },
+}
+
+DEFAULT_ROLE = UserRole.AP_CLERK.value
+
+def is_valid_role(role: str) -> bool:
+    return role in [r.value for r in UserRole]
+
+def list_roles() -> list[str]:
+    return [r.value for r in UserRole]
+
+def get_role_permissions(role: str) -> list[str]:
+    """Get all permissions for a given role"""
+    return ROLE_PERMISSIONS.get(role, [])
+
+def has_permission(role: str, permission: str) -> bool:
+    """Check if role has specific permission"""
+    if role == ADMIN:
+        return True  # Admin has all permissions
+    return permission in ROLE_PERMISSIONS.get(role, [])
+
+def get_approval_limit(role: str) -> int | None:
+    """Get approval limit for role (None = unlimited)"""
+    if role == ADMIN:
+        return None  # Unlimited
+    return APPROVAL_LIMITS.get(role, None)
