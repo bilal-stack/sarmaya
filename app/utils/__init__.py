@@ -29,6 +29,8 @@ from .datetime_helpers import (
     sanitize_for_json,
 )
 
+from app.utils.money import money_to_float, format_currency
+
 __all__ = [
     # Datetime helpers
     "utc_now",
@@ -48,4 +50,7 @@ __all__ = [
     "is_within_days",
     "add_business_days",
     "sanitize_for_json",
+    # Money helpers
+    "money_to_float",
+    "format_currency",
 ]

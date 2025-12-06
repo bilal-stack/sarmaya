@@ -2,7 +2,6 @@ from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey,
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
-import uuid
 from app.core.enums import InvoiceState, Currency
 
 class Invoice(BaseModel):
