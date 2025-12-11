@@ -63,7 +63,6 @@ class DocumentAIProvider(OCRProvider):
             
             # Parse extracted entities
             parsed_result = self._parse_document_ai_response(document)
-            print('Document AI parsed result:', parsed_result)
             return parsed_result
         
         except Exception as e:

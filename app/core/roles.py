@@ -163,7 +163,39 @@ def has_permission(role: str, permission: str) -> bool:
     return permission in ROLE_PERMISSIONS.get(role, [])
 
 def get_approval_limit(role: str) -> int | None:
-    """Get approval limit for role (None = unlimited)"""
+    """Get approval limit for role (None = unlimited, 0 = no approval permission)"""
     if role == ADMIN:
         return None  # Unlimited
-    return APPROVAL_LIMITS.get(role, None)
+    
+    # Only roles with explicit approval permission should have limits
+    if role not in APPROVAL_LIMITS:
+        return 0  # No approval permission
+    
+    return APPROVAL_LIMITS.get(role)
+
+def can_approve_invoices(role: str) -> bool:
+    """Check if role has invoice approval permission"""
+    return has_permission(role, PERM_APPROVE_INVOICE)
+
+def can_approve_amount(role: str, amount: float) -> tuple[bool, str]:
+    """
+    Check if role can approve given amount
+    Returns (can_approve, error_message)
+    """
+    # First check if role has approval permission at all
+    if not can_approve_invoices(role):
+        return False, f"Role '{role}' does not have permission to approve invoices"
+    
+    # Then check approval limit
+    limit = get_approval_limit(role)
+    
+    if limit is None:  # Unlimited
+        return True, ""
+    
+    if limit == 0:  # No approval permission
+        return False, f"Role '{role}' does not have permission to approve invoices"
+    
+    if amount > limit:
+        return False, f"Role '{role}' can only approve invoices up to {limit}, but invoice amount is {amount}"
+    
+    return True, ""

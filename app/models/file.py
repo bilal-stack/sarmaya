@@ -1,8 +1,7 @@
-from sqlalchemy import Column, String, Integer, BigInteger, JSON, ForeignKey
+from sqlalchemy import Column, String, BigInteger, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
-import uuid
 
 
 class File(BaseModel):

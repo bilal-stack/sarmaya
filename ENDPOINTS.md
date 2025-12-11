@@ -224,11 +224,23 @@ Prefix: `/api/v1/auth`
 
 ## AI (`/ai`)
 
+### Conversations
+
+| Method | Endpoint | Purpose | Auth | Body |
+|--------|----------|---------|------|------|
+| GET | `/ai/conversations` | List user's conversations | ✅ Bearer | - |
+| GET | `/ai/conversations/{id}` | Get conversation with history | ✅ Bearer | - |
+| DELETE | `/ai/conversations/{id}` | Delete conversation | ✅ Bearer | - |
+
+**Query Params (List):**
+- `limit` (default: 50)
+- `offset` (default: 0)
+
 ### Chat & Query
 
 | Method | Endpoint | Purpose | Auth | Body |
 |--------|----------|---------|------|------|
-| POST | `/ai/chat` | Chat with AI | ✅ Bearer | `{message, history?}` |
+| POST | `/ai/chat` | Chat with AI (persistent) | ✅ Bearer | `{message, conversation_id?}` |
 | POST | `/ai/query` | Natural language query | ✅ Bearer | `{query}` |
 | POST | `/ai/detect-duplicate` | AI duplicate detection | ✅ Bearer | `{vendor_name, invoice_number, invoice_date, total_amount}` |
 
@@ -236,53 +248,56 @@ Prefix: `/api/v1/auth`
 ```json
 {
   "message": "Show me pending invoices",
-  "history": [
-    {"role": "user", "content": "previous question"},
-    {"role": "assistant", "content": "previous answer"}
-  ]
+  "conversation_id": "uuid-optional"
 }
 ```
 
 **Chat Response:**
 ```json
 {
-  "response": "Here are your pending invoices...",
+  "conversation_id": "uuid",
+  "message": "Here are your pending invoices...",
   "role": "assistant"
 }
 ```
 
-**Query Request:**
+**Conversation List Response:**
 ```json
-{
-  "query": "Which invoices are over 100k?"
-}
+[
+  {
+    "id": "uuid",
+    "title": "Chat 2024-01-15 10:30",
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:35:00Z",
+    "message_count": 5
+  }
+]
 ```
 
-**Query Response:**
+**Conversation Detail Response:**
 ```json
 {
-  "query": "Which invoices are over 100k?",
-  "ai_response": "I found 3 invoices over 100k...",
-  "data": [
+  "id": "uuid",
+  "title": "Chat 2024-01-15 10:30",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:35:00Z",
+  "message_count": 5,
+  "messages": [
     {
       "id": "uuid",
-      "invoice_number": "INV-123",
-      "vendor_name": "ABC Corp",
-      "total_amount": 150000.0,
-      "invoice_date": "2024-01-15"
+      "conversation_id": "uuid",
+      "role": "user",
+      "content": "Show me pending invoices",
+      "created_at": "2024-01-15T10:30:00Z"
+    },
+    {
+      "id": "uuid",
+      "conversation_id": "uuid",
+      "role": "assistant",
+      "content": "Here are your pending invoices...",
+      "created_at": "2024-01-15T10:30:05Z"
     }
   ]
-}
-```
-
-**Duplicate Detection Response:**
-```json
-{
-  "is_duplicate": false,
-  "confidence": 0.95,
-  "matched_invoice_id": null,
-  "similarity_score": 0.0,
-  "reasoning": "No matching invoices found"
 }
 ```
 
@@ -527,6 +542,27 @@ curl -X POST http://127.0.0.1:8000/api/v1/ai/query \
 ### 3. Get Audit Trail
 ```bash
 curl -X GET "http://127.0.0.1:8000/api/v1/audit/trail/invoice/uuid" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 4. Chat with Context Retention
+```bash
+# Start new conversation
+RESPONSE=$(curl -X POST http://127.0.0.1:8000/api/v1/ai/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Show me pending invoices"}')
+
+CONV_ID=$(echo $RESPONSE | jq -r '.conversation_id')
+
+# Continue conversation
+curl -X POST http://127.0.0.1:8000/api/v1/ai/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"Which one is the highest amount?\", \"conversation_id\": \"$CONV_ID\"}"
+
+# List all conversations
+curl -X GET http://127.0.0.1:8000/api/v1/ai/conversations \
   -H "Authorization: Bearer $TOKEN"
 ```
 

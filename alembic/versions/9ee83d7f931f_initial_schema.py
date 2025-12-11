@@ -1,8 +1,8 @@
-"""Initial schema
+"""initial_schema
 
-Revision ID: b105d820d4a4
+Revision ID: 9ee83d7f931f
 Revises: 
-Create Date: 2025-11-28 09:25:36.884465
+Create Date: 2025-12-10 09:03:37.162346
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'b105d820d4a4'
+revision: str = '9ee83d7f931f'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -57,9 +57,9 @@ def upgrade() -> None:
     op.create_table('users',
     sa.Column('tenant_id', sa.UUID(), nullable=False),
     sa.Column('email', sa.String(length=255), nullable=False),
-    sa.Column('password_hash', sa.String(length=255), nullable=False),
+    sa.Column('password', sa.String(length=255), nullable=False),
     sa.Column('full_name', sa.String(length=255), nullable=True),
-    sa.Column('role', sa.String(length=50), nullable=True),
+    sa.Column('role', sa.Enum('ADMIN', 'AP_CLERK', 'MANAGER', 'CFO', 'APPROVER', 'AUDITOR', 'USER', 'SYSTEM', name='userrole'), nullable=True),
     sa.Column('permissions', sa.JSON(), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('last_login', sa.DateTime(), nullable=True),
@@ -87,30 +87,17 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_workflow_states_tenant_id'), 'workflow_states', ['tenant_id'], unique=False)
-    op.create_table('audit_logs',
-    sa.Column('tenant_id', sa.UUID(), nullable=False),
-    sa.Column('user_id', sa.UUID(), nullable=True),
-    sa.Column('user_email', sa.String(length=255), nullable=True),
-    sa.Column('user_role', sa.String(length=50), nullable=True),
-    sa.Column('object_type', sa.String(length=50), nullable=False),
-    sa.Column('object_id', sa.UUID(), nullable=False),
-    sa.Column('action', sa.String(length=100), nullable=False),
-    sa.Column('before_value', sa.JSON(), nullable=True),
-    sa.Column('after_value', sa.JSON(), nullable=True),
-    sa.Column('changes', sa.JSON(), nullable=True),
-    sa.Column('comment', sa.String(), nullable=True),
-    sa.Column('custom_metadata', sa.JSON(), nullable=True),
-    sa.Column('ip_address', postgresql.INET(), nullable=True),
-    sa.Column('user_agent', sa.String(), nullable=True),
-    sa.Column('timestamp', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    op.create_table('conversations',
     sa.Column('id', sa.UUID(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
+    sa.Column('tenant_id', sa.UUID(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=False),
+    sa.Column('title', sa.String(length=255), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_audit_logs_tenant_id'), 'audit_logs', ['tenant_id'], unique=False)
     op.create_table('files',
     sa.Column('tenant_id', sa.UUID(), nullable=False),
     sa.Column('original_filename', sa.String(length=255), nullable=False),
@@ -147,7 +134,7 @@ def upgrade() -> None:
     sa.Column('swift_code', sa.String(length=20), nullable=True),
     sa.Column('tax_id', sa.String(length=100), nullable=True),
     sa.Column('tax_certificate_url', sa.String(length=500), nullable=True),
-    sa.Column('status', sa.String(length=50), nullable=True),
+    sa.Column('status', sa.Enum('ACTIVE', 'INACTIVE', 'BLOCKED', 'PENDING_VERIFICATION', name='vendorstatus'), nullable=True),
     sa.Column('risk_score', sa.Integer(), nullable=True),
     sa.Column('risk_flags', sa.JSON(), nullable=True),
     sa.Column('custom_metadata', sa.JSON(), nullable=True),
@@ -161,6 +148,50 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_vendors_tenant_id'), 'vendors', ['tenant_id'], unique=False)
+    op.create_table('audit_logs',
+    sa.Column('tenant_id', sa.UUID(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=True),
+    sa.Column('user_email', sa.String(length=255), nullable=True),
+    sa.Column('user_role', sa.String(length=50), nullable=True),
+    sa.Column('object_type', sa.String(length=50), nullable=False),
+    sa.Column('object_id', sa.UUID(), nullable=False),
+    sa.Column('action', sa.String(length=100), nullable=False),
+    sa.Column('before_value', sa.JSON(), nullable=True),
+    sa.Column('after_value', sa.JSON(), nullable=True),
+    sa.Column('changes', sa.JSON(), nullable=True),
+    sa.Column('comment', sa.String(), nullable=True),
+    sa.Column('custom_metadata', sa.JSON(), nullable=True),
+    sa.Column('ip_address', postgresql.INET(), nullable=True),
+    sa.Column('user_agent', sa.String(), nullable=True),
+    sa.Column('workflow_step', sa.String(length=100), nullable=True),
+    sa.Column('workflow_type', sa.String(length=50), nullable=True),
+    sa.Column('file_id', sa.UUID(), nullable=True),
+    sa.Column('document_hash', sa.String(length=64), nullable=True),
+    sa.Column('file_path', sa.String(length=500), nullable=True),
+    sa.Column('ai_assisted', sa.Boolean(), nullable=True),
+    sa.Column('ai_provider', sa.String(length=50), nullable=True),
+    sa.Column('ai_confidence', sa.Integer(), nullable=True),
+    sa.Column('timestamp', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['file_id'], ['files.id'], ),
+    sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_audit_logs_tenant_id'), 'audit_logs', ['tenant_id'], unique=False)
+    op.create_table('conversation_messages',
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('conversation_id', sa.UUID(), nullable=False),
+    sa.Column('role', sa.String(length=20), nullable=False),
+    sa.Column('content', sa.Text(), nullable=False),
+    sa.Column('meta_data', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('invoices',
     sa.Column('tenant_id', sa.UUID(), nullable=False),
     sa.Column('invoice_number', sa.String(length=100), nullable=False),
@@ -168,12 +199,12 @@ def upgrade() -> None:
     sa.Column('vendor_name', sa.String(length=255), nullable=False),
     sa.Column('invoice_date', sa.Date(), nullable=False),
     sa.Column('due_date', sa.Date(), nullable=True),
-    sa.Column('currency', sa.String(length=3), nullable=True),
+    sa.Column('currency', sa.Enum('PKR', 'USD', 'EUR', 'GBP', name='currency'), nullable=True),
     sa.Column('subtotal_amount', sa.Numeric(precision=15, scale=2), nullable=True),
     sa.Column('tax_amount', sa.Numeric(precision=15, scale=2), nullable=True),
     sa.Column('total_amount', sa.Numeric(precision=15, scale=2), nullable=False),
     sa.Column('description', sa.String(), nullable=True),
-    sa.Column('current_state', sa.String(length=50), nullable=True),
+    sa.Column('current_state', sa.Enum('DRAFT', 'VALIDATED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'PAID', 'CANCELLED', name='invoicestate'), nullable=True),
     sa.Column('ocr_confidence', sa.Integer(), nullable=True),
     sa.Column('ocr_extracted_data', sa.JSON(), nullable=True),
     sa.Column('pdf_file_id', sa.UUID(), nullable=True),
@@ -206,12 +237,14 @@ def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
     op.drop_index(op.f('ix_invoices_tenant_id'), table_name='invoices')
     op.drop_table('invoices')
+    op.drop_table('conversation_messages')
+    op.drop_index(op.f('ix_audit_logs_tenant_id'), table_name='audit_logs')
+    op.drop_table('audit_logs')
     op.drop_index(op.f('ix_vendors_tenant_id'), table_name='vendors')
     op.drop_table('vendors')
     op.drop_index(op.f('ix_files_tenant_id'), table_name='files')
     op.drop_table('files')
-    op.drop_index(op.f('ix_audit_logs_tenant_id'), table_name='audit_logs')
-    op.drop_table('audit_logs')
+    op.drop_table('conversations')
     op.drop_index(op.f('ix_workflow_states_tenant_id'), table_name='workflow_states')
     op.drop_table('workflow_states')
     op.drop_index(op.f('ix_users_tenant_id'), table_name='users')
