@@ -1,10 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 from app.api.deps import get_current_user, get_db_session
 from app.services.ai import get_ai_provider
+from app.services.conversation_service import ConversationService
+from app.schemas.conversation import (
+    ChatRequest, 
+    ChatResponse, 
+    ConversationOut, 
+    ConversationDetail
+)
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from datetime import date
@@ -13,50 +20,150 @@ router = APIRouter(prefix="/ai", tags=["AI"])
 
 
 # ============================================
-# CHAT
+# CONVERSATIONS
 # ============================================
 
-@router.post("/chat")
+@router.get("/conversations", response_model=List[ConversationOut])
+def list_conversations(
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """List all conversations for current user"""
+    service = ConversationService(db)
+    conversations, total = service.list_user_conversations(
+        user_id=current_user["sub"],
+        limit=limit,
+        offset=offset
+    )
+    
+    # Add message count
+    result = []
+    for conv in conversations:
+        result.append({
+            "id": conv.id,
+            "title": conv.title,
+            "created_at": conv.created_at,
+            "updated_at": conv.updated_at,
+            "message_count": len(conv.messages)
+        })
+    
+    return result
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+def get_conversation(
+    conversation_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Get conversation with full message history"""
+    service = ConversationService(db)
+    conversation = service.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    if str(conversation.user_id) != str(current_user["sub"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return conversation
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Delete a conversation"""
+    service = ConversationService(db)
+    conversation = service.get_conversation(conversation_id)
+    
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    if str(conversation.user_id) != str(current_user["sub"]):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    service.delete_conversation(conversation_id)
+    return {"message": "Conversation deleted"}
+
+
+# ============================================
+# CHAT WITH CONTEXT
+# ============================================
+
+@router.post("/chat", response_model=ChatResponse)
 def chat(
-    message: str = Body(..., embed=True),
-    history: List[Dict[str, str]] = Body(default=[], embed=True),
+    request: ChatRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     """
-    Chat with AI assistant
+    Chat with AI assistant with persistent conversation history
     
-    Body:
-    {
-        "message": "Show me pending invoices",
-        "history": [
-            {"role": "user", "content": "previous message"},
-            {"role": "assistant", "content": "previous response"}
-        ]
-    }
+    - If conversation_id is provided, continue existing conversation
+    - If not provided, create new conversation
     """
     try:
         ai = get_ai_provider()
+        conv_service = ConversationService(db)
+        
+        # Get or create conversation
+        if request.conversation_id:
+            conversation = conv_service.get_conversation(request.conversation_id)
+            if not conversation:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            if str(conversation.user_id) != str(current_user["sub"]):
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            conversation = conv_service.create_conversation(
+                user_id=current_user["sub"],
+                tenant_id=current_user["tenant_id"]
+            )
+        
+        # Get conversation history
+        history = conv_service.get_conversation_history(conversation.id)
+        messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in history
+        ]
+        
+        # Add current user message
+        messages.append({"role": "user", "content": request.message})
         
         # Build context
         context = {
             "tenant_id": str(current_user["tenant_id"]),
-            "tenant_name": "Demo Company",  # TODO: fetch from DB
             "role": current_user["role"],
             "user_email": current_user["email"]
         }
         
-        # Add current message
-        messages = history + [{"role": "user", "content": message}]
-        
         # Get AI response
-        response = ai.chat(messages, context)
+        ai_response = ai.chat(messages, context)
         
-        return {
-            "response": response,
-            "role": "assistant"
-        }
+        # Save messages to database
+        conv_service.add_message(
+            conversation_id=conversation.id,
+            role="user",
+            content=request.message
+        )
+        conv_service.add_message(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=ai_response
+        )
+        
+        return ChatResponse(
+            conversation_id=conversation.id,
+            message=ai_response,
+            role="assistant"
+        )
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -1,15 +1,19 @@
 # Project README — Sarmaya OS (mini)
 
 ## Quick status (current)
-- Alembic migrations generated (initial schema: `b105d820d4a4`).
-- Seed migration present: `alembic/versions/002_seed_demo.py`.
-- No-op placeholder migration: `002_seed_demo_data`.
-- RLS migration present: `003_enable_rls_policies.py` (not applied until you run migrations).
-- Models detected by Alembic: tenants, users, vendors, workflow_states, policies, files, invoices, audit_logs.
-- Auth endpoints implemented (registration, login, me).
-- Issues handled:
-  - Password hashing: switched to `bcrypt_sha256` in `app/core/security.py` to avoid bcrypt 72-byte limit.
-  - Pylance typing: ORM column -> str cast used in `app/api/auth.py` for static typing.
+- **Alembic migrations recreated (clean state)**:
+  - Initial schema migration (all tables)
+  - Seed data migration (demo tenant, users, workflow states, vendor)
+  - RLS migration (applied AFTER tables exist)
+- Models: tenants, users, vendors, workflow_states, policies, files, invoices, audit_logs, ai_conversations, ai_messages
+- Auth endpoints implemented (registration, login, me, logout, profile update, password change)
+- Invoice endpoints with OCR (Google Document AI)
+- AI chat with conversation persistence
+- Audit logging system
+- Issues resolved:
+  - RLS now applied AFTER table creation (correct order)
+  - Password hashing: `bcrypt_sha256` to avoid 72-byte limit
+  - Migration chain: linear and verified
 
 ---
 
@@ -87,6 +91,20 @@ Prefix: `/api/v1/auth`
 - GET `/api/v1/auth/me`  
   - Purpose: Return current user info (requires Bearer token).  
   - Response: UserOut.
+
+- POST `/api/v1/auth/logout`  
+  - Purpose: Invalidate current session (logout).  
+  - Response: `{"detail": "Successfully logged out"}`.
+
+- PUT `/api/v1/auth/update-profile`  
+  - Purpose: Update current user profile.  
+  - Body: JSON matching `UserUpdate` (email, full_name, optional role).  
+  - Response: Updated user (UserOut).
+
+- POST `/api/v1/auth/change-password`  
+  - Purpose: Change user password.  
+  - Body: JSON `{"old_password": "...", "new_password": "..."}`.  
+  - Response: `{"detail": "Password updated successfully"}`.
 
 ---
 

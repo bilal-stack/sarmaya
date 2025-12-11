@@ -1,8 +1,7 @@
-from sqlalchemy import Column, String, Boolean, Integer, JSON, ForeignKey, DateTime, Enum as SQLEnum
+from sqlalchemy import Column, String, Integer, JSON, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
-import uuid
 from app.core.enums import VendorStatus
 
 class Vendor(BaseModel):

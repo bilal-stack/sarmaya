@@ -1,8 +1,8 @@
 from sqlalchemy import Column, String, Integer, Float, ForeignKey
 from sqlalchemy.orm import relationship
-from app.models.base import Base, TimestampMixin
+from app.models.base import BaseModel, TimestampMixin
 
-class PurchaseOrder(Base, TimestampMixin):
+class PurchaseOrder(BaseModel, TimestampMixin):
     __tablename__ = "purchase_orders"
     reference = Column(String, nullable=False)
     vendor_id = Column(Integer, ForeignKey("vendors.id"))

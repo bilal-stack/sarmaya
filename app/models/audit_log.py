@@ -2,7 +2,6 @@ from sqlalchemy import Column, String, JSON, ForeignKey, DateTime, func, Boolean
 from sqlalchemy.dialects.postgresql import UUID, INET
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
-import uuid
 
 
 class AuditLog(BaseModel):

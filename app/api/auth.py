@@ -59,7 +59,7 @@ def register(
         tenant_id=tenant_obj.id,
         email=user_in.email,
         full_name=user_in.full_name,
-        password_hash=hashed,
+        password=hashed,
         role=role,
     )
     db.add(user)
@@ -76,7 +76,8 @@ def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("dem
     user = db.query(User).filter(User.tenant_id == tenant_obj.id, User.email == data.email).first()
         
     # Cast ORM attribute to str for static type checkers (runtime value is already a string)
-    hashed_password = cast(str, user.password_hash) if user is not None else ""
+    hashed_password = cast(str, user.password) if user is not None else ""
+    
     if not user or not verify_password(data.password, hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
@@ -131,11 +132,11 @@ def change_password(
     db: Session = Depends(get_db),
 ):
     # Verify current password
-    hashed_password = cast(str, current_user.password_hash)
+    hashed_password = cast(str, current_user.password)
     if not verify_password(current_password, hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password invalid")
     # Update to new password
-    current_user.password_hash = get_password_hash(new_password)
+    current_user.password = get_password_hash(new_password)
     db.add(current_user)
     db.commit()
     return {"ok": True}
