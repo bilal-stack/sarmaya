@@ -32,7 +32,10 @@ class ConversationOut(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
     message_count: int = 0
-    
+    total: Optional[int] = None  # For pagination metadata
+    limit: Optional[int] = None
+    offset: Optional[int] = None
+
     class Config:
         from_attributes = True
 
@@ -50,3 +53,10 @@ class ChatResponse(BaseModel):
     conversation_id: UUID
     message: str
     role: str = "assistant"
+
+# Schema for paginated list response
+class PaginatedConversationsOut(BaseModel):
+    conversations: List[ConversationOut]
+    total: int
+    limit: int
+    offset: int

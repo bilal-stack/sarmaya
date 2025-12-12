@@ -27,7 +27,7 @@ email-validator==2.0.0
 Pillow==10.1.0
 PyPDF2==3.0.1
 
-# HTTP client (for chatbot / web requests)
+# HTTP client
 httpx==0.25.2
 
 # Email (async SMTP for notifications)
