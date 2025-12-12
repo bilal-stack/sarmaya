@@ -74,15 +74,33 @@ Prefix: `/api/v1/auth`
   - Purpose: Create a new user for a tenant.  
   - Query param: `tenant` (optional, defaults to `demo`).  
   - Body: JSON matching `UserCreate` (email, password, full_name, optional role).  
-  - Response: Created user (UserOut).  
-  - Notes: Only creates user in specified tenant; role assignment validation recommended.
+  - Response: `TokenWithUser` (access_token, token_type, user details).  
+  - Notes: User is automatically logged in upon registration.
 
 - POST `/api/v1/auth/login`  
-  - Purpose: Authenticate user and return JWT.  
+  - Purpose: Authenticate user and return JWT with user details.  
   - Query param: `tenant` (optional, defaults to `demo`).  
   - Body: JSON `{"email": "...", "password": "..."}` (LoginIn).  
-  - Response: `{"access_token": "...", "token_type":"bearer"}`.  
+  - Response: `TokenWithUser` (access_token, token_type, user details).  
   - Notes: Token payload contains `sub` (user id) and `tenant_id`.
+
+**Response Format (Login & Register):**
+```json
+{
+  "access_token": "eyJhbGc...",
+  "token_type": "bearer",
+  "user": {
+    "id": "uuid",
+    "tenant_id": "uuid",
+    "email": "user@example.com",
+    "full_name": "User Name",
+    "role": "user",
+    "is_active": true,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
 
 - GET `/api/v1/auth/me`  
   - Purpose: Return current user info (requires Bearer token).  
@@ -222,15 +240,15 @@ Prefix: `/api/v1/auth`
 
 ---
 
-## AI (`/ai`)
+## Conversation (`/conversation`)
 
 ### Conversations
 
 | Method | Endpoint | Purpose | Auth | Body |
 |--------|----------|---------|------|------|
-| GET | `/ai/conversations` | List user's conversations | ✅ Bearer | - |
-| GET | `/ai/conversations/{id}` | Get conversation with history | ✅ Bearer | - |
-| DELETE | `/ai/conversations/{id}` | Delete conversation | ✅ Bearer | - |
+| GET | `/conversation/list` | List user's conversations | ✅ Bearer | - |
+| GET | `/conversation/messages/{id}` | Get conversation with history | ✅ Bearer | - |
+| DELETE | `/conversation/delete/{id}` | Delete conversation | ✅ Bearer | - |
 
 **Query Params (List):**
 - `limit` (default: 50)
@@ -240,9 +258,9 @@ Prefix: `/api/v1/auth`
 
 | Method | Endpoint | Purpose | Auth | Body |
 |--------|----------|---------|------|------|
-| POST | `/ai/chat` | Chat with AI (persistent) | ✅ Bearer | `{message, conversation_id?}` |
-| POST | `/ai/query` | Natural language query | ✅ Bearer | `{query}` |
-| POST | `/ai/detect-duplicate` | AI duplicate detection | ✅ Bearer | `{vendor_name, invoice_number, invoice_date, total_amount}` |
+| POST | `/conversation/chat` | Chat with AI (persistent) | ✅ Bearer | `{message, conversation_id?}` |
+| POST | `/conversation/query` | Natural language query | ✅ Bearer | `{query}` |
+| POST | `/conversation/detect-duplicate` | AI duplicate detection | ✅ Bearer | `{vendor_name, invoice_number, invoice_date, total_amount}` |
 
 **Chat Request:**
 ```json
@@ -533,7 +551,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/invoices/$INVOICE_ID/approve \
 
 ### 2. Query Pending Invoices with AI
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/ai/query \
+curl -X POST http://127.0.0.1:8000/api/v1/conversation/query \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "Show me all pending invoices over 100k"}'
@@ -548,7 +566,7 @@ curl -X GET "http://127.0.0.1:8000/api/v1/audit/trail/invoice/uuid" \
 ### 4. Chat with Context Retention
 ```bash
 # Start new conversation
-RESPONSE=$(curl -X POST http://127.0.0.1:8000/api/v1/ai/chat \
+RESPONSE=$(curl -X POST http://127.0.0.1:8000/api/v1/conversation/chat \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message": "Show me pending invoices"}')
@@ -556,13 +574,13 @@ RESPONSE=$(curl -X POST http://127.0.0.1:8000/api/v1/ai/chat \
 CONV_ID=$(echo $RESPONSE | jq -r '.conversation_id')
 
 # Continue conversation
-curl -X POST http://127.0.0.1:8000/api/v1/ai/chat \
+curl -X POST http://127.0.0.1:8000/api/v1/conversation/chat \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"message\": \"Which one is the highest amount?\", \"conversation_id\": \"$CONV_ID\"}"
 
 # List all conversations
-curl -X GET http://127.0.0.1:8000/api/v1/ai/conversations \
+curl -X GET http://127.0.0.1:8000/api/v1/conversation/conversations \
   -H "Authorization: Bearer $TOKEN"
 ```
 

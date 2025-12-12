@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
-from app.api import auth, invoices, dashboard, chatbot, files, vendors, ai, audit
+from app.api import auth, invoices, dashboard, files, vendors, conversation, audit
 from app.core.middleware import rls_middleware
 import logging
 import uuid
@@ -15,6 +16,17 @@ DEBUG = settings.DEBUG
 
 app = FastAPI(title="Sarmaya OS")
 
+# CORS Configuration - MUST be added before routes
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods including OPTIONS
+    allow_headers=["*"],  # Allows all headers
+    expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
+
 # Versioned API router
 api_v1 = APIRouter(prefix="/api/v1")
 
@@ -22,9 +34,8 @@ api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(auth.router)
 api_v1.include_router(invoices.router)
 api_v1.include_router(dashboard.router)
-api_v1.include_router(chatbot.router)
 api_v1.include_router(files.router)
-api_v1.include_router(ai.router)
+api_v1.include_router(conversation.router)
 api_v1.include_router(vendors.router)
 api_v1.include_router(audit.router)
 

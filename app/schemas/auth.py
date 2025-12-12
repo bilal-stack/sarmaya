@@ -1,12 +1,22 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
+from app.schemas.user import UserOut
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
 
 class Token(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str
 
-class TokenData(BaseModel):
-    sub: str | None = None
 
-class LoginIn(BaseModel):
-    email: str
-    password: str
+class TokenWithUser(BaseModel):
+    """Token response with user details"""
+    access_token: str
+    token_type: str
+    user: UserOut
+    
+    class Config:
+        from_attributes = True

@@ -10,10 +10,12 @@
 - Invoice endpoints with OCR (Google Document AI)
 - AI chat with conversation persistence
 - Audit logging system
+- **CORS configured** for cross-origin requests (handles OPTIONS preflight)
 - Issues resolved:
   - RLS now applied AFTER table creation (correct order)
   - Password hashing: `bcrypt_sha256` to avoid 72-byte limit
   - Migration chain: linear and verified
+  - CORS preflight OPTIONS requests handled
 
 ---
 
@@ -42,6 +44,8 @@
    ```
    uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
    ```
+
+**Note:** CORS is configured to allow requests from common frontend dev servers (localhost:3000, localhost:5173). Update `CORS_ORIGINS` in `.env` for production.
 
 ---
 
@@ -113,7 +117,7 @@ Routers are mounted under `/api/v1`:
 - `invoices` — invoice CRUD, approval flow (planned/partial).
 - `files` — file upload/download (planned/partial).
 - `vendors` — vendor management (planned).
-- `dashboard`, `chatbot` — app-specific endpoints (planned).
+- `dashboard` — app-specific endpoints (planned).
 
 Check `app/api/` for implementation details.
 

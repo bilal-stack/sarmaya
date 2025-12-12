@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from uuid import UUID
 
 from app.api.deps import get_current_user, get_db_session
@@ -10,30 +10,32 @@ from app.schemas.conversation import (
     ChatRequest, 
     ChatResponse, 
     ConversationOut, 
-    ConversationDetail
+    ConversationDetail,
+    PaginatedConversationsOut
 )
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from datetime import date
 
-router = APIRouter(prefix="/ai", tags=["AI"])
+router = APIRouter(prefix="/conversation", tags=["Conversation"])
 
 
 # ============================================
 # CONVERSATIONS
 # ============================================
 
-@router.get("/conversations", response_model=List[ConversationOut])
+@router.get("/list", response_model=PaginatedConversationsOut)
 def list_conversations(
     limit: int = 50,
     offset: int = 0,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
+    
     """List all conversations for current user"""
     service = ConversationService(db)
     conversations, total = service.list_user_conversations(
-        user_id=current_user["sub"],
+        user_id=current_user["id"],
         limit=limit,
         offset=offset
     )
@@ -49,10 +51,15 @@ def list_conversations(
             "message_count": len(conv.messages)
         })
     
-    return result
+    return {
+        "conversations": result,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
+@router.get("/messages/{conversation_id}", response_model=ConversationDetail)
 def get_conversation(
     conversation_id: UUID,
     current_user: dict = Depends(get_current_user),
@@ -65,13 +72,13 @@ def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
-    if str(conversation.user_id) != str(current_user["sub"]):
+    if str(conversation.user_id) != str(current_user["id"]):
         raise HTTPException(status_code=403, detail="Access denied")
     
     return conversation
 
 
-@router.delete("/conversations/{conversation_id}")
+@router.delete("/delete/{conversation_id}")
 def delete_conversation(
     conversation_id: UUID,
     current_user: dict = Depends(get_current_user),
@@ -116,11 +123,11 @@ def chat(
             conversation = conv_service.get_conversation(request.conversation_id)
             if not conversation:
                 raise HTTPException(status_code=404, detail="Conversation not found")
-            if str(conversation.user_id) != str(current_user["sub"]):
+            if str(conversation.user_id) != str(current_user["id"]):
                 raise HTTPException(status_code=403, detail="Access denied")
         else:
             conversation = conv_service.create_conversation(
-                user_id=current_user["sub"],
+                user_id=current_user["id"],
                 tenant_id=current_user["tenant_id"]
             )
         

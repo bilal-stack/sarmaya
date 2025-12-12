@@ -10,7 +10,7 @@ from app.core.security import (
     create_access_token,
     decode_access_token,
 )
-from app.schemas.auth import LoginIn, Token
+from app.schemas.auth import LoginIn, Token, TokenWithUser
 from app.schemas.user import UserCreate, UserOut
 from app.models.user import User
 from app.models.tenant import Tenant
@@ -35,7 +35,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=TokenWithUser, status_code=status.HTTP_201_CREATED)
 def register(
     user_in: UserCreate,
     db: Session = Depends(get_db),
@@ -65,10 +65,19 @@ def register(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+
+    token_payload = {
+        "sub": str(user.id),
+        "tenant_id": str(user.tenant_id),
+        "email": user.email,
+        "role": user.role,
+    }
+    access_token = create_access_token(token_payload)
+
+    return {"access_token": access_token, "token_type": "bearer", "user": user}
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=TokenWithUser)
 def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("demo", description="Tenant slug")):
     tenant_obj = db.query(Tenant).filter(Tenant.slug == tenant).first()
     if not tenant_obj:
@@ -88,7 +97,7 @@ def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("dem
         "role": user.role,
     }
     access_token = create_access_token(token_payload)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "user": user}
 
 
 @router.get("/me", response_model=UserOut)
