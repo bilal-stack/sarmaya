@@ -2,7 +2,7 @@ import logging
 import re
 import os
 from datetime import date, datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 from google.cloud import documentai_v1 as documentai #type: ignore
 from google.api_core.client_options import ClientOptions
 
@@ -60,7 +60,13 @@ class DocumentAIProvider(OCRProvider):
             
             result = self.client.process_document(request=request)
             document = result.document
-            
+            #print('document hre ====== :', document)
+
+            with open("document_ai_full_dump.txt", "w", encoding="utf-8") as f:
+                f.write(str(document))
+
+            print("✅ Full response dumped to document_ai_full_dump.txt")
+
             # Parse extracted entities
             parsed_result = self._parse_document_ai_response(document)
             return parsed_result
@@ -86,20 +92,23 @@ class DocumentAIProvider(OCRProvider):
             "invoice_date": None,
             "total_amount": 0.0,
             "tax_amount": 0.0,
-            "currency": "PKR",  # Default currency
+            "currency": "PKR",
+            "line_items": [],
             "confidence": 0,
             "raw_data": {}
         }
         
-        # Extract entities (Document AI returns structured entities for invoices)
+        # Extract entities
         entities_dict = {}
         total_confidence = 0
         confidence_count = 0
         
-        # Track values needed for tax calculation
         net_amount = 0.0
         tax_value = 0.0
         tax_is_percentage = False
+        
+        # ✅ NEW: Collect all line item entities first, then merge
+        raw_line_items = []
         
         for entity in document.entities:
             entity_type = entity.type_
@@ -114,8 +123,37 @@ class DocumentAIProvider(OCRProvider):
             total_confidence += confidence
             confidence_count += 1
             
-            # Map to result fields
-            if entity_type == "supplier_name":
+            # ✅ COLLECT LINE ITEMS (don't process yet)
+            if entity_type == "line_item":
+                line_item = {
+                    "description": "",
+                    "quantity": 0.0,
+                    "unit_price": 0.0,
+                    "amount": 0.0,
+                    "product_code": "",
+                    "confidence": confidence,
+                    "raw_mention": entity_value  # Store original text for debugging
+                }
+                
+                for prop in entity.properties:
+                    prop_type = prop.type_
+                    prop_value = prop.mention_text
+                    
+                    if prop_type == "line_item/description":
+                        line_item["description"] = prop_value
+                    elif prop_type == "line_item/quantity":
+                        line_item["quantity"] = self._parse_amount(prop_value)
+                    elif prop_type == "line_item/unit_price":
+                        line_item["unit_price"] = self._parse_amount(prop_value)
+                    elif prop_type == "line_item/amount":
+                        line_item["amount"] = self._parse_amount(prop_value)
+                    elif prop_type == "line_item/product_code":
+                        line_item["product_code"] = prop_value
+                
+                raw_line_items.append(line_item)
+            
+            # Map other entity types
+            elif entity_type == "supplier_name":
                 result["vendor_name"] = entity_value
             elif entity_type == "invoice_id":
                 result["invoice_number"] = entity_value
@@ -125,39 +163,39 @@ class DocumentAIProvider(OCRProvider):
                 result["total_amount"] = self._parse_amount(entity_value)
             elif entity_type == "net_amount":
                 net_amount = self._parse_amount(entity_value)
-                # Fallback if total_amount not found
                 if not result["total_amount"]:
                     result["total_amount"] = net_amount
             elif entity_type == "total_tax_amount":
                 tax_value = self._parse_amount(entity_value)
             elif entity_type == "currency":
-                result["currency"] = entity_value.upper()  # Extract currency (USD, PKR, etc.)
+                result["currency"] = entity_value.upper()
         
-        # Determine if tax is percentage or amount and calculate accordingly
+        # ✅ MERGE FRAGMENTED LINE ITEMS
+        result["line_items"] = self._merge_line_items(raw_line_items)
+        
+        # Tax calculation
         if tax_value > 0:
             tax_is_percentage = self._is_percentage(tax_value, entity_value if entity_type == "total_tax_amount" else "")
             
             if tax_is_percentage:
-                # Calculate actual tax amount from percentage
                 if net_amount > 0:
                     result["tax_amount"] = round((net_amount * tax_value) / 100, 2)
                 else:
-                    # Try to reverse calculate from total_amount if net_amount not available
-                    # total = net + tax, where tax = net * (tax_rate/100)
-                    # total = net * (1 + tax_rate/100)
-                    # net = total / (1 + tax_rate/100)
                     if result["total_amount"] > 0:
                         net_amount = result["total_amount"] / (1 + tax_value / 100)
                         result["tax_amount"] = round(result["total_amount"] - net_amount, 2)
             else:
-                # Tax is already an amount
                 result["tax_amount"] = tax_value
         
-        # Calculate average confidence
+        # ✅ FALLBACK: Extract currency from text if not found
+        if result["currency"] == "PKR" and "currency" not in entities_dict:
+            currency_match = re.search(r'\b(PKR|USD|EUR|GBP|INR)\b', document.text, re.IGNORECASE)
+            if currency_match:
+                result["currency"] = currency_match.group(1).upper()
+        
         if confidence_count > 0:
             result["confidence"] = int((total_confidence / confidence_count) * 100)
         
-        # Fallback: extract from raw text if entities missing
         if not result["vendor_name"] or not result["invoice_number"]:
             fallback = self._fallback_text_extraction(document.text)
             result["vendor_name"] = result["vendor_name"] or fallback.get("vendor_name", "")
@@ -171,10 +209,65 @@ class DocumentAIProvider(OCRProvider):
                 "is_percentage": tax_is_percentage,
                 "raw_value": tax_value,
                 "net_amount_used": net_amount
-            }
+            },
+            "line_items_count": len(result["line_items"]),
+            "raw_line_items_count": len(raw_line_items)  # For debugging
         }
         
         return result
+    
+    def _merge_line_items(self, raw_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Merge fragmented line items that belong together
+        
+        Strategy:
+        1. Items with only description and no amount -> merge with previous
+        2. Items with very low amounts (<100) might be fragments
+        3. Use product_code as grouping key
+        """
+        if not raw_items:
+            return []
+        
+        merged = []
+        current_item = None
+        
+        for item in raw_items:
+            # Skip completely empty items
+            if not item["description"] and item["amount"] == 0:
+                continue
+            
+            # Check if this is a fragment (description only, no amount/qty)
+            is_fragment = (
+                item["description"] and 
+                item["amount"] == 0 and 
+                item["quantity"] == 0 and
+                not item["product_code"]
+            )
+            
+            if is_fragment and current_item:
+                # Merge description into previous item
+                current_item["description"] += " " + item["description"]
+                # Keep higher confidence
+                current_item["confidence"] = max(current_item["confidence"], item["confidence"])
+            else:
+                # Start new item or append if complete
+                if current_item:
+                    merged.append(current_item)
+                current_item = item
+        
+        # Don't forget last item
+        if current_item:
+            merged.append(current_item)
+        
+        # Clean up merged items
+        for item in merged:
+            item["description"] = item["description"].strip()
+            # Remove raw_mention (used only for debugging)
+            item.pop("raw_mention", None)
+            # Remove confidence from final output
+            item.pop("confidence", None)
+        
+        return merged
     
     def _is_percentage(self, value: float, original_text: str) -> bool:
         """Determine if a tax value is a percentage or absolute amount"""

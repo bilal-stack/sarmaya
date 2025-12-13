@@ -325,12 +325,14 @@ CREATE TABLE invoices (
     
     -- Workflow
     current_state VARCHAR(50) DEFAULT 'draft',
-    -- References workflow_states.state_name
     
-    -- OCR Data
+    -- OCR
     ocr_confidence INTEGER, -- 0-100
     ocr_extracted_data JSONB,
-    -- Stores: {vendor: {value: "ABC", confidence: 85}, amount: {...}}
+    
+    -- ✅ ADD: Line items
+    line_items JSONB DEFAULT '[]',
+    -- Structure: [{"description": "...", "quantity": 10, "unit_price": 100, "amount": 1000, "product_code": "..."}]
     
     -- File
     pdf_file_id UUID REFERENCES files(id),

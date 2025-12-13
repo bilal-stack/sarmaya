@@ -169,6 +169,15 @@ Prefix: `/api/v1/auth`
   "current_state": "draft",
   "ocr_confidence": 85,
   "ocr_data": {...},
+  "line_items": [
+    {
+      "description": "Umbrella Upper Color: Black with Inner Color: Blue-Good Quality",
+      "quantity": 15.0,
+      "unit_price": 1700.0,
+      "amount": 30090.0,
+      "product_code": "01.02.10.001.005"
+    }
+  ],
   "duplicate_warning": null,
   "file_id": "uuid"
 }

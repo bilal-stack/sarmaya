@@ -1,5 +1,5 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional, Dict, Any
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, List
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -38,6 +38,7 @@ class InvoiceResponse(InvoiceBase):
     current_state: InvoiceState
     ocr_confidence: Optional[int] = None
     ocr_extracted_data: Optional[Dict[str, Any]] = None
+    line_items: Optional[List[Dict[str, Any]]] = []  # ✅ ADD
     pdf_file_id: Optional[UUID] = None
     approved_by: Optional[UUID] = None
     approved_at: Optional[datetime] = None

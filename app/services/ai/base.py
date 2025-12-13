@@ -20,13 +20,19 @@ class AIProvider(ABC):
         pass
     
     @abstractmethod
-    def extract_invoice_fields(self, ocr_text: str, raw_ocr_data: Optional[Dict] = None) -> Dict[str, Any]:
+    def extract_invoice_fields(
+        self, 
+        ocr_text: str, 
+        raw_ocr_data: Optional[Dict] = None,
+        line_items: Optional[List[Dict]] = None
+    ) -> Dict[str, Any]:
         """
         Extract structured invoice fields from OCR text using AI
         
         Args:
             ocr_text: Raw text from OCR
             raw_ocr_data: Optional raw OCR response
+            line_items: Optional OCR-extracted line items (may have errors)
         
         Returns:
             {
@@ -35,9 +41,12 @@ class AIProvider(ABC):
                 "invoice_date": str (ISO),
                 "total_amount": float,
                 "tax_amount": float,
-                "line_items": [...],
+                "line_items": [...],  # AI-cleaned line items
                 "confidence": int,
-                "ai_corrections": {...}
+                "ai_corrections": {
+                    "line_items_merged": ["item1", "item2"],
+                    "descriptions_fixed": {"old": "new"}
+                }
             }
         """
         pass

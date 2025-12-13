@@ -40,9 +40,27 @@ class OpenAIProvider(AIProvider):
             logger.error(f"OpenAI chat failed: {str(e)}")
             return f"AI error: {str(e)}"
     
-    def extract_invoice_fields(self, ocr_text: str, raw_ocr_data: Optional[Dict] = None) -> Dict[str, Any]:
+    def extract_invoice_fields(
+        self, 
+        ocr_text: str, 
+        raw_ocr_data: Optional[Dict] = None,
+        line_items: Optional[List[Dict]] = None
+    ) -> Dict[str, Any]:
         """Extract invoice fields using GPT-4 structured output"""
         try:
+            # ✅ Build enhanced prompt with OCR line items for fixing
+            line_items_context = ""
+            if line_items:
+                import json
+                line_items_context = f"""
+OCR extracted these line items (may contain errors):
+{json.dumps(line_items, indent=2)}
+
+IMPORTANT: Fix any fragmented descriptions. For example:
+- "Proof Torch for Helmet Red" + "Color" should merge to "Proof Torch for Helmet Red Color"
+- "Yellow Size: 41 to 46" + "Hard Toe" should merge to "Yellow Size: 41 to 46 - Hard Toe"
+"""
+            
             prompt = f"""Extract invoice data from this OCR text. Return ONLY a JSON object with these exact keys:
 {{
     "vendor_name": "extracted vendor name",
@@ -53,10 +71,23 @@ class OpenAIProvider(AIProvider):
     "tax_amount": 0.0,
     "subtotal_amount": 0.0,
     "currency": "PKR",
-    "line_items": [],
+    "line_items": [
+        {{
+            "description": "Complete product description (merge fragments)",
+            "quantity": 0.0,
+            "unit_price": 0.0,
+            "amount": 0.0,
+            "product_code": ""
+        }}
+    ],
     "confidence": 85,
-    "ai_corrections": {{}}
+    "ai_corrections": {{
+        "line_items_merged": ["list of merged items"],
+        "descriptions_fixed": {{"old": "new"}}
+    }}
 }}
+
+{line_items_context}
 
 OCR Text:
 {ocr_text}
@@ -65,11 +96,11 @@ OCR Text:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert invoice data extractor. Always return valid JSON."},
+                    {"role": "system", "content": "You are an expert invoice data extractor. Always return valid JSON. Merge fragmented line item descriptions intelligently."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
-                max_tokens=1000
+                max_tokens=2000  # Increased for line items
             )
             
             result_text = response.choices[0].message.content
@@ -90,8 +121,10 @@ OCR Text:
             result.setdefault("total_amount", 0.0)
             result.setdefault("tax_amount", 0.0)
             result.setdefault("confidence", 70)
+            result.setdefault("line_items", [])
+            result.setdefault("ai_corrections", {})
             
-            logger.info(f"AI extracted: {result['vendor_name']}, {result['invoice_number']}")
+            logger.info(f"AI extracted: {result['vendor_name']}, {result['invoice_number']}, {len(result['line_items'])} line items")
             
             return result
         
@@ -104,6 +137,7 @@ OCR Text:
                 "total_amount": 0.0,
                 "tax_amount": 0.0,
                 "confidence": 0,
+                "line_items": [],
                 "error": str(e)
             }
     

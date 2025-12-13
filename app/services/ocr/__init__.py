@@ -25,9 +25,10 @@ def extract_invoice_data_ocr(file_path: str) -> dict:
     """
     Enhanced OCR with AI-powered field extraction
     
-    1. Run OCR (OCR.space or Textract)
+    1. Run OCR (OCR.space or Document AI)
     2. Pass raw text to AI for intelligent parsing
-    3. Merge OCR + AI results
+    3. AI fixes OCR errors (fragmented line items, etc.)
+    4. Merge OCR + AI results
     """
     # Step 1: Get raw OCR
     ocr_provider = get_ocr_provider()
@@ -39,14 +40,18 @@ def extract_invoice_data_ocr(file_path: str) -> dict:
             ai_provider = get_ai_provider()
         
             # Get raw text from OCR result
-            raw_text = ocr_result.get("raw_data", {}).get("ParsedText", "")
-            if not raw_text and "raw_data" in ocr_result:
+            raw_text = ocr_result.get("raw_data", {}).get("text", "")
+            if not raw_text:
                 # Fallback: stringify raw data
                 import json
                 raw_text = json.dumps(ocr_result["raw_data"])
             
-            # AI extraction
-            ai_result = ai_provider.extract_invoice_fields(raw_text, ocr_result.get("raw_data"))
+            # ✅ AI extraction with line items cleaning
+            ai_result = ai_provider.extract_invoice_fields(
+                raw_text, 
+                ocr_result.get("raw_data"),
+                line_items=ocr_result.get("line_items", [])  # Pass OCR line items for AI to fix
+            )
             
             # Merge results (AI takes precedence if confidence > OCR)
             if ai_result.get("confidence", 0) > ocr_result.get("confidence", 0):
@@ -60,9 +65,14 @@ def extract_invoice_data_ocr(file_path: str) -> dict:
                     "ai_enhanced": True,
                     "ai_corrections": ai_result.get("ai_corrections", {})
                 })
+            
+            # ✅ AI ALWAYS fixes line items (even if OCR confidence is higher)
+            if ai_result.get("line_items"):
+                ocr_result["line_items"] = ai_result["line_items"]
+                ocr_result["ai_enhanced"] = True
+                ocr_result["ai_corrections"] = ai_result.get("ai_corrections", {})
         
         except Exception as e:
-            # Fallback to OCR-only if AI fails
             import logging
             logging.error(f"AI enhancement failed, using OCR only: {e}")
             ocr_result["ai_enhanced"] = False

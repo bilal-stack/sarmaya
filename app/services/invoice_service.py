@@ -574,6 +574,7 @@ class InvoiceService:
             current_state=InvoiceState.DRAFT.value,
             ocr_confidence=confidence,
             ocr_extracted_data=ocr_result_sanitized,
+            line_items=ocr_result.get("line_items", []),  # ✅ ADD
             pdf_file_id=file_record.id,
             created_by=current_user["id"]
         )
