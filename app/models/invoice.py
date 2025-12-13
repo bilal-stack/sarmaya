@@ -33,6 +33,9 @@ class Invoice(BaseModel):
     ocr_confidence = Column(Integer, nullable=True)
     ocr_extracted_data = Column(JSON, nullable=True)
     
+    # ✅ ADD: Line items
+    line_items = Column(JSON, default=[])
+    
     # File
     pdf_file_id = Column(UUID(as_uuid=True), ForeignKey("files.id"), nullable=True)
     

@@ -5,9 +5,10 @@
   - Initial schema migration (all tables)
   - Seed data migration (demo tenant, users, workflow states, vendor)
   - RLS migration (applied AFTER tables exist)
-- Models: tenants, users, vendors, workflow_states, policies, files, invoices, audit_logs, ai_conversations, ai_messages
+- Models: tenants, users, vendors, workflow_states, policies, files, invoices (with line_items), audit_logs, ai_conversations, ai_messages
 - Auth endpoints implemented (registration, login, me, logout, profile update, password change)
-- Invoice endpoints with OCR (Google Document AI)
+- Invoice endpoints with OCR (Google Document AI) + AI enhancement
+- **AI-powered OCR fixes**: Merges fragmented line items, cleans descriptions
 - AI chat with conversation persistence
 - Audit logging system
 - **CORS configured** for cross-origin requests (handles OPTIONS preflight)
@@ -16,6 +17,7 @@
   - Password hashing: `bcrypt_sha256` to avoid 72-byte limit
   - Migration chain: linear and verified
   - CORS preflight OPTIONS requests handled
+  - **Line item fragmentation fixed** (AI merges "Proof Torch" + "Color" correctly)
 
 ---
 

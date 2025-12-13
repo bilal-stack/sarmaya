@@ -207,6 +207,7 @@ def upgrade() -> None:
     sa.Column('current_state', sa.Enum('DRAFT', 'VALIDATED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'PAID', 'CANCELLED', name='invoicestate'), nullable=True),
     sa.Column('ocr_confidence', sa.Integer(), nullable=True),
     sa.Column('ocr_extracted_data', sa.JSON(), nullable=True),
+    sa.Column('line_items', sa.JSON(), nullable=True),
     sa.Column('pdf_file_id', sa.UUID(), nullable=True),
     sa.Column('approved_by', sa.UUID(), nullable=True),
     sa.Column('approved_at', sa.DateTime(), nullable=True),
