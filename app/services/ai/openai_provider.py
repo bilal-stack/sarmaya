@@ -33,7 +33,6 @@ class OpenAIProvider(AIProvider):
             )
             
             content = response.choices[0].message.content or ""
-            print("OpenAI response content:", content)
             return content
         
         except Exception as e:
@@ -157,6 +156,21 @@ OCR Text:
                     "reasoning": "No similar invoices found"
                 }
             
+            # Format line items for better readability
+            current_items = current_invoice.get('line_items', [])
+            current_items_str = json.dumps(current_items, indent=2) if current_items else "No line items"
+            
+            candidates_with_items = []
+            for candidate in candidate_invoices:
+                items = candidate.get('line_items', [])
+                candidates_with_items.append({
+                    "id": candidate.get("id"),
+                    "invoice_number": candidate.get("invoice_number"),
+                    "invoice_date": candidate.get("invoice_date"),
+                    "total_amount": candidate.get("total_amount"),
+                    "line_items": items
+                })
+            
             prompt = f"""Analyze if this invoice is a duplicate of any existing invoices.
 
 Current Invoice:
@@ -164,9 +178,16 @@ Current Invoice:
 - Invoice Number: {current_invoice.get('invoice_number')}
 - Date: {current_invoice.get('invoice_date')}
 - Amount: {current_invoice.get('total_amount')}
+- Line Items: {current_items_str}
 
 Potentially Similar Invoices:
-{json.dumps(candidate_invoices, indent=2)}
+{json.dumps(candidates_with_items, indent=2)}
+
+Consider:
+1. Exact invoice number match = very high duplicate probability
+2. Same vendor + date + amount + line items = duplicate
+3. Similar line items but different invoice number = possible resubmission
+4. Different line items = likely not duplicate even if amounts match
 
 Return ONLY a JSON object:
 {{
@@ -174,18 +195,18 @@ Return ONLY a JSON object:
     "confidence": 0.0-1.0,
     "matched_invoice_id": "uuid or null",
     "similarity_score": 0.0-1.0,
-    "reasoning": "brief explanation"
+    "reasoning": "brief explanation (mention if line items were compared)"
 }}
 """
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert at detecting duplicate invoices."},
+                    {"role": "system", "content": "You are an expert at detecting duplicate invoices. Compare all fields including line items for accurate detection."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                max_tokens=300
+                max_tokens=500  # Increased for line item reasoning
             )
             
             try:
@@ -246,3 +267,120 @@ If you need specific data, say "I need to query the database for..." and suggest
         except Exception as e:
             logger.error(f"AI query failed: {str(e)}")
             return f"Sorry, I encountered an error: {str(e)}"
+    
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        context: Optional[Dict[str, Any]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        db: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Chat with function calling support"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1500,
+                tools=tools if tools else None,
+                tool_choice="auto" if tools else None
+            )
+            
+            message = response.choices[0].message
+            
+            # If AI wants to call a function
+            if message.tool_calls:
+                tool_call = message.tool_calls[0]
+                function_name = tool_call.function.name
+                function_args = json.loads(tool_call.function.arguments)
+                
+                # Execute the function
+                if db and function_name == "query_invoices":
+                    result = self._execute_invoice_query(db, function_args)
+                    
+                    # Add function result to messages
+                    messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tool_call]
+                    })
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(result)
+                    })
+                    
+                    # Get final AI response
+                    final_response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=0.7
+                    )
+                    
+                    return {
+                        "content": final_response.choices[0].message.content,
+                        "function_called": function_name,
+                        "function_result": result
+                    }
+            
+            # No function call, return regular response
+            return {
+                "content": message.content or "",
+                "function_called": None,
+                "function_result": None
+            }
+        
+        except Exception as e:
+            logger.error(f"OpenAI chat with tools failed: {str(e)}")
+            return {
+                "content": f"AI error: {str(e)}",
+                "function_called": None,
+                "function_result": None
+            }
+    
+    def _execute_invoice_query(self, db, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute invoice query based on AI parameters"""
+        from app.models.invoice import Invoice
+        from sqlalchemy import func, desc
+        
+        query = db.query(Invoice)
+        
+        # Apply filters
+        if args.get("status"):
+            query = query.filter(Invoice.current_state == args["status"])
+        
+        if args.get("vendor_name"):
+            query = query.filter(Invoice.vendor_name.ilike(f"%{args['vendor_name']}%"))
+        
+        if args.get("min_amount"):
+            query = query.filter(Invoice.total_amount >= args["min_amount"])
+        
+        if args.get("max_amount"):
+            query = query.filter(Invoice.total_amount <= args["max_amount"])
+        
+        # Sorting
+        if args.get("sort_by") == "amount_desc":
+            query = query.order_by(desc(Invoice.total_amount))
+        else:
+            query = query.order_by(desc(Invoice.created_at))
+        
+        # Limit
+        limit = min(args.get("limit", 10), 50)
+        invoices = query.limit(limit).all()
+        
+        # Format results
+        return {
+            "count": len(invoices),
+            "invoices": [
+                {
+                    "id": str(inv.id),
+                    "invoice_number": inv.invoice_number,
+                    "vendor_name": inv.vendor_name,
+                    "total_amount": float(inv.total_amount or 0),
+                    "currency": inv.currency,
+                    "status": inv.current_state,
+                    "invoice_date": str(inv.invoice_date)
+                }
+                for inv in invoices
+            ]
+        }

@@ -10,6 +10,7 @@
 - Invoice endpoints with OCR (Google Document AI) + AI enhancement
 - **AI-powered OCR fixes**: Merges fragmented line items, cleans descriptions
 - AI chat with conversation persistence
+- **AI-powered function calling** for real-time invoice queries
 - Audit logging system
 - **CORS configured** for cross-origin requests (handles OPTIONS preflight)
 - Issues resolved:
@@ -256,3 +257,11 @@ Notes
 Contact / dev notes
 - API base: `http://127.0.0.1:8000/api/v1`  
 - For help fixing Alembic chain, paste `dir alembic\versions\` output and `type alembic\versions\*.py | findstr "revision ="`.
+
+---
+
+## AI Features
+- **AI Agents Architecture**:
+  - Query Agent (natural language → SQL with function calling)
+  - Duplicate Detection Agent (multi-strategy: exact/fuzzy/line-item)
+  - SQL Tools for structured database queries

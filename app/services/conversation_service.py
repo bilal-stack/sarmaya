@@ -90,3 +90,35 @@ class ConversationService:
         if conversation:
             self.db.delete(conversation)
             self.db.commit()
+    
+    def update_conversation_title(self, conversation_id: UUID, title: str):
+        """Update conversation title"""
+        conversation = self.get_conversation(conversation_id)
+        if conversation:
+            conversation.title = title
+            self.db.commit()
+    
+    def generate_title_from_message(self, message: str, ai_provider=None) -> str:
+        """Generate a concise title from message content"""
+        # If AI provider available, use it for smart title generation
+        if ai_provider:
+            try:
+                prompt = f"Generate a short, concise title (max 6 words) for this conversation based on the user's message. Return ONLY the title, no quotes or extra text:\n\n{message}"
+                title = ai_provider.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    context={"task": "title_generation"}
+                )
+                # Clean up the response (remove quotes, trim)
+                title = title.strip().strip('"').strip("'")
+                if len(title) > 60:
+                    title = title[:57] + "..."
+                return title
+            except:
+                pass
+        
+        # Fallback: Use first 6 words of message
+        words = message.split()[:6]
+        title = " ".join(words)
+        if len(message.split()) > 6:
+            title += "..."
+        return title

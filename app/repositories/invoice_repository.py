@@ -96,14 +96,31 @@ class InvoiceRepository:
         amount_min = total_amount * (1 - amount_tolerance)
         amount_max = total_amount * (1 + amount_tolerance)
         
+        # Extract vendor core name
+        vendor_core = self._extract_vendor_core(vendor_name)
+        
         return self.db.query(Invoice).filter(
-            Invoice.vendor_name == vendor_name,
+            # ✅ Fuzzy vendor match
+            Invoice.vendor_name.ilike(f"%{vendor_core}%"),
             Invoice.invoice_date.between(
                 invoice_date - timedelta(days=window_days),
                 invoice_date + timedelta(days=window_days)
             ),
             Invoice.total_amount.between(amount_min, amount_max)
         ).first()
+    
+    def _extract_vendor_core(self, vendor_name: str) -> str:
+        """Extract core vendor name for fuzzy matching"""
+        import re
+        
+        suffixes = ['limited', 'ltd', 'pvt', 'corp', 'inc', 'llc']
+        name = vendor_name.lower().strip()
+        name = re.sub(r'[^\w\s]', '', name)
+        
+        words = name.split()
+        filtered = [w for w in words if w not in suffixes]
+        
+        return filtered[0] if filtered else name
     
     def get_pending_approvals(self, limit: int = 100) -> List[Invoice]:
         """Get all pending approval invoices"""

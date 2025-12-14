@@ -88,3 +88,29 @@ class AIProvider(ABC):
             Natural language response with data
         """
         pass
+    
+    @abstractmethod
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        context: Optional[Dict[str, Any]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        db: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Chat with function calling support
+        
+        Args:
+            messages: Chat history
+            context: User/tenant context
+            tools: List of tool definitions (OpenAI function format)
+            db: Database session for executing queries
+        
+        Returns:
+            {
+                "content": "AI response",
+                "function_called": "query_invoices",
+                "function_result": {...}
+            }
+        """
+        pass

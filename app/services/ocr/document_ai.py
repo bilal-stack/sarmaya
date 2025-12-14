@@ -3,7 +3,7 @@ import re
 import os
 from datetime import date, datetime
 from typing import Dict, Any, List
-from google.cloud import documentai_v1 as documentai #type: ignore
+from google.cloud import documentai_v1 as documentai
 from google.api_core.client_options import ClientOptions
 
 from app.core.config import settings
@@ -65,7 +65,7 @@ class DocumentAIProvider(OCRProvider):
             with open("document_ai_full_dump.txt", "w", encoding="utf-8") as f:
                 f.write(str(document))
 
-            print("✅ Full response dumped to document_ai_full_dump.txt")
+            print("Full response dumped to document_ai_full_dump.txt")
 
             # Parse extracted entities
             parsed_result = self._parse_document_ai_response(document)
@@ -107,7 +107,7 @@ class DocumentAIProvider(OCRProvider):
         tax_value = 0.0
         tax_is_percentage = False
         
-        # ✅ NEW: Collect all line item entities first, then merge
+        # Collect all line item entities first, then merge
         raw_line_items = []
         
         for entity in document.entities:
@@ -123,7 +123,7 @@ class DocumentAIProvider(OCRProvider):
             total_confidence += confidence
             confidence_count += 1
             
-            # ✅ COLLECT LINE ITEMS (don't process yet)
+            # Collect line items
             if entity_type == "line_item":
                 line_item = {
                     "description": "",
@@ -170,7 +170,7 @@ class DocumentAIProvider(OCRProvider):
             elif entity_type == "currency":
                 result["currency"] = entity_value.upper()
         
-        # ✅ MERGE FRAGMENTED LINE ITEMS
+        # MERGE FRAGMENTED LINE ITEMS
         result["line_items"] = self._merge_line_items(raw_line_items)
         
         # Tax calculation
@@ -187,7 +187,7 @@ class DocumentAIProvider(OCRProvider):
             else:
                 result["tax_amount"] = tax_value
         
-        # ✅ FALLBACK: Extract currency from text if not found
+        # FALLBACK: Extract currency from text if not found
         if result["currency"] == "PKR" and "currency" not in entities_dict:
             currency_match = re.search(r'\b(PKR|USD|EUR|GBP|INR)\b', document.text, re.IGNORECASE)
             if currency_match:
