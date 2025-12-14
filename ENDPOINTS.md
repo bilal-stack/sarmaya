@@ -251,6 +251,24 @@ Prefix: `/api/v1/auth`
 
 ## Conversation (`/conversation`)
 
+### AI Agents
+
+The system uses specialized AI agents for complex tasks:
+
+**Query Agent:**
+- Converts natural language to SQL queries
+- Uses function calling to execute database queries
+- Examples:
+  - "pending invoices" → `query_invoices(status="pending_approval")`
+  - "invoices below 25000" → `query_invoices(max_amount=25000)`
+  - "top 5 vendors" → `get_top_vendors(limit=5)`
+
+**Duplicate Detection Agent:**
+- Multi-strategy approach:
+  1. **Exact match** - Invoice number + vendor
+  2. **Fuzzy match** - Amount ±5% + date ±30 days
+  3. **Line item comparison** - Semantic similarity with AI
+
 ### Conversations
 
 | Method | Endpoint | Purpose | Auth | Body |
@@ -288,43 +306,25 @@ Prefix: `/api/v1/auth`
 }
 ```
 
-**Conversation List Response:**
-```json
-[
-  {
-    "id": "uuid",
-    "title": "Chat 2024-01-15 10:30",
-    "created_at": "2024-01-15T10:30:00Z",
-    "updated_at": "2024-01-15T10:35:00Z",
-    "message_count": 5
-  }
-]
-```
-
-**Conversation Detail Response:**
+**Query Response (with Agent):**
 ```json
 {
-  "id": "uuid",
-  "title": "Chat 2024-01-15 10:30",
-  "created_at": "2024-01-15T10:30:00Z",
-  "updated_at": "2024-01-15T10:35:00Z",
-  "message_count": 5,
-  "messages": [
-    {
-      "id": "uuid",
-      "conversation_id": "uuid",
-      "role": "user",
-      "content": "Show me pending invoices",
-      "created_at": "2024-01-15T10:30:00Z"
-    },
-    {
-      "id": "uuid",
-      "conversation_id": "uuid",
-      "role": "assistant",
-      "content": "Here are your pending invoices...",
-      "created_at": "2024-01-15T10:30:05Z"
-    }
-  ]
+  "query": "Show me pending invoices",
+  "ai_response": "Here are 3 pending invoices...",
+  "data": [...],
+  "function_called": "query_invoices",
+  "sql_executed": true
+}
+```
+
+**Duplicate Detection Response (Multi-Strategy):**
+```json
+{
+  "is_duplicate": true,
+  "confidence": 0.95,
+  "strategy": "line_item",
+  "matched_invoice_id": "uuid",
+  "reasoning": "Line items match exactly, same vendor, date within 7 days"
 }
 ```
 

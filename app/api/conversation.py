@@ -16,6 +16,8 @@ from app.schemas.conversation import (
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from datetime import date
+from app.agents.duplicate_agent import DuplicateDetectionAgent
+from app.agents.query_agent import QueryAgent
 
 router = APIRouter(prefix="/conversation", tags=["Conversation"])
 
@@ -126,9 +128,11 @@ def chat(
             if str(conversation.user_id) != str(current_user["id"]):
                 raise HTTPException(status_code=403, detail="Access denied")
         else:
+            # Create with temporary title
             conversation = conv_service.create_conversation(
                 user_id=current_user["id"],
-                tenant_id=current_user["tenant_id"]
+                tenant_id=current_user["tenant_id"],
+                title="New Chat"
             )
         
         # Get conversation history
@@ -137,6 +141,9 @@ def chat(
             {"role": msg.role, "content": msg.content}
             for msg in history
         ]
+        
+        # Check if this is the first user message (to generate title)
+        is_first_message = len([m for m in history if m.role == "user"]) == 0
         
         # Add current user message
         messages.append({"role": "user", "content": request.message})
@@ -162,6 +169,11 @@ def chat(
             role="assistant",
             content=ai_response
         )
+        
+        # Generate title from first message
+        if is_first_message:
+            title = conv_service.generate_title_from_message(request.message, ai)
+            conv_service.update_conversation_title(conversation.id, title)
         
         return ChatResponse(
             conversation_id=conversation.id,
@@ -189,52 +201,27 @@ def query_invoices(
     db: Session = Depends(get_db_session),
 ):
     """
-    Natural language query for invoices/vendors
+    Natural language query with SQL agent
     
     Examples:
-    - "Show me all pending invoices"
-    - "Which invoices are over 100k?"
-    - "List vendors with status active"
+    - "Show me pending invoices"
+    - "Invoices below 25000"
+    - "Top 5 vendors"
     """
     try:
-        ai = get_ai_provider()
+        # Use Query Agent
+        agent = QueryAgent(
+            db=db,
+            tenant_id=current_user["tenant_id"],
+            user_context={
+                "tenant_id": current_user["tenant_id"],
+                "role": current_user["role"],
+                "email": current_user["email"]
+            }
+        )
         
-        # Gather data summary for context
-        pending_count = db.query(Invoice).filter(Invoice.current_state == "pending_approval").count()
-        total_invoices = db.query(Invoice).count()
-        vendor_count = db.query(Vendor).count()
-        
-        context = {
-            "tenant_id": str(current_user["tenant_id"]),
-            "role": current_user["role"],
-            "data_summary": f"{total_invoices} invoices, {pending_count} pending, {vendor_count} vendors"
-        }
-        
-        # Get AI interpretation
-        ai_response = ai.query_system(query, context)
-        
-        # Simple query execution (expand later with SQL generation)
-        data = None
-        if "pending" in query.lower():
-            invoices = db.query(Invoice).filter(
-                Invoice.current_state == "pending_approval"
-            ).limit(10).all()
-            data = [
-                {
-                    "id": str(inv.id),
-                    "invoice_number": inv.invoice_number,
-                    "vendor_name": inv.vendor_name,
-                    "total_amount": float(inv.total_amount or 0),
-                    "invoice_date": str(inv.invoice_date)
-                }
-                for inv in invoices
-            ]
-        
-        return {
-            "query": query,
-            "ai_response": ai_response,
-            "data": data
-        }
+        result = agent.query(query)
+        return result
     
     except Exception as e:
         raise HTTPException(
@@ -243,10 +230,6 @@ def query_invoices(
         )
 
 
-# ============================================
-# DUPLICATE DETECTION
-# ============================================
-
 @router.post("/detect-duplicate")
 def detect_duplicate(
     invoice_data: Dict[str, Any] = Body(...),
@@ -254,45 +237,31 @@ def detect_duplicate(
     db: Session = Depends(get_db_session),
 ):
     """
-    AI-powered duplicate detection
+    AI-powered duplicate detection with multi-strategy agent
     
     Body:
     {
         "vendor_name": "ABC Corp",
         "invoice_number": "INV-123",
         "invoice_date": "2024-01-15",
-        "total_amount": 50000.0
+        "total_amount": 50000.0,
+        "line_items": [...]
     }
     """
     try:
-        ai = get_ai_provider()
+        # Use Duplicate Detection Agent
+        agent = DuplicateDetectionAgent(
+            db=db,
+            tenant_id=current_user["tenant_id"]
+        )
         
-        # Find similar invoices (same vendor, close date/amount)
-        from datetime import timedelta
-        inv_date = date.fromisoformat(invoice_data.get("invoice_date", str(date.today())))
-        amount = float(invoice_data.get("total_amount", 0))
-        
-        similar = db.query(Invoice).filter(
-            Invoice.vendor_name == invoice_data.get("vendor_name"),
-            Invoice.invoice_date.between(
-                inv_date - timedelta(days=30),
-                inv_date + timedelta(days=30)
-            ),
-            Invoice.total_amount.between(amount * 0.9, amount * 1.1)
-        ).limit(5).all()
-        
-        candidates = [
-            {
-                "id": str(inv.id),
-                "invoice_number": inv.invoice_number,
-                "invoice_date": str(inv.invoice_date),
-                "total_amount": float(inv.total_amount or 0)
-            }
-            for inv in similar
-        ]
-        
-        # AI analysis
-        result = ai.detect_duplicate_invoices(invoice_data, candidates)
+        result = agent.detect(
+            vendor_name=invoice_data.get("vendor_name"),
+            invoice_number=invoice_data.get("invoice_number"),
+            invoice_date=invoice_data.get("invoice_date"),
+            total_amount=invoice_data.get("total_amount"),
+            line_items=invoice_data.get("line_items")
+        )
         
         return result
     
