@@ -129,6 +129,27 @@ class InvoiceRepository:
             for state, count, total in results
         ]
     
+    def count_by_state(self, state: str) -> int:
+        """Number of invoices currently in a given workflow state."""
+        return self.db.query(func.count(Invoice.id)).filter(
+            Invoice.current_state == state
+        ).scalar() or 0
+
+    def get_top_vendors(self, limit: int = 5) -> List[Tuple[str, float]]:
+        """Top vendors by total invoiced amount, highest first.
+        Returns [(vendor_name, total_amount), ...]."""
+        results = (
+            self.db.query(
+                Invoice.vendor_name,
+                func.coalesce(func.sum(Invoice.total_amount), 0).label("total"),
+            )
+            .group_by(Invoice.vendor_name)
+            .order_by(func.sum(Invoice.total_amount).desc())
+            .limit(limit)
+            .all()
+        )
+        return [(name, money_to_float(total)) for name, total in results]
+
     def get_monthly_stats(self, month_start: date) -> Tuple[int, float]:
         """
         Get invoice count and total for current month

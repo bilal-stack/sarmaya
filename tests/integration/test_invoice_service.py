@@ -192,6 +192,39 @@ class TestMarkPaid:
             InvoiceService(db).mark_as_paid(inv.id, clerk)
 
 
+class TestDashboardSummary:
+    def test_counts_pending_and_month_and_top_vendors(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        acme = _make_vendor(db, tenant.id, "Acme Ltd")
+        globex = _make_vendor(db, tenant.id, "Globex Inc")
+
+        # 2 pending, 1 draft. Acme out-spends Globex.
+        _make_invoice(db, tenant.id, clerk["id"],
+                      InvoiceState.PENDING_APPROVAL.value, 5000, vendor=acme)
+        _make_invoice(db, tenant.id, clerk["id"],
+                      InvoiceState.PENDING_APPROVAL.value, 3000, vendor=acme)
+        _make_invoice(db, tenant.id, clerk["id"],
+                      InvoiceState.DRAFT.value, 1000, vendor=globex)
+
+        summary = InvoiceService(db).get_dashboard_summary()
+
+        assert summary["pending_approvals"] == 2
+        assert summary["invoices_this_month"]["count"] == 3
+        assert summary["invoices_this_month"]["total_amount"] == 9000.0
+
+        top = summary["top_vendors"]
+        assert top[0]["vendor_name"] == "Acme Ltd"
+        assert top[0]["total_amount"] == 8000.0
+
+    def test_empty_tenant_returns_zeroes(self, db, tenant, make_user):
+        make_user(UserRole.AP_CLERK)
+        summary = InvoiceService(db).get_dashboard_summary()
+
+        assert summary["pending_approvals"] == 0
+        assert summary["invoices_this_month"]["count"] == 0
+        assert summary["top_vendors"] == []
+
+
 class TestNotifications:
     """Workflow events fire emails to the right people, and delivery failures
     never break the workflow. SMTP is patched out at the _deliver boundary."""

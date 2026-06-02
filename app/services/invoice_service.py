@@ -646,6 +646,28 @@ class InvoiceService:
         """Get pending approval invoices"""
         return self.repository.get_pending_approvals()
 
+    def get_dashboard_summary(self) -> Dict[str, Any]:
+        """Headline dashboard figures: invoices awaiting approval, this month's
+        volume, and the top vendors by spend. Tenant isolation is enforced by
+        RLS on the request-scoped session."""
+        today = date.today()
+        month_start = date(today.year, today.month, 1)
+        month_count, month_total = self.repository.get_monthly_stats(month_start)
+
+        return {
+            "pending_approvals": self.repository.count_by_state(
+                InvoiceState.PENDING_APPROVAL.value
+            ),
+            "invoices_this_month": {
+                "count": month_count,
+                "total_amount": month_total,
+            },
+            "top_vendors": [
+                {"vendor_name": name, "total_amount": total}
+                for name, total in self.repository.get_top_vendors(limit=5)
+            ],
+        }
+
     def get_invoices_blocked_on_vendor(self, limit: int = 100) -> List[Invoice]:
         """Pending-approval invoices stuck because their vendor isn't ACTIVE yet.
 
