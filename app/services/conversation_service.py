@@ -57,19 +57,22 @@ class ConversationService:
         metadata: Optional[dict] = None
     ) -> ConversationMessage:
         """Add message to conversation"""
+        conversation = self.get_conversation(conversation_id)
+        if not conversation:
+            raise ValueError("Conversation not found")
+
         message = ConversationMessage(
+            tenant_id=conversation.tenant_id,
             conversation_id=conversation_id,
             role=role,
             content=content,
-            metadata=metadata
+            meta_data=metadata
         )
         self.db.add(message)
-        
+
         # Update conversation timestamp
-        conversation = self.get_conversation(conversation_id)
-        if conversation:
-            conversation.updated_at = utc_now()
-        
+        conversation.updated_at = utc_now()
+
         self.db.commit()
         self.db.refresh(message)
         return message

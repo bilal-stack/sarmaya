@@ -93,7 +93,7 @@ def delete_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
-    if str(conversation.user_id) != str(current_user["sub"]):
+    if str(conversation.user_id) != str(current_user["id"]):
         raise HTTPException(status_code=403, detail="Access denied")
     
     service.delete_conversation(conversation_id)
