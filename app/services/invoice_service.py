@@ -19,6 +19,7 @@ from app.core.roles import (
     has_permission,
     can_approve_amount,
     PERM_CREATE_INVOICE,
+    PERM_APPROVE_INVOICE,
     PERM_REJECT_INVOICE,
     PERM_MARK_PAID_INVOICE,
 )
@@ -168,6 +169,60 @@ class InvoiceService:
             },
         )
         self.repository.commit()
+
+    def _assert_duplicate_resolved(self, invoice: Invoice) -> None:
+        """Soft duplicate gate: block approval while the invoice carries an
+        unacknowledged potential-duplicate flag. Cleared via resolve_duplicate,
+        which records the override reason in the audit trail."""
+        if invoice.potential_duplicate_id and not invoice.duplicate_acknowledged:
+            raise ValueError(
+                "Cannot approve: this invoice is flagged as a potential duplicate. "
+                "Review and override it with a reason first."
+            )
+
+    def resolve_duplicate(
+        self, invoice_id: UUID, reason: str, current_user: dict
+    ) -> Invoice:
+        """Override a flagged potential duplicate, recording the reviewer's
+        reason in the audit trail (per spec: a fuzzy duplicate is a soft warning
+        that is overridable with a logged reason). Unblocks approval."""
+        invoice = self.repository.get_by_id(invoice_id)
+        if not invoice:
+            raise ValueError("Invoice not found")
+
+        if not has_permission(current_user["role"], PERM_APPROVE_INVOICE):
+            raise PermissionError(
+                "You do not have permission to override duplicate warnings"
+            )
+
+        if not invoice.potential_duplicate_id:
+            raise ValueError("Invoice has no potential duplicate to resolve")
+
+        if not reason or not reason.strip():
+            raise ValueError("An override reason is required")
+
+        if invoice.duplicate_acknowledged:
+            return invoice
+
+        invoice.duplicate_acknowledged = True
+        self.repository.update(invoice)
+        self.repository.commit()
+        invoice = self.repository.refresh(invoice)
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="invoice",
+            object_id=invoice.id,
+            action="duplicate_overridden",
+            comment=reason.strip(),
+            workflow_type="invoice",
+            after_value={"potential_duplicate_id": str(invoice.potential_duplicate_id)},
+        )
+        self.repository.commit()
+
+        return invoice
 
     def list_invoices(
         self,
@@ -446,6 +501,10 @@ class InvoiceService:
         self._assert_vendor_active(
             invoice, "approve invoice", current_user, "approval_blocked"
         )
+
+        # Governance gate: a flagged potential duplicate must be reviewed and
+        # overridden (with a logged reason) before approval.
+        self._assert_duplicate_resolved(invoice)
 
         # Check approval permissions
         can_approve, error_msg = can_approve_amount(
@@ -811,6 +870,9 @@ class InvoiceService:
             ocr_extracted_data=ocr_result_sanitized,
             line_items=ocr_result.get("line_items", []),  # ✅ ADD
             pdf_file_id=file_record.id,
+            # Soft duplicate flag: created in DRAFT regardless, but approval is
+            # blocked until a reviewer overrides it with a logged reason.
+            potential_duplicate_id=similar.id if similar else None,
             created_by=current_user["id"]
         )
         

@@ -120,6 +120,90 @@ class TestApprove:
             InvoiceService(db).approve_invoice(inv.id, manager)
 
 
+class TestDuplicateOverride:
+    def _flagged_invoice(self, db, tenant, clerk, amount=100_000):
+        """A pending-approval invoice flagged as a potential duplicate of an
+        earlier one sharing the same (active) vendor."""
+        vendor = _make_vendor(db, tenant.id, f"Vendor-{uuid.uuid4().hex[:6]}")
+        original = _make_invoice(
+            db, tenant.id, clerk["id"], InvoiceState.APPROVED.value, amount, vendor=vendor
+        )
+        flagged = _make_invoice(
+            db, tenant.id, clerk["id"], InvoiceState.PENDING_APPROVAL.value, amount,
+            vendor=vendor,
+        )
+        flagged.potential_duplicate_id = original.id
+        db.add(flagged)
+        db.flush()
+        return flagged, original
+
+    def test_flagged_duplicate_blocks_approval(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        manager = make_user(UserRole.MANAGER)
+        flagged, _ = self._flagged_invoice(db, tenant, clerk)
+
+        with pytest.raises(ValueError, match="potential duplicate"):
+            InvoiceService(db).approve_invoice(flagged.id, manager)
+
+    def test_resolve_unblocks_approval(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        manager = make_user(UserRole.MANAGER)
+        svc = InvoiceService(db)
+        flagged, _ = self._flagged_invoice(db, tenant, clerk)
+
+        resolved = svc.resolve_duplicate(flagged.id, "Different PO, not a dup", manager)
+        assert resolved.duplicate_acknowledged is True
+
+        approved = svc.approve_invoice(flagged.id, manager)
+        assert approved.current_state == InvoiceState.APPROVED.value
+
+    def test_resolve_requires_reason(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        manager = make_user(UserRole.MANAGER)
+        flagged, _ = self._flagged_invoice(db, tenant, clerk)
+
+        with pytest.raises(ValueError, match="reason"):
+            InvoiceService(db).resolve_duplicate(flagged.id, "   ", manager)
+
+    def test_resolve_requires_approve_permission(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        flagged, _ = self._flagged_invoice(db, tenant, clerk)
+
+        # AP_CLERK can create but not approve, so cannot override duplicates.
+        with pytest.raises(PermissionError):
+            InvoiceService(db).resolve_duplicate(flagged.id, "looks fine", clerk)
+
+    def test_resolve_without_flag_raises(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        manager = make_user(UserRole.MANAGER)
+        inv = _make_invoice(
+            db, tenant.id, clerk["id"], InvoiceState.PENDING_APPROVAL.value, 100_000
+        )
+
+        with pytest.raises(ValueError, match="no potential duplicate"):
+            InvoiceService(db).resolve_duplicate(inv.id, "n/a", manager)
+
+    def test_resolve_logs_audit_with_reason(self, db, tenant, make_user):
+        from app.models.audit_log import AuditLog
+
+        clerk = make_user(UserRole.AP_CLERK)
+        manager = make_user(UserRole.MANAGER)
+        flagged, _ = self._flagged_invoice(db, tenant, clerk)
+
+        InvoiceService(db).resolve_duplicate(flagged.id, "Verified distinct invoice", manager)
+
+        log = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.object_id == flagged.id,
+                AuditLog.action == "duplicate_overridden",
+            )
+            .first()
+        )
+        assert log is not None
+        assert "Verified distinct invoice" in (log.comment or "")
+
+
 class TestSubmit:
     def test_submit_sets_pending_and_required_role(self, db, tenant, make_user):
         clerk = make_user(UserRole.AP_CLERK)

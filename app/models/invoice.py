@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Enum as SQLEnum
+from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Boolean, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
@@ -32,6 +32,12 @@ class Invoice(BaseModel):
     # OCR
     ocr_confidence = Column(Integer, nullable=True)
     ocr_extracted_data = Column(JSON, nullable=True)
+
+    # Duplicate review: a fuzzy-matched likely duplicate found at upload. Stays
+    # unacknowledged (blocking approval) until a reviewer overrides with a
+    # logged reason.
+    potential_duplicate_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    duplicate_acknowledged = Column(Boolean, nullable=False, server_default="false", default=False)
     
     # ✅ ADD: Line items
     line_items = Column(JSON, default=[])

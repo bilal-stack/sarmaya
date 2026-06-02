@@ -325,6 +325,37 @@ def reject_invoice(
         )
 
 
+@router.post("/{invoice_id}/resolve-duplicate")
+def resolve_duplicate(
+    invoice_id: UUID,
+    reason: str = Body(..., embed=True),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Override a flagged potential duplicate with a logged reason, unblocking
+    approval. The reason is recorded in the audit trail."""
+    service = InvoiceService(db)
+
+    try:
+        invoice = service.resolve_duplicate(invoice_id, reason, current_user)
+        return {
+            "invoice_id": str(invoice.id),
+            "duplicate_acknowledged": invoice.duplicate_acknowledged,
+            "resolved_by": current_user["email"],
+            "reason": reason,
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+
+
 @router.post("/{invoice_id}/mark-paid")
 def mark_invoice_paid(
     invoice_id: UUID,

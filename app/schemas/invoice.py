@@ -46,6 +46,8 @@ class InvoiceResponse(InvoiceBase):
     approved_by: Optional[UUID] = None
     approved_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
+    potential_duplicate_id: Optional[UUID] = None
+    duplicate_acknowledged: bool = False
     created_by: UUID
     created_at: datetime
     updated_at: datetime
