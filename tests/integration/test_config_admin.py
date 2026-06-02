@@ -22,6 +22,7 @@ from app.services.policy import evaluate_approval_role
 from app.services.workflow import transition_state
 from app.services.policy_service import ApprovalPolicyService
 from app.services.workflow_config_service import WorkflowConfigService
+from app.services.config_provisioning import ConfigProvisioningService
 from app.schemas.policy import ApprovalPolicyCreate, ApprovalPolicyUpdate, ApprovalRule
 
 pytestmark = pytest.mark.integration
@@ -172,3 +173,49 @@ class TestWorkflowConfigDrivesTransitions:
         clerk = make_user(UserRole.AP_CLERK)
         with pytest.raises(PermissionError):
             WorkflowConfigService(db).list_states("invoice", clerk)
+
+
+# --- default-config provisioning for new tenants -----------------------------
+
+class TestInitializeDefaults:
+    def test_provisions_working_config_for_new_tenant(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+
+        # Fresh tenant has no config -> hardcoded fallbacks only.
+        assert WorkflowConfigService(db).list_states("invoice", admin) == []
+        assert ApprovalPolicyService(db).list_policies(admin) == []
+
+        result = ConfigProvisioningService(db).initialize_defaults(admin)
+        assert result["created_states"] == 7
+        assert result["created_policies"] == 2
+
+        # Workflow transitions now read from the DB.
+        inv = Invoice(tenant_id=tenant.id, current_state=InvoiceState.DRAFT.value)
+        assert transition_state(db, inv, InvoiceState.VALIDATED.value, admin["id"]) is True
+        db.expunge(inv)
+        inv2 = Invoice(tenant_id=tenant.id, current_state=InvoiceState.DRAFT.value)
+        with pytest.raises(ValueError):  # draft -> pending is not a configured transition
+            transition_state(db, inv2, InvoiceState.PENDING_APPROVAL.value, admin["id"])
+
+        # Approval routing now reads from the DB matrix.
+        assert evaluate_approval_role(db, admin["tenant_id"], 100_000) == "manager"
+        assert evaluate_approval_role(db, admin["tenant_id"], 300_000) == "cfo"
+
+    def test_idempotent(self, db, make_user):
+        admin = make_user(UserRole.ADMIN)
+        svc = ConfigProvisioningService(db)
+
+        first = svc.initialize_defaults(admin)
+        assert first["created_states"] == 7 and first["created_policies"] == 2
+
+        second = svc.initialize_defaults(admin)
+        assert second == {"created_states": 0, "created_policies": 0}
+
+        # Still exactly one set of states/policies.
+        assert len(WorkflowConfigService(db).list_states("invoice", admin)) == 7
+        assert len(ApprovalPolicyService(db).list_policies(admin)) == 2
+
+    def test_non_admin_forbidden(self, db, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        with pytest.raises(PermissionError):
+            ConfigProvisioningService(db).initialize_defaults(clerk)

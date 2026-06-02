@@ -12,8 +12,30 @@ from app.schemas.policy import (
 from app.schemas.workflow import WorkflowStateResponse, WorkflowTransitionsUpdate
 from app.services.policy_service import ApprovalPolicyService
 from app.services.workflow_config_service import WorkflowConfigService
+from app.services.config_provisioning import ConfigProvisioningService
 
 router = APIRouter(prefix="/config", tags=["Configuration"])
+
+
+# ============================================
+# TENANT DEFAULTS
+# ============================================
+
+@router.post("/initialize-defaults", status_code=status.HTTP_200_OK)
+def initialize_default_config(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Seed this tenant's default invoice workflow + approval matrix if absent.
+
+    Idempotent: returns the number of states/policies created (0 when the tenant
+    is already configured). Lets a new tenant become configuration-first without
+    a deploy, then edit the seeded rows via the endpoints below.
+    """
+    try:
+        return ConfigProvisioningService(db).initialize_defaults(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 def _raise_for(exc: Exception) -> None:

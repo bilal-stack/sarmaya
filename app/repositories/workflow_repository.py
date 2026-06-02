@@ -28,6 +28,18 @@ class WorkflowRepository:
             WorkflowState.state_name == state_name.lower(),
         ).first()
 
+    def count_states(self, workflow_type: str) -> int:
+        return (
+            self.db.query(WorkflowState)
+            .filter(WorkflowState.workflow_type == workflow_type)
+            .count()
+        )
+
+    def create(self, state: WorkflowState) -> WorkflowState:
+        self.db.add(state)
+        self.db.flush()
+        return state
+
     def update(self, state: WorkflowState) -> WorkflowState:
         self.db.add(state)
         self.db.flush()
