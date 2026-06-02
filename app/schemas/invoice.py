@@ -80,6 +80,7 @@ class InvoiceUploadResponse(BaseModel):
     current_state: Optional[str] = None
     ocr_confidence: Optional[int] = None
     ocr_data: Optional[Dict[str, Any]] = None
+    field_explanations: Optional[Dict[str, Any]] = None
     duplicate_warning: Optional[Dict[str, Any]] = None
     file_id: Optional[UUID] = None
     error: Optional[str] = None

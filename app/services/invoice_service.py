@@ -839,6 +839,7 @@ class InvoiceService:
             "current_state": invoice.current_state,
             "ocr_confidence": confidence,
             "ocr_data": ocr_result,
+            "field_explanations": ocr_result.get("field_explanations"),
             "line_items": ocr_result.get("line_items", []),  # ✅ ENSURE this is present
             "duplicate_warning": duplicate_warning,
             "file_id": str(file_record.id)

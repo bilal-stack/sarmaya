@@ -4,6 +4,7 @@ from app.services.ocr.ocr_space import OCRSpaceProvider
 from app.services.ocr.aws_textract import AWSTextractProvider
 from app.services.ocr.document_ai import DocumentAIProvider
 from app.services.ai import get_ai_provider
+from app.services.ocr.field_explainer import build_field_explanations
 from app.core.enums import OCRProviderType
 
 
@@ -76,8 +77,26 @@ def extract_invoice_data_ocr(file_path: str) -> dict:
             import logging
             logging.error(f"AI enhancement failed, using OCR only: {e}")
             ocr_result["ai_enhanced"] = False
-    
+
+    # Attach per-field confidence + "Why?" evidence for human review.
+    fields = {**ocr_result, "currency": ocr_result.get("currency", "PKR")}
+    ocr_result["field_explanations"] = build_field_explanations(
+        _raw_text_of(ocr_result), fields
+    )
+
     return ocr_result
+
+
+def _raw_text_of(ocr_result: dict) -> str:
+    """Best-effort recovery of the plain OCR text from a provider result."""
+    raw = ocr_result.get("raw_data") or {}
+    if isinstance(raw, dict):
+        if raw.get("text"):
+            return raw["text"]
+        parsed = raw.get("ParsedResults") or []
+        if parsed and isinstance(parsed, list):
+            return parsed[0].get("ParsedText", "") or ""
+    return ""
 
 
 # Convenience exports
