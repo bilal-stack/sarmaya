@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
 from uuid import UUID
 
 from app.repositories.vendor_repository import VendorRepository
@@ -38,6 +38,28 @@ class VendorService:
         if not vendor:
             raise ValueError("Vendor not found")
         return vendor
+
+    def get_review_queue(
+        self, current_user: dict, limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """Vendor-centric triage list for the governance gate: vendors awaiting
+        verification (or blocked) together with the count and value of the
+        pending-approval invoices each is holding up, highest-impact first."""
+        self._require_view(current_user)
+        return [
+            {
+                "id": vendor.id,
+                "legal_name": vendor.legal_name,
+                "display_name": vendor.display_name,
+                "vendor_code": vendor.vendor_code,
+                "email": vendor.email,
+                "status": vendor.status,
+                "created_at": vendor.created_at,
+                "blocked_invoice_count": count,
+                "blocked_total_amount": total,
+            }
+            for vendor, count, total in self.repository.get_review_queue(limit)
+        ]
 
     # --- write --------------------------------------------------------------
 

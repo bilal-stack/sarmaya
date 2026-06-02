@@ -26,7 +26,14 @@ def _vendor_payload(**overrides) -> VendorCreate:
     return VendorCreate(**data)
 
 
-def _make_invoice_for_vendor(db, tenant_id, created_by, vendor):
+def _make_invoice_for_vendor(
+    db,
+    tenant_id,
+    created_by,
+    vendor,
+    state=InvoiceState.DRAFT,
+    amount="1000",
+):
     inv = Invoice(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -34,8 +41,8 @@ def _make_invoice_for_vendor(db, tenant_id, created_by, vendor):
         vendor_id=vendor.id,
         vendor_name=vendor.legal_name,
         invoice_date=date.today(),
-        total_amount=Decimal("1000"),
-        current_state=InvoiceState.DRAFT.value,
+        total_amount=Decimal(amount),
+        current_state=state.value,
         created_by=created_by,
     )
     db.add(inv)
@@ -123,6 +130,83 @@ class TestStatus:
 
         updated = VendorService(db).set_status(vendor.id, VendorStatus.BLOCKED, admin)
         assert updated.status == VendorStatus.BLOCKED
+
+
+class TestReviewQueue:
+    def test_pending_vendor_appears_with_blocked_totals(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        svc = VendorService(db)
+        vendor = svc.create_vendor(_vendor_payload(), admin)
+        svc.set_status(vendor.id, VendorStatus.PENDING_VERIFICATION, admin)
+
+        _make_invoice_for_vendor(
+            db, tenant.id, admin["id"], vendor,
+            state=InvoiceState.PENDING_APPROVAL, amount="1500",
+        )
+        _make_invoice_for_vendor(
+            db, tenant.id, admin["id"], vendor,
+            state=InvoiceState.PENDING_APPROVAL, amount="500",
+        )
+
+        queue = svc.get_review_queue(admin)
+        item = next(i for i in queue if i["id"] == vendor.id)
+        assert item["blocked_invoice_count"] == 2
+        assert item["blocked_total_amount"] == 2000.0
+        assert item["status"] == VendorStatus.PENDING_VERIFICATION
+
+    def test_active_vendor_excluded(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        svc = VendorService(db)
+        vendor = svc.create_vendor(_vendor_payload(), admin)  # ACTIVE by default
+        _make_invoice_for_vendor(
+            db, tenant.id, admin["id"], vendor,
+            state=InvoiceState.PENDING_APPROVAL,
+        )
+
+        queue = svc.get_review_queue(admin)
+        assert all(i["id"] != vendor.id for i in queue)
+
+    def test_only_pending_approval_invoices_counted(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        svc = VendorService(db)
+        vendor = svc.create_vendor(_vendor_payload(), admin)
+        svc.set_status(vendor.id, VendorStatus.PENDING_VERIFICATION, admin)
+
+        # A draft invoice is not held by the gate, so it must not be counted.
+        _make_invoice_for_vendor(
+            db, tenant.id, admin["id"], vendor, state=InvoiceState.DRAFT,
+        )
+
+        queue = svc.get_review_queue(admin)
+        item = next(i for i in queue if i["id"] == vendor.id)
+        assert item["blocked_invoice_count"] == 0
+        assert item["blocked_total_amount"] == 0.0
+
+    def test_ordered_by_blocked_value_desc(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        svc = VendorService(db)
+        low = svc.create_vendor(_vendor_payload(), admin)
+        high = svc.create_vendor(_vendor_payload(), admin)
+        svc.set_status(low.id, VendorStatus.PENDING_VERIFICATION, admin)
+        svc.set_status(high.id, VendorStatus.PENDING_VERIFICATION, admin)
+
+        _make_invoice_for_vendor(
+            db, tenant.id, admin["id"], low,
+            state=InvoiceState.PENDING_APPROVAL, amount="100",
+        )
+        _make_invoice_for_vendor(
+            db, tenant.id, admin["id"], high,
+            state=InvoiceState.PENDING_APPROVAL, amount="9000",
+        )
+
+        queue = svc.get_review_queue(admin)
+        ids = [i["id"] for i in queue]
+        assert ids.index(high.id) < ids.index(low.id)
+
+    def test_approver_cannot_view_queue(self, db, tenant, make_user):
+        approver = make_user(UserRole.APPROVER)
+        with pytest.raises(PermissionError):
+            VendorService(db).get_review_queue(approver)
 
 
 class TestDelete:

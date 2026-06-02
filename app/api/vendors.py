@@ -11,6 +11,7 @@ from app.schemas.vendor import (
     VendorStatusUpdate,
     VendorResponse,
     VendorListResponse,
+    VendorReviewItem,
 )
 from app.services.vendor_service import VendorService
 
@@ -41,6 +42,24 @@ def list_vendors(
             offset=offset,
         )
         return vendors
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/review-queue", response_model=List[VendorReviewItem])
+def vendor_review_queue(
+    limit: int = Query(default=100, le=200),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Reviewer worklist: vendors awaiting verification (or blocked), each with
+    the count/value of pending-approval invoices the governance gate is holding.
+
+    Activate a vendor (PATCH /vendors/{id}/status) to unblock its invoices.
+    Declared before /{vendor_id} so the literal path isn't parsed as a UUID.
+    """
+    try:
+        return VendorService(db).get_review_queue(current_user, limit=limit)
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 

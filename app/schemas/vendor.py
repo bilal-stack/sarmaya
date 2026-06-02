@@ -87,3 +87,10 @@ class VendorListResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class VendorReviewItem(VendorListResponse):
+    """A non-ACTIVE vendor on the reviewer worklist, annotated with the volume
+    of pending-approval invoices the governance gate is holding for it."""
+    blocked_invoice_count: int
+    blocked_total_amount: float

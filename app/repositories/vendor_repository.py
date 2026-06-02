@@ -5,7 +5,8 @@ from uuid import UUID
 
 from app.models.vendor import Vendor
 from app.models.invoice import Invoice
-from app.core.enums import VendorStatus
+from app.core.enums import VendorStatus, InvoiceState
+from app.utils.money import money_to_float
 
 
 class VendorRepository:
@@ -60,6 +61,45 @@ class VendorRepository:
             .all()
         )
         return vendors, total
+
+    def get_review_queue(
+        self, limit: int = 100
+    ) -> List[Tuple[Vendor, int, float]]:
+        """Reviewer worklist of non-ACTIVE vendors (the governance gate is
+        holding their invoices), each annotated with how many pending-approval
+        invoices it is blocking and their total value.
+
+        Ordered by blocked value desc so reviewers verify the highest-impact
+        vendors first. Tenant scoping is handled by RLS.
+        Returns [(vendor, blocked_invoice_count, blocked_total_amount), ...].
+        """
+        blocked = (
+            self.db.query(
+                Invoice.vendor_id.label("vendor_id"),
+                func.count(Invoice.id).label("cnt"),
+                func.coalesce(func.sum(Invoice.total_amount), 0).label("total"),
+            )
+            .filter(Invoice.current_state == InvoiceState.PENDING_APPROVAL.value)
+            .group_by(Invoice.vendor_id)
+            .subquery()
+        )
+
+        rows = (
+            self.db.query(
+                Vendor,
+                func.coalesce(blocked.c.cnt, 0),
+                func.coalesce(blocked.c.total, 0),
+            )
+            .outerjoin(blocked, blocked.c.vendor_id == Vendor.id)
+            .filter(Vendor.status != VendorStatus.ACTIVE)
+            .order_by(
+                func.coalesce(blocked.c.total, 0).desc(),
+                Vendor.legal_name.asc(),
+            )
+            .limit(limit)
+            .all()
+        )
+        return [(vendor, int(cnt or 0), money_to_float(total)) for vendor, cnt, total in rows]
 
     def count_linked_invoices(self, vendor_id: UUID) -> int:
         """Number of invoices referencing this vendor (guards hard delete)."""
