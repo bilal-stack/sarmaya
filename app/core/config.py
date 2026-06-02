@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pathlib import Path
 
@@ -18,7 +18,13 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: list = ["*"]
     
     # Database
+    # Runtime connection. For Postgres Row Level Security to actually isolate
+    # tenants, this MUST be a non-superuser, non-BYPASSRLS role (e.g. os_app).
+    # Superusers and BYPASSRLS roles silently bypass every RLS policy.
     DATABASE_URL: str = "postgresql://postgres:root@localhost:5432/os"
+    # Privileged connection used ONLY for schema migrations / DDL (Alembic).
+    # May be the table owner or a superuser; the running app must never use it.
+    ADMIN_DATABASE_URL: str = "postgresql://postgres:root@localhost:5432/os"
 
     SQLALCHEMY_ECHO: bool = False
     
@@ -74,9 +80,10 @@ class Settings(BaseSettings):
     GOOGLE_DOCUMENT_AI_PROCESSOR_ID: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Path to service account JSON
     
-    class Config:
-        env_file = str(ENV_FILE)
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        case_sensitive=True,
+    )
 
 @lru_cache()
 def get_settings():

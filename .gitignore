@@ -246,3 +246,10 @@ dist/
 # Uploads
 uploads/*
 !uploads/.gitkeep
+
+# Secrets / service-account keys
+os-google.json
+*-google.json
+*service-account*.json
+*.pem
+*.key

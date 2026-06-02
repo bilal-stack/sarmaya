@@ -14,7 +14,7 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.ADMIN_DATABASE_URL)
 # Debug: Print all tables Alembic knows about
 print("Tables Alembic sees:")
 for table_name in BaseModel().metadata.tables.keys():

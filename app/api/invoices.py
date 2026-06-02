@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional, List
 from uuid import UUID
+import logging
 from app.api.deps import get_current_user, get_db_session
 from app.schemas.invoice import (
     InvoiceResponse,
@@ -13,6 +14,9 @@ from app.schemas.invoice import (
 )
 from app.services.invoice_service import InvoiceService
 from app.core.enums import InvoiceState
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
 
 
@@ -45,6 +49,21 @@ def list_invoices(
         offset=offset
     )
     return invoices
+
+
+@router.get("/blocked-on-vendor", response_model=List[InvoiceListResponse])
+def list_invoices_blocked_on_vendor(
+    limit: int = Query(default=100, le=200),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Reviewer worklist: pending-approval invoices the governance gate is
+    holding because their linked vendor is not yet verified/active.
+
+    Activate the vendor (PATCH /vendors/{id}/status) to unblock these.
+    Declared before /{invoice_id} so the literal path isn't parsed as a UUID.
+    """
+    return InvoiceService(db).get_invoices_blocked_on_vendor(limit)
 
 
 @router.get("/{invoice_id}", response_model=InvoiceResponse)
@@ -153,16 +172,32 @@ async def upload_invoice_with_ocr(
     3. Duplicate detection
     4. Invoice creation
     """
-    # Validate file type
+    # Validate declared content type
     if not file.content_type or "pdf" not in file.content_type.lower():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF files are supported"
         )
-    
+
     # Read file content
     content = await file.read()
-    
+
+    # Enforce size limit (content_length header is client-supplied, so check the
+    # actual bytes we read).
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds the {settings.MAX_FILE_SIZE_MB} MB limit"
+        )
+
+    # Verify magic bytes — the declared content type is spoofable.
+    if not content.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is not a valid PDF"
+        )
+
     # Use service to handle upload logic
     service = InvoiceService(db)
     
@@ -174,17 +209,19 @@ async def upload_invoice_with_ocr(
             current_user=current_user
         )
         return result
-    except RuntimeError as e:
-        # OCR or processing errors
+    except RuntimeError:
+        # OCR or processing errors — log internals, return a generic message.
+        logger.exception("Invoice upload OCR/processing failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Could not process the uploaded invoice. Please try again."
         )
-    except Exception as e:
-        # Unexpected errors
+    except Exception:
+        # Unexpected errors — never leak internals to the client.
+        logger.exception("Unexpected error during invoice upload")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Upload failed: {str(e)}"
+            detail="Upload failed due to an internal error."
         )
 
 
@@ -281,6 +318,11 @@ def reject_invoice(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
 
 
 @router.post("/{invoice_id}/mark-paid")
@@ -303,5 +345,10 @@ def mark_invoice_paid(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )

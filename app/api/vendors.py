@@ -1,89 +1,107 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
+from uuid import UUID
 
-from app.core.database import get_db
-from app.core.security import decode_access_token
-from app.models.vendor import Vendor
-from app.models.tenant import Tenant
+from app.api.deps import get_current_user, get_db_session
+from app.core.enums import VendorStatus
+from app.schemas.vendor import (
+    VendorCreate,
+    VendorUpdate,
+    VendorStatusUpdate,
+    VendorResponse,
+    VendorListResponse,
+)
+from app.services.vendor_service import VendorService
 
-router = APIRouter(prefix="/vendors", tags=["vendors"])
+router = APIRouter(prefix="/vendors", tags=["Vendors"])
 
-def get_tenant(db: Session, token: str) -> Tenant:
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    tenant_id = payload.get("tenant_id")
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
-    # RLS context will be set by middleware/deps in future; for now we use WHERE clauses
-    return tenant
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
-def create_vendor(
-    legal_name: str,
-    email: Optional[str] = None,
-    bank_account_name: Optional[str] = None,
-    bank_account_number: Optional[str] = None,
-    status_value: str = "active",
-    token: str = Query(..., description="Bearer token"),
-    db: Session = Depends(get_db),
-):
-    tenant = get_tenant(db, token)
-    existing = db.query(Vendor).filter(Vendor.tenant_id == tenant.id, Vendor.legal_name == legal_name).first()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor already exists")
-    v = Vendor(
-        tenant_id=tenant.id,
-        legal_name=legal_name,
-        email=email,
-        bank_account_name=bank_account_name,
-        bank_account_number=bank_account_number,
-        status=status_value,
-    )
-    db.add(v)
-    db.commit()
-    db.refresh(v)
-    return {"id": str(v.id), "legal_name": v.legal_name, "status": v.status}
+def _raise_for(exc: Exception) -> None:
+    if isinstance(exc, PermissionError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-@router.get("/")
+
+@router.get("/", response_model=List[VendorListResponse])
 def list_vendors(
-    status_filter: Optional[str] = None,
-    token: str = Query(...),
-    db: Session = Depends(get_db),
+    status_filter: Optional[VendorStatus] = None,
+    search: Optional[str] = None,
+    limit: int = Query(default=50, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
 ):
-    tenant = get_tenant(db, token)
-    q = db.query(Vendor).filter(Vendor.tenant_id == tenant.id)
-    if status_filter:
-        q = q.filter(Vendor.status == status_filter)
-    rows = q.order_by(Vendor.legal_name.asc()).all()
-    return [{"id": str(r.id), "legal_name": r.legal_name, "email": r.email, "status": r.status} for r in rows]
+    try:
+        vendors, _ = VendorService(db).list_vendors(
+            current_user=current_user,
+            status_filter=status_filter,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        return vendors
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
-@router.get("/{vendor_id}")
-def get_vendor(vendor_id: str, token: str = Query(...), db: Session = Depends(get_db)):
-    tenant = get_tenant(db, token)
-    v = db.query(Vendor).filter(Vendor.tenant_id == tenant.id, Vendor.id == vendor_id).first()
-    if not v:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
-    return {"id": str(v.id), "legal_name": v.legal_name, "email": v.email, "status": v.status}
 
-@router.patch("/{vendor_id}/status")
-def update_vendor_status(vendor_id: str, status_value: str, token: str = Query(...), db: Session = Depends(get_db)):
-    tenant = get_tenant(db, token)
-    v = db.query(Vendor).filter(Vendor.tenant_id == tenant.id, Vendor.id == vendor_id).first()
-    if not v:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
-    v.status = status_value
-    db.commit()
-    return {"id": str(v.id), "status": v.status}
+@router.get("/{vendor_id}", response_model=VendorResponse)
+def get_vendor(
+    vendor_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        return VendorService(db).get_vendor(vendor_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post("/", response_model=VendorResponse, status_code=status.HTTP_201_CREATED)
+def create_vendor(
+    payload: VendorCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        return VendorService(db).create_vendor(payload, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.patch("/{vendor_id}", response_model=VendorResponse)
+def update_vendor(
+    vendor_id: UUID,
+    payload: VendorUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        return VendorService(db).update_vendor(vendor_id, payload, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.patch("/{vendor_id}/status", response_model=VendorResponse)
+def update_vendor_status(
+    vendor_id: UUID,
+    payload: VendorStatusUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        return VendorService(db).set_status(vendor_id, payload.status, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
 
 @router.delete("/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_vendor(vendor_id: str, token: str = Query(...), db: Session = Depends(get_db)):
-    tenant = get_tenant(db, token)
-    v = db.query(Vendor).filter(Vendor.tenant_id == tenant.id, Vendor.id == vendor_id).first()
-    if not v:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor not found")
-    db.delete(v)
-    db.commit()
-    return {}
+def delete_vendor(
+    vendor_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        VendorService(db).delete_vendor(vendor_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)

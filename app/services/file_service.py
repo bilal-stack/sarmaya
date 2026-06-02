@@ -3,7 +3,7 @@ from uuid import UUID
 from typing import Tuple
 
 from app.models.file import File as FileModel
-from app.services.storage import save_file as storage_save_file
+from app.services.storage import save_file as storage_save_file, delete_file as storage_delete_file
 
 
 class FileService:
@@ -53,6 +53,13 @@ class FileService:
         
         return file_record, stored_path, file_hash
     
+    def delete_file(self, file_record: FileModel, stored_path: str) -> None:
+        """Remove a stored file and its DB record. Used to clean up orphans
+        when a later step (OCR, invoice creation) fails after the file was saved."""
+        storage_delete_file(stored_path)
+        self.db.delete(file_record)
+        self.db.flush()
+
     def link_file_to_object(self, file_record: FileModel, object_id: UUID) -> None:
         """Link file to an object (e.g., invoice)"""
         file_record.object_id = object_id

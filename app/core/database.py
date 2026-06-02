@@ -19,6 +19,46 @@ engine = create_engine(
 engine.echo = False
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# RLS tenant context GUC. Read by the policies created in migration 003 via
+# current_setting('app.current_tenant_id', TRUE).
+TENANT_GUC = "app.current_tenant_id"
+
+
+def set_tenant_context(session: Session, tenant_id: str) -> None:
+    """Bind the RLS tenant for the lifetime of this Session.
+
+    The tenant is stored on session.info and re-applied at the start of every
+    transaction by the after_begin listener below. This is required because
+    SQLAlchemy returns the connection to the pool at each transaction boundary:
+    the service layer commits mid-request and then keeps working (refresh,
+    audit insert) in a fresh transaction on a possibly different pooled
+    connection. A one-shot SET would be lost there and the follow-up statements
+    would run with no tenant — invisible (or rejected) under RLS.
+
+    The GUC is set transaction-locally (set_config is_local => true), so it is
+    discarded when the connection returns to the pool and can never leak to
+    another tenant's request that later reuses that connection.
+    """
+    session.info["tenant_id"] = str(tenant_id)
+    # Apply to the already-open transaction (after_begin won't fire for it).
+    _apply_tenant(session, str(tenant_id))
+
+
+def _apply_tenant(executor, tenant_id: str) -> None:
+    executor.execute(
+        text("SELECT set_config(:k, :v, true)"),
+        {"k": TENANT_GUC, "v": tenant_id},
+    )
+
+
+@event.listens_for(Session, "after_begin")
+def _bind_tenant_on_begin(session, transaction, connection):
+    """Re-bind the tenant GUC whenever a new transaction starts on a session
+    that has a tenant set, so the context survives mid-request commits."""
+    tenant_id = session.info.get("tenant_id")
+    if tenant_id:
+        _apply_tenant(connection, tenant_id)
+
 
 # ============================================
 # TENANT CONNECTION FACTORY (Hybrid-Ready)
@@ -56,11 +96,7 @@ class TenantConnectionFactory:
             # Use RLS (MVP approach)
             session = SessionLocal()
             try:
-                # Set PostgreSQL session variable for RLS (parameterized for security)
-                session.execute(
-                    text("SET LOCAL app.current_tenant_id = :tenant_id"),
-                    {"tenant_id": tenant_id}
-                )
+                set_tenant_context(session, tenant_id)
                 return session
             except Exception as e:
                 session.close()

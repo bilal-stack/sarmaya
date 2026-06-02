@@ -22,5 +22,13 @@ def save_file(tenant_id: str, filename: str, content: bytes) -> tuple[str, str]:
     # Write file
     with open(stored_path, "wb") as f:
         f.write(content)
-    
+
     return stored_path, file_hash
+
+
+def delete_file(stored_path: str) -> None:
+    """Delete a stored file. No-op if it does not exist."""
+    try:
+        os.remove(stored_path)
+    except FileNotFoundError:
+        pass

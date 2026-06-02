@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from app.schemas.user import UserOut
 
 
@@ -18,5 +18,4 @@ class TokenWithUser(BaseModel):
     token_type: str
     user: UserOut
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

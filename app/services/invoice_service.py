@@ -5,14 +5,22 @@ from uuid import UUID
 from decimal import Decimal
 
 from app.repositories.invoice_repository import InvoiceRepository
+from app.repositories.vendor_repository import VendorRepository
 from app.models.invoice import Invoice
+from app.models.vendor import Vendor
 from app.models.file import File as FileModel
 from app.schemas.invoice import InvoiceCreate, InvoiceUpdate
-from app.core.enums import InvoiceState
+from app.core.enums import InvoiceState, VendorStatus
 from app.services.workflow import transition_state
 from app.services.policy import evaluate_approval_role
 from app.services.audit import log_audit
-from app.core.roles import has_permission, can_approve_amount, PERM_CREATE_INVOICE
+from app.core.roles import (
+    has_permission,
+    can_approve_amount,
+    PERM_CREATE_INVOICE,
+    PERM_REJECT_INVOICE,
+    PERM_MARK_PAID_INVOICE,
+)
 from app.utils.datetime_helpers import utc_now
 from app.services.file_service import FileService
 from app.services.ocr import extract_invoice_data_ocr
@@ -26,12 +34,139 @@ class InvoiceService:
     def __init__(self, db: Session):
         self.db = db
         self.repository = InvoiceRepository(db)
+        self.vendor_repository = VendorRepository(db)
         self.file_service = FileService(db)
-    
+
     def get_invoice(self, invoice_id: UUID) -> Optional[Invoice]:
         """Get invoice by ID"""
         return self.repository.get_by_id(invoice_id)
-    
+
+    def _resolve_vendor(
+        self,
+        current_user: dict,
+        vendor_id: Optional[UUID] = None,
+        vendor_name: Optional[str] = None,
+        auto_create: bool = False,
+    ) -> Tuple[Optional[UUID], Optional[str], Optional[str]]:
+        """Resolve the vendor master record for an invoice.
+
+        Returns ``(vendor_id, canonical_name, status)``. Resolution order:
+          1. explicit ``vendor_id`` — must exist (raises ValueError otherwise);
+          2. case-insensitive match on ``vendor_name``;
+          3. if ``auto_create``, create a PENDING_VERIFICATION vendor from the
+             name so every invoice links to a vendor master record. The record
+             is unusable (can't be approved/paid against) until a human with
+             vendors.manage verifies and activates it.
+
+        The vendor (when created) is only flushed, not committed, so it shares
+        the invoice's transaction. Callers decide what to do with a BLOCKED
+        status; this method does not reject on its own.
+        """
+        vendor = None
+        if vendor_id:
+            vendor = self.vendor_repository.get_by_id(vendor_id)
+            if not vendor:
+                raise ValueError("Vendor not found")
+        elif vendor_name and vendor_name.strip():
+            vendor = self.vendor_repository.get_by_legal_name(vendor_name)
+
+        if vendor is None and auto_create:
+            name = (vendor_name or "").strip()
+            if name:
+                vendor = self.vendor_repository.create(
+                    Vendor(
+                        tenant_id=current_user["tenant_id"],
+                        legal_name=name,
+                        status=VendorStatus.PENDING_VERIFICATION,
+                        created_by=current_user["id"],
+                    )
+                )
+                log_audit(
+                    db=self.db,
+                    tenant_id=current_user["tenant_id"],
+                    user_id=current_user["id"],
+                    object_type="vendor",
+                    object_id=vendor.id,
+                    action="created",
+                    after_value={"legal_name": vendor.legal_name, "source": "invoice_upload"},
+                )
+
+        if vendor is None:
+            return None, vendor_name, None
+        status = vendor.status.value if hasattr(vendor.status, "value") else vendor.status
+        return vendor.id, vendor.legal_name, status
+
+    def _assert_vendor_active(
+        self,
+        invoice: Invoice,
+        action: str,
+        current_user: dict,
+        audit_action: str,
+    ) -> None:
+        """Governance gate: block a financial action (approve / mark-paid) when
+        the invoice's vendor master record is not ACTIVE.
+
+        A vendor created from an upload starts PENDING_VERIFICATION and must be
+        verified/activated by a human (vendors.manage) before money moves; a
+        BLOCKED vendor is never payable. Draft/submit are deliberately not gated
+        so AP work can proceed while verification happens in parallel.
+
+        Denials are audited (``audit_action``) and committed on their own so the
+        attempt to move money against an unverified vendor leaves a permanent
+        trail even though the action itself is rejected.
+        """
+        if not invoice.vendor_id:
+            self._audit_block(invoice, current_user, audit_action, "no_vendor_link")
+            raise ValueError(
+                f"Cannot {action}: invoice is not linked to a vendor master record"
+            )
+
+        vendor = self.vendor_repository.get_by_id(invoice.vendor_id)
+        if not vendor:
+            self._audit_block(invoice, current_user, audit_action, "vendor_missing")
+            raise ValueError(
+                f"Cannot {action}: linked vendor no longer exists"
+            )
+
+        status = vendor.status.value if hasattr(vendor.status, "value") else vendor.status
+        if status != VendorStatus.ACTIVE.value:
+            self._audit_block(
+                invoice, current_user, audit_action, f"vendor_{status}",
+                vendor_id=vendor.id, vendor_name=vendor.legal_name,
+            )
+            raise PermissionError(
+                f"Cannot {action}: vendor '{vendor.legal_name}' is {status}. "
+                "The vendor must be verified and activated before this invoice "
+                "can be approved or paid."
+            )
+
+    def _audit_block(
+        self,
+        invoice: Invoice,
+        current_user: dict,
+        audit_action: str,
+        reason: str,
+        vendor_id: Optional[UUID] = None,
+        vendor_name: Optional[str] = None,
+    ) -> None:
+        """Persist a governance denial as its own committed audit record."""
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="invoice",
+            object_id=invoice.id,
+            action=audit_action,
+            comment=f"Blocked: {reason}",
+            workflow_type="invoice",
+            after_value={
+                "reason": reason,
+                "vendor_id": str(vendor_id) if vendor_id else None,
+                "vendor_name": vendor_name,
+            },
+        )
+        self.repository.commit()
+
     def list_invoices(
         self,
         status_filter: Optional[InvoiceState] = None,
@@ -64,20 +199,33 @@ class InvoiceService:
         - Create invoice
         - Log audit
         """
-        # Check for duplicate
-        existing = self.repository.get_by_invoice_number(
-            invoice_data.invoice_number,
-            invoice_data.vendor_name
+        # Link to a vendor master record (explicit id wins, else name match,
+        # else auto-create a pending-verification vendor so vendor_id is always
+        # set and dedup can key on it).
+        vendor_id, vendor_name, vendor_status = self._resolve_vendor(
+            current_user,
+            vendor_id=invoice_data.vendor_id,
+            vendor_name=invoice_data.vendor_name,
+            auto_create=True,
         )
-        
+        if vendor_status == VendorStatus.BLOCKED.value:
+            raise ValueError("Cannot create an invoice for a blocked vendor")
+
+        # Check for duplicate — keyed on vendor_id so the same number under a
+        # different name spelling is still caught.
+        existing = self.repository.find_duplicate_by_number_and_vendor_id(
+            invoice_data.invoice_number, vendor_id
+        )
+
         if existing:
             raise ValueError("Invoice with this number already exists for this vendor")
-        
+
         # Create invoice
         invoice = Invoice(
             tenant_id=current_user["tenant_id"],
             invoice_number=invoice_data.invoice_number,
-            vendor_name=invoice_data.vendor_name,
+            vendor_id=vendor_id,
+            vendor_name=vendor_name,
             invoice_date=invoice_data.invoice_date,
             due_date=invoice_data.due_date,
             total_amount=invoice_data.total_amount,
@@ -137,7 +285,7 @@ class InvoiceService:
         }
         
         # Update fields
-        for field, value in invoice_data.dict(exclude_unset=True).items():
+        for field, value in invoice_data.model_dump(exclude_unset=True).items():
             setattr(invoice, field, value)
         
         invoice = self.repository.update(invoice)
@@ -289,7 +437,12 @@ class InvoiceService:
             raise ValueError(
                 f"Cannot approve invoice in '{invoice.current_state}' state"
             )
-        
+
+        # Governance gate: vendor must be verified/active before approval
+        self._assert_vendor_active(
+            invoice, "approve invoice", current_user, "approval_blocked"
+        )
+
         # Check approval permissions
         can_approve, error_msg = can_approve_amount(
             current_user["role"],
@@ -365,7 +518,10 @@ class InvoiceService:
         
         if not invoice:
             raise ValueError("Invoice not found")
-        
+
+        if not has_permission(current_user["role"], PERM_REJECT_INVOICE):
+            raise PermissionError("You do not have permission to reject invoices")
+
         if not reason or not reason.strip():
             raise ValueError("Rejection reason is required")
         
@@ -410,10 +566,18 @@ class InvoiceService:
     def mark_as_paid(self, invoice_id: UUID, current_user: dict) -> Invoice:
         """Mark invoice as paid"""
         invoice = self.repository.get_by_id(invoice_id)
-        
+
         if not invoice:
             raise ValueError("Invoice not found")
-        
+
+        if not has_permission(current_user["role"], PERM_MARK_PAID_INVOICE):
+            raise PermissionError("You do not have permission to mark invoices as paid")
+
+        # Governance gate: vendor must be verified/active before payment
+        self._assert_vendor_active(
+            invoice, "mark invoice as paid", current_user, "payment_blocked"
+        )
+
         success = transition_state(
             db=self.db,
             obj=invoice,
@@ -473,6 +637,14 @@ class InvoiceService:
     def get_pending_approvals(self) -> List[Invoice]:
         """Get pending approval invoices"""
         return self.repository.get_pending_approvals()
+
+    def get_invoices_blocked_on_vendor(self, limit: int = 100) -> List[Invoice]:
+        """Pending-approval invoices stuck because their vendor isn't ACTIVE yet.
+
+        The reviewer worklist for the governance gate: each entry unblocks once
+        a user with vendors.manage verifies/activates the linked vendor.
+        """
+        return self.repository.get_blocked_on_vendor_verification(limit)
     
     def upload_and_extract_invoice(
         self,
@@ -506,13 +678,34 @@ class InvoiceService:
             uploaded_by=current_user["id"]
         )
         self.file_service.commit()
-        
+
+        try:
+            return self._extract_and_create_invoice(
+                file_record=file_record,
+                stored_path=stored_path,
+                file_hash=file_hash,
+                current_user=current_user,
+            )
+        except Exception:
+            # Clean up the orphaned file (disk + DB) before propagating, so a
+            # failed OCR/creation doesn't leave a dangling upload behind.
+            self.file_service.delete_file(file_record, stored_path)
+            self.file_service.commit()
+            raise
+
+    def _extract_and_create_invoice(
+        self,
+        file_record: FileModel,
+        stored_path: str,
+        file_hash: str,
+        current_user: dict,
+    ) -> Dict[str, Any]:
         # Extract data using OCR
         try:
             ocr_result = extract_invoice_data_ocr(stored_path)
         except Exception as e:
             raise RuntimeError(f"OCR extraction failed: {str(e)}")
-        
+
         # Sanitize OCR data for JSON storage
         ocr_result_sanitized = sanitize_for_json(ocr_result)
         
@@ -526,12 +719,22 @@ class InvoiceService:
         confidence = ocr_result.get("confidence", 0)
         currency = ocr_result.get("currency", "PKR")
         
-        # Check for exact duplicate
-        existing = self.repository.find_duplicates_by_number(
-            invoice_number=invoice_number,
-            vendor_name=vendor_name
+        # Resolve the vendor master record, auto-creating a pending-verification
+        # vendor when the name doesn't match an existing one. This guarantees
+        # vendor_id is always set so every duplicate check keys on it (immune to
+        # name/OCR spelling drift) rather than free-text names.
+        vendor_id, vendor_name, vendor_status = self._resolve_vendor(
+            current_user,
+            vendor_name=vendor_name,
+            auto_create=True,
         )
-        
+
+        # Check for exact duplicate, keyed on vendor_id.
+        existing = self.repository.find_duplicate_by_number_and_vendor_id(
+            invoice_number=invoice_number,
+            vendor_id=vendor_id,
+        )
+
         if existing:
             return {
                 "success": False,
@@ -540,16 +743,17 @@ class InvoiceService:
                 "existing_invoice_id": str(existing.id),
                 "ocr_data": ocr_result
             }
-        
-        # Check for similar invoices (fuzzy duplicate detection)
-        similar = self.repository.find_similar_invoices(
-            vendor_name=vendor_name,
+
+        # Check for similar invoices (fuzzy duplicate detection) — a soft
+        # warning surfaced to the human approver, not a hard block.
+        similar = self.repository.find_similar_by_vendor_id(
+            vendor_id=vendor_id,
             invoice_date=invoice_date,
             total_amount=total_amount,
             window_days=7,
-            amount_tolerance=0.05
+            amount_tolerance=0.05,
         )
-        
+
         duplicate_warning = None
         if similar:
             from app.utils.money import money_to_float
@@ -560,11 +764,12 @@ class InvoiceService:
                 "date": str(similar.invoice_date),
                 "message": "Possible duplicate detected (similar amount & date)"
             }
-        
+
         # Create invoice
         invoice = Invoice(
             tenant_id=current_user["tenant_id"],
             invoice_number=invoice_number,
+            vendor_id=vendor_id,
             vendor_name=vendor_name,
             invoice_date=invoice_date,
             total_amount=total_amount,
@@ -616,7 +821,9 @@ class InvoiceService:
             "success": True,
             "invoice_id": str(invoice.id),
             "invoice_number": invoice.invoice_number,
+            "vendor_id": str(vendor_id) if vendor_id else None,
             "vendor_name": vendor_name,
+            "vendor_status": vendor_status,
             "invoice_date": str(invoice_date),
             "total_amount": total_amount,
             "tax_amount": tax_amount,

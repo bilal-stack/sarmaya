@@ -60,12 +60,14 @@ ROLE_PERMISSIONS = {
         PERM_CREATE_INVOICE,
         PERM_VIEW_INVOICE,
         PERM_UPDATE_INVOICE,
+        PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
     ],
     MANAGER: [
         PERM_VIEW_INVOICE,
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
+        PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
     ],
     CFO: [
@@ -109,13 +111,13 @@ ROLES = {
     },
     "ap_clerk": {
         "display_name": "AP Clerk",
-        "description": "Create and manage invoices",
-        "permissions": ["invoices.create", "invoices.view", "invoices.update", "vendors.view"],
+        "description": "Create and manage invoices and vendors",
+        "permissions": ["invoices.create", "invoices.view", "invoices.update", "vendors.manage", "vendors.view"],
     },
     "manager": {
         "display_name": "Manager",
-        "description": "Approve invoices up to 250k",
-        "permissions": ["invoices.view", "invoices.approve", "invoices.reject", "vendors.view"],
+        "description": "Approve invoices up to 250k; manage vendors",
+        "permissions": ["invoices.view", "invoices.approve", "invoices.reject", "vendors.manage", "vendors.view"],
     },
     "cfo": {
         "display_name": "CFO",

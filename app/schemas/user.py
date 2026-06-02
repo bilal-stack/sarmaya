@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 from typing import Optional
 from uuid import UUID
 from app.core.roles import is_valid_role, DEFAULT_ROLE, list_roles
@@ -24,5 +24,4 @@ class UserCreate(UserBase):
 class UserOut(UserBase):
     id: UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

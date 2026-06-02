@@ -1,10 +1,9 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 from typing import Generator
 
-from app.core.database import get_db
+from app.core.database import get_db, set_tenant_context
 from app.core.security import decode_access_token
 from app.models.user import User
 
@@ -33,7 +32,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
-    
+
+    # users is RLS-protected; bind the tenant before reading it, otherwise a
+    # non-BYPASSRLS app role sees zero rows and every request 401s.
+    set_tenant_context(db, str(tenant_id))
+
     # Verify user exists
     user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id).first()
     if not user or not user.is_active:
@@ -59,10 +62,11 @@ def get_db_session(
     This automatically filters all queries by tenant_id
     """
     tenant_id = current_user["tenant_id"]
-    
-    # Set RLS context variable
-    db.execute(text("SET LOCAL app.current_tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
-    
+
+    # get_current_user already bound the tenant on this same (per-request) session;
+    # set it again defensively in case this dependency is used on its own.
+    set_tenant_context(db, str(tenant_id))
+
     try:
         yield db
     finally:

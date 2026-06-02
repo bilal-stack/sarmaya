@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import cast, Optional
 
-from app.core.database import get_db
+from app.core.database import get_db, set_tenant_context
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -29,6 +29,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     tenant_id = payload.get("tenant_id")
     if not user_id or not tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    # users is RLS-protected; bind tenant before reading it.
+    set_tenant_context(db, str(tenant_id))
     user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
@@ -45,6 +47,9 @@ def register(
     tenant_obj = db.query(Tenant).filter(Tenant.slug == tenant).first()
     if not tenant_obj:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant not found")
+
+    # Bind RLS tenant before touching the users table (read + insert below).
+    set_tenant_context(db, str(tenant_obj.id))
 
     # Check existing user for tenant
     existing = db.query(User).filter(User.tenant_id == tenant_obj.id, User.email == user_in.email).first()
@@ -82,6 +87,8 @@ def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("dem
     tenant_obj = db.query(Tenant).filter(Tenant.slug == tenant).first()
     if not tenant_obj:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant not found")
+    # Bind RLS tenant before reading the users table.
+    set_tenant_context(db, str(tenant_obj.id))
     user = db.query(User).filter(User.tenant_id == tenant_obj.id, User.email == data.email).first()
         
     # Cast ORM attribute to str for static type checkers (runtime value is already a string)

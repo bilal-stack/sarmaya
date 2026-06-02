@@ -4,7 +4,8 @@ from typing import Optional, List, Tuple
 from datetime import date, timedelta
 from uuid import UUID
 from app.models.invoice import Invoice
-from app.core.enums import InvoiceState
+from app.models.vendor import Vendor
+from app.core.enums import InvoiceState, VendorStatus
 from app.utils.money import money_to_float
 
 
@@ -17,17 +18,6 @@ class InvoiceRepository:
     def get_by_id(self, invoice_id: UUID) -> Optional[Invoice]:
         """Get invoice by ID"""
         return self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    
-    def get_by_invoice_number(
-        self, 
-        invoice_number: str, 
-        vendor_name: str
-    ) -> Optional[Invoice]:
-        """Get invoice by invoice number and vendor"""
-        return self.db.query(Invoice).filter(
-            Invoice.invoice_number == invoice_number,
-            Invoice.vendor_name == vendor_name
-        ).first()
     
     def list_invoices(
         self,
@@ -61,73 +51,67 @@ class InvoiceRepository:
         
         return invoices, total
     
-    def find_duplicates_by_number(
-        self, 
-        invoice_number: str, 
-        vendor_name: str
+    def find_duplicate_by_number_and_vendor_id(
+        self,
+        invoice_number: str,
+        vendor_id: UUID,
     ) -> Optional[Invoice]:
-        """Find exact duplicate by invoice number and vendor"""
+        """Exact duplicate keyed on the vendor master record rather than the
+        free-text name. Catches the same invoice number re-entered under a
+        different spelling/OCR of the same vendor (e.g. 'Acme Ltd' vs
+        'ACME LIMITED')."""
         return self.db.query(Invoice).filter(
             Invoice.invoice_number == invoice_number,
-            Invoice.vendor_name == vendor_name
+            Invoice.vendor_id == vendor_id,
         ).first()
-    
-    def find_similar_invoices(
+
+    def find_similar_by_vendor_id(
         self,
-        vendor_name: str,
+        vendor_id: UUID,
         invoice_date: date,
         total_amount: float,
         window_days: int = 7,
-        amount_tolerance: float = 0.05
+        amount_tolerance: float = 0.05,
     ) -> Optional[Invoice]:
-        """
-        Find similar invoice (first match for duplicate warning)
-        
-        Args:
-            vendor_name: Vendor name to match
-            invoice_date: Invoice date
-            total_amount: Invoice total amount
-            window_days: Date range ± days
-            amount_tolerance: Amount tolerance (0.05 = ±5%)
-        
-        Returns:
-            First similar invoice or None
-        """
+        """Fuzzy duplicate (near date + near amount) for a linked vendor,
+        matched by vendor_id so name variations don't hide a real duplicate."""
         amount_min = total_amount * (1 - amount_tolerance)
         amount_max = total_amount * (1 + amount_tolerance)
-        
-        # Extract vendor core name
-        vendor_core = self._extract_vendor_core(vendor_name)
-        
+
         return self.db.query(Invoice).filter(
-            # ✅ Fuzzy vendor match
-            Invoice.vendor_name.ilike(f"%{vendor_core}%"),
+            Invoice.vendor_id == vendor_id,
             Invoice.invoice_date.between(
                 invoice_date - timedelta(days=window_days),
-                invoice_date + timedelta(days=window_days)
+                invoice_date + timedelta(days=window_days),
             ),
-            Invoice.total_amount.between(amount_min, amount_max)
+            Invoice.total_amount.between(amount_min, amount_max),
         ).first()
-    
-    def _extract_vendor_core(self, vendor_name: str) -> str:
-        """Extract core vendor name for fuzzy matching"""
-        import re
-        
-        suffixes = ['limited', 'ltd', 'pvt', 'corp', 'inc', 'llc']
-        name = vendor_name.lower().strip()
-        name = re.sub(r'[^\w\s]', '', name)
-        
-        words = name.split()
-        filtered = [w for w in words if w not in suffixes]
-        
-        return filtered[0] if filtered else name
-    
+
     def get_pending_approvals(self, limit: int = 100) -> List[Invoice]:
         """Get all pending approval invoices"""
         return self.db.query(Invoice).filter(
             Invoice.current_state == InvoiceState.PENDING_APPROVAL.value
         ).order_by(Invoice.created_at.desc()).limit(limit).all()
     
+    def get_blocked_on_vendor_verification(self, limit: int = 100) -> List[Invoice]:
+        """Pending-approval invoices the governance gate would reject because
+        their linked vendor is not yet ACTIVE (PENDING_VERIFICATION/BLOCKED/etc).
+
+        This is the reviewer worklist: activate these vendors to unblock the
+        invoices. Tenant scoping is handled by RLS.
+        """
+        return (
+            self.db.query(Invoice)
+            .join(Vendor, Invoice.vendor_id == Vendor.id)
+            .filter(
+                Invoice.current_state == InvoiceState.PENDING_APPROVAL.value,
+                Vendor.status != VendorStatus.ACTIVE,
+            )
+            .order_by(Invoice.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
     def get_stats_by_status(self) -> List[Tuple[str, int, float]]:
         """
         Get invoice counts and totals grouped by status

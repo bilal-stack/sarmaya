@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
 
 from app.models.conversation import Conversation, ConversationMessage
 from app.schemas.conversation import ConversationCreate, ConversationMessageCreate
+from app.utils.datetime_helpers import utc_now
 
 
 class ConversationService:
@@ -21,7 +21,7 @@ class ConversationService:
         conversation = Conversation(
             user_id=user_id,
             tenant_id=tenant_id,
-            title=title or f"Chat {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+            title=title or f"Chat {utc_now().strftime('%Y-%m-%d %H:%M')}"
         )
         self.db.add(conversation)
         self.db.commit()
@@ -68,7 +68,7 @@ class ConversationService:
         # Update conversation timestamp
         conversation = self.get_conversation(conversation_id)
         if conversation:
-            conversation.updated_at = datetime.utcnow()
+            conversation.updated_at = utc_now()
         
         self.db.commit()
         self.db.refresh(message)

@@ -1,0 +1,642 @@
+Sarmaya OS Build Book
+Developer-Ready Handbook for Core Platform + All Variants
+Owner: Andrew
+Version: 1.0
+Date: 2025-12-16
+
+How I Expect the Developer to Use This Build Book
+I wrote this as the single source of truth to build Sarmaya OS across all variants. I do not want ad-hoc interpretation. If something is ambiguous, the developer logs it in the Decision Register and proposes the best default implementation.
+Non-Negotiables
+Configuration-first: policies, thresholds, approval matrices, and module toggles must be editable without code deploys.
+Workflow-first: every business process is a state machine with explicit states, transitions, and audit evidence.
+Strict auditability: immutable audit trail on every action, policy evaluation snapshot, and evidence pack integrity hashing.
+AI is gated: structured JSON only, schema validation always, human-in-the-loop when risk or confidence thresholds require it.
+Enterprise ready: deploy-per-client is the primary deployment model, but the code must remain multi-tenant compatible.
+Definition of Done for Any Variant
+All workflows implemented with state machine definitions, transition guards, SLAs, and escalation rules.
+All policy checks implemented with a versioned rules schema and deterministic outputs.
+Decision Inbox supports every work item type in that variant.
+Reports and dashboards for that variant shipped and validated against seed dataset.
+Integration connectors implemented with retries, idempotency, dead-letter queues, and reconciliation records.
+Test pack: acceptance tests (Given/When/Then), regression checklist, and performance smoke tests.
+Admin Console: configuration screens, job monitor, error monitor, and audit viewer.
+Product Positioning I Am Building Toward
+Sarmaya OS is a governance-first Ops OS that connects Finance, Procurement, HR, Supply Chain, and Operations with one decision surface. I am not building a generic ERP clone. I am building an operating layer that makes policies executable, evidence traceable, and decisions explainable.
+Core Differentiators
+Decision Inbox: one inbox across all departments for approvals, exceptions, missing evidence, mismatches, reconciliation breaks, and AI reviews.
+Live Audit Mode: any transaction opens as a full timeline with policy reasons, evidence, and who did what.
+Restricted Autopilot: optional, constrained to low-risk paths, always reversible, always logged, and always explainable.
+Cross-department handoffs as primitives: procurement to receiving to AP to treasury is a single chain, not separate tools.
+Competitive Feature Map and Where We Win
+Tipalti / Payhawk / Ramp class tools: strong payments UX and vendor onboarding, but weak cross-department process chaining and control evidence packs. We win by making policy and audit the product, not an afterthought.
+Coupa / Ariba class tools: strong sourcing and cataloging, but heavy and slow to tailor. We win with configuration-first policies, faster integrations, and a unified Decision Inbox across all variants.
+Esker / Yooz / AvidXchange class tools: strong invoice capture and matching, but limited governance transparency. We win with Live Audit Mode, explainability traces, and deterministic policy snapshots.
+Sage / Oracle / Dynamics class ERPs: broad ERP coverage, but approvals and exception handling are often clunky. We win by layering an operating system on top that makes decisions, exceptions, and evidence fast to resolve.
+ServiceNow / Jira ITSM: strong ticketing, but not finance-grade governance. We win by applying the same audit + policy discipline to IT, ops, and access workflows.
+Smart Features That Make Us Stand Out
+Policy Simulator (what-if): simulate rule changes against historical data before turning them on.
+Evidence Pack Generator: one-click audit-ready bundle with hashes, logs, and policy snapshots.
+Exception Autoresolution Suggestions: AI proposes fixes, but cannot finalize high-risk actions without approval.
+Reconciliation Ledger: every integration write has a matching read-back and aging, so breaks are visible and fixable.
+Change Watchlists: vendor bank changes, master data edits, and policy overrides trigger real-time alerts to a watchlist role.
+Decision Inbox Everywhere: optional Teams/Slack cards, but the system-of-record remains the inbox with full context.
+Tenant Launch Kit: seed policies, chart-of-accounts mappings, and report templates so onboarding is fast.
+UI/UX Inspiration List to Copy the Best Patterns
+SAP Fiori: My Inbox worklist, consistent detail panel, fast approve/reject actions, attachments in context.
+Workday: role-based home pages, analytics tiles, strong audit posture and process history.
+Microsoft Dynamics 365 Finance: AP, vendor invoice, and reconciliation patterns.
+Coupa and Ariba: sourcing and procurement flows, tolerance rules, exception handling.
+Modern spend tools (Ramp, Payhawk, Airbase): clean card UX, instant feedback, rule previews.
+AP automation tools (Tipalti, Yooz, AvidXchange): invoice capture, matching, exception resolution workbenches.
+UI/UX Requirements I Care About
+Three-pane workflow: left navigation, center list/inbox, right detail panel. Never force a full-page context switch for simple approvals.
+Evidence-first viewing: every approval screen shows the required docs, extracted fields, and policy results in one view.
+Live audit timeline: chronological feed of states, actions, policy decisions, and attachments with fast filtering.
+Policy reasons panel: show the exact rules that triggered approvals, exceptions, and autopilot eligibility.
+Inline diffs: vendor master edits, bank detail changes, and policy changes must show before/after diffs.
+Fast actions: approve/reject/request-info with reason templates. Keyboard shortcuts for power users.
+Escalation visibility: SLA timers and escalation path visible on every work item.
+Export and share: one-click PDF/CSV exports with watermarking and audit logs.
+Mobile approvals: responsive inbox and approval actions for executives.
+Deployment Models
+Primary: Deploy-per-client (Enterprise VPC or On-Prem)
+Each client has isolated infrastructure and database.
+Easier enterprise security posture, compliance, and data residency.
+Release management via per-client controlled upgrades.
+Compatibility: Multi-tenant SaaS
+Tenant isolation via tenant_id and strict scoping in every table and query.
+Feature flags and policy configs stored per tenant.
+Optional: separate schema per tenant if needed later.
+Core Platform Architecture
+Services and Modules
+Identity and Access: users, roles, scopes, SSO, MFA support.
+Process Engine: state machines, queues, SLAs, escalation, delegation.
+Policy and Controls Engine: rules evaluation, SoD checks, thresholds, evidence requirements.
+Decision Inbox: unified task surface and queues.
+Document and Evidence Service: file store, hashing, OCR optional, extraction review.
+Integration Hub: connectors, webhooks, retries, idempotency, reconciliation ledger.
+AI Orchestrator: model router, schema validator, HITL queues, prompt/version control, explainability traces.
+Reporting and Metrics: operational dashboards, compliance dashboards, export engine.
+Notification Service: email, in-app, optional WhatsApp, reminders and escalations.
+Admin Console: configuration, monitors, audit viewer, policy simulator.
+Suggested Technical Stack Defaults (Editable)
+These are best-in-class defaults. The developer can swap components if a client environment forces a different choice, but the product principles must remain: workflow-first, policy-first, audit-first.
+Backend: Python (FastAPI) with Pydantic schemas for every API and workflow payload. Prefer a modular monolith first; split into services only when needed.
+Workflow engine: Temporal as default (strong retries, idempotency, long-running workflows). Option: Camunda 8 if a client requires BPMN modeling.
+Policy engine: Open Policy Agent (OPA) with versioned Rego policies. Store every decision snapshot for audit reproducibility.
+Event bus: NATS JetStream for internal events (fast, simple). Option: Kafka for very high throughput deployments.
+Database: Postgres as system-of-record. Add pg_partman + partitioning for audit tables. Optional: read replica for heavy reporting.
+Search: OpenSearch for audit/event search and document metadata search. Optional: Postgres FTS for smaller deployments.
+Object store: S3-compatible storage (AWS S3, MinIO). All files hashed; evidence packs are immutable.
+Identity & access: OIDC/SAML with Keycloak by default. Support Microsoft Entra ID and Google Workspace SSO. Enforce RBAC + SoD in app logic.
+Secrets: AWS Secrets Manager or HashiCorp Vault (never in DB).
+OCR / document parsing: default to Google Document AI or Azure Document Intelligence (Form Recognizer). Fallback: Tesseract for simple scans.
+Vector store (Copilot): Qdrant (self-host) or pgvector for smaller clients. Keep embeddings and retrieval scoped per tenant.
+Reporting: Metabase or Apache Superset for v1 dashboards. Support Power BI via a reporting mart or direct connectors.
+Infra: Docker + Terraform. Run on AWS ECS/Fargate for speed; graduate to Kubernetes (EKS) for larger clients. Use IaC for every environment.
+Observability: OpenTelemetry, Prometheus/Grafana, Loki, Sentry. Alert on workflow stuck states, integration failures, and policy override spikes.
+CI/CD: GitHub Actions with environment promotion gates. Database migrations are versioned and reversible.
+Core Data Boundaries
+Transactional data: normalized, source of truth for workflow and finance objects.
+Evidence store: immutable files plus extraction metadata, linked to transactions.
+Audit log: append-only events table, optionally streamed to external SIEM.
+Reporting mart: read-optimized tables or warehouse sync for dashboards.
+Security, Compliance, and Audit
+Audit Trail Requirements
+Every user action emits an AuditEvent with actor, action, entity, before and after diff, timestamp, correlation_id.
+Every policy evaluation is stored with policy_version, inputs snapshot, output decision, and reasons.
+Every approval includes rationale text, outcome, and attached evidence if required.
+Every document stored with content hash. Evidence pack includes hashes of all attachments referenced.
+Access Controls
+RBAC with scopes: tenant, business unit, location, cost center, project.
+SoD enforcement: maker-checker and restricted combinations of roles.
+Field-level masking for sensitive fields where needed (bank accounts, national IDs).
+Auditor role: read-only access plus audit export.
+Operational Security
+Secrets management: environment injected, never stored in DB.
+Encryption at rest for DB and object store; TLS in transit.
+Backups: daily full, hourly incrementals where feasible. RPO and RTO documented per client.
+Immutable audit: guardrails to prevent hard deletes; soft delete for business objects only.
+Process Engine Specification
+State Machines
+Every workflow is defined as a state machine with explicit states, transitions, guards, and side effects. I want these definitions stored as versioned JSON per workflow, so I can audit and evolve processes per client without code rewrites.
+State Machine JSON Template
+{
+  "workflow_key": "finance.invoice.matching",
+  "version": "1.0.0",
+  "states": [
+    {"key": "draft"},
+    {"key": "submitted"},
+    {"key": "policy_check"},
+    {"key": "match_attempt"},
+    {"key": "exception_queue"},
+    {"key": "approval_pending"},
+    {"key": "approved"},
+    {"key": "rejected"},
+    {"key": "posted"},
+    {"key": "closed"}
+  ],
+  "transitions": [
+    {
+      "from": "draft",
+      "to": "submitted",
+      "event": "submit",
+      "guards": ["has_required_fields", "has_min_evidence"],
+      "effects": ["create_work_item", "emit_audit_event"]
+    }
+  ],
+  "sla": {
+    "approval_pending": {"hours": 48, "escalate_to": "approvals.manager_queue"}
+  }
+}
+Work Item Types
+ApprovalTask: approve or reject with rationale.
+ExceptionTask: resolve mismatch, missing evidence, or policy violation.
+ReviewTask: HITL review for AI extraction or AI-suggested decisions.
+ReconciliationTask: resolve bank or ledger breaks.
+AdminTask: configuration change approvals, policy change approvals.
+SLA, Escalation, Delegation
+SLA timers start when a task enters a state. Escalation creates a new task or reassigns based on configured rules.
+Delegation supports temporary assignment of approvals and tasks with start and end dates.
+Escalations must preserve original approver chain for audit.
+Policy and Controls Engine
+Rule Categories
+Approval thresholds by amount, category, vendor risk, and department.
+Tolerance thresholds for 2-way and 3-way matching (price, quantity, amount).
+Vendor restrictions: blacklist, watchlist, required due diligence.
+SoD: maker-checker, conflict combinations, bank change approvals.
+Mandatory evidence rules: specific docs required per workflow stage.
+Exception routing: where mismatches go, who resolves, and escalation paths.
+Policy Rule Schema Template
+{
+  "policy_key": "finance.approval.thresholds",
+  "version": "2025-12-16",
+  "rules": [
+    {
+      "if": {"amount_gte": 5000, "currency": "USD"},
+      "then": {"route_to": "approvals.finance_manager", "min_approvals": 1}
+    },
+    {
+      "if": {"vendor_risk": "high"},
+      "then": {"route_to": "approvals.controller_queue", "min_approvals": 2}
+    }
+  ],
+  "outputs": {
+    "decision": "approve_route",
+    "reasons": ["..."],
+    "required_evidence": ["..."]
+  }
+}
+SoD Enforcement
+Requester cannot approve own request above a configurable threshold.
+Same person cannot create vendor and approve vendor activation unless explicitly allowed.
+Same person cannot change vendor bank details and approve the first payment after change.
+Policy Simulator
+UI in Admin Console to simulate a policy change against historical sample data.
+Outputs include predicted changes in approval volume, exception volume, SLA risk, and autopilot eligibility.
+Decision Inbox
+Core Views
+My Tasks: approvals, exceptions, reviews, reconciliations assigned to me.
+Team Queue: unassigned items for my team or role queue.
+Exceptions: all mismatches and missing evidence tasks.
+High Risk: risk score above threshold or vendor risk high.
+Overdue: SLA breached items.
+Reconciliation Breaks: unmatched transactions and breaks.
+Detail Panel Must Show
+Summary: who, what, amount, entity, department, vendor.
+Status and next step, SLA countdown, priority.
+Policy results: what policies evaluated, pass/fail, reasons.
+Evidence pack: attachments, extracted fields, confidence, required evidence checklist.
+Timeline: audit events and state transitions.
+Actions: approve, reject, request info, route, hold, escalate.
+AI Orchestration and Copilot
+AI Principles
+No free-form outputs in production paths. Everything is strict JSON validated against schemas.
+AI never finalizes high-risk decisions without human confirmation.
+AI must always attach an explainability trace: what signals were used and why it suggested an outcome.
+Prompt and model versions must be stored with every AI output for reproducibility.
+AI Router
+Rules-based routing first: cheap models for extraction and classification, stronger models for reasoning, optional frontier model for complex unstructured text.
+Fallback logic when AI fails schema validation or confidence is low.
+A/B evaluation harness for prompts and models.
+Copilot Capabilities
+Explain exceptions: summarize mismatch and propose next steps.
+Suggest coding: category, GL, cost center, project based on history and policy constraints.
+Draft messages: vendor missing docs email and internal clarification requests (editable, not auto-sent).
+Approval brief: auto-generate an approver summary that highlights key facts, risks, and policy results.
+Policy Q&A: answer user questions about policies and SOPs using approved policy text only.
+HITL Triggers
+Amount above threshold.
+Vendor risk high or watchlisted.
+Extraction confidence below threshold.
+Policy conflict detected or missing mandatory evidence.
+Anomaly detection triggers: duplicates, outliers, unusual vendor bank changes, unusual timing.
+Restricted Autopilot
+Autopilot is opt-in per client and per workflow.
+Autopilot applies only to low-risk items where all policy checks pass and evidence completeness is 100 percent.
+Every autopilot action produces an audit event, a policy snapshot, and a reversible action record.
+Autopilot guardrails: max daily count, max amount, and random sampling for human review.
+Integration Hub
+Connector Standards
+Idempotency keys on all write operations.
+Retry with exponential backoff for transient failures.
+Dead-letter queue for failed jobs with reprocess tooling.
+Reconciliation records for each integration write and response.
+Mapping layer with versioned mapping profiles per client.
+Common Integrations
+ERP or legacy ERP: vendors, chart of accounts, POs, invoices, payments, journals.
+Bank: statement import and payment execution (file or API).
+Email: invoice ingestion and notifications.
+WhatsApp or SMS optional: reminders and vendor comms.
+E-invoicing where required by jurisdiction.
+Payroll provider for HR OS if external.
+Realtime and Collaboration
+Microsoft Teams: approval cards, comment threads, and deep-links back to the evidence timeline.
+Slack: approval cards and exception alerts with secure deep-links back to Sarmaya.
+Webhooks (outbound): event subscriptions per client for invoice.approved, payment.failed, vendor.bank_changed, etc.
+Webhooks (inbound): partner systems can push PO created, GRN received, payment status updates, and document uploads.
+SFTP drop zones: nightly ERP extracts, bank files, and statement files for clients without stable APIs.
+CRM (RevOps OS): Salesforce, HubSpot, Zoho for lead-to-cash and contract approvals.
+Ticketing/ITSM (ITSM OS): ServiceNow, Jira Service Management for change approvals and service workflows.
+E-signature (Contracts): DocuSign/Adobe Sign for contract signing with evidence capture.
+BI export: Power BI/Looker/Excel via governed export APIs and scheduled snapshots.
+Reporting, Dashboards, and Matrices
+I want reporting to be role-based and decision-focused. Every dashboard must lead to a drill-down into the Decision Inbox and the live audit timeline.
+Global Dashboards
+Executive Control Room: what is stuck, why it is stuck, and cash impact.
+Approval Bottlenecks: cycle time by step, by role, by department.
+Exceptions Heatmap: root causes by vendor, category, department.
+Policy Overrides: who overrides, frequency, amounts, reasons.
+Audit Evidence Completeness: missing docs, late approvals, incomplete packs.
+Reconciliation Health: breaks by bank/entity/root cause and aging.
+Autopilot Health: usage, reversals, sampled reviews, drift alerts.
+Global Matrices
+Approval Matrix: role vs amount thresholds vs category.
+SoD Matrix: role combinations allowed and blocked.
+Vendor Risk Matrix: risk tier vs required due diligence vs payment restrictions.
+Tolerance Matrix: match tolerance by category/vendor/entity.
+Evidence Matrix: workflow stage vs required documents.
+Standard Report Catalog (Must Ship as Templates)
+CFO / Finance Director
+Cash position and 13-week cash forecast (from approved payables + expected receipts).
+AP aging with exception funnel (how much is blocked and why).
+Spend analytics by vendor/category/cost center with policy override overlays.
+Working capital dashboard: DPO/DSO/inventory days (if connected).
+Close calendar: checklist progress, bottlenecks, and late journal drivers.
+AP / Treasury Team
+Invoice throughput: capture to post, match rate, exception rate, and rework drivers.
+Payment run status: proposed, approved, executed, failed, reissued, and reasons.
+Duplicate / anomaly dashboard: duplicates caught, prevented losses, and watchlist hits.
+Bank reconciliation breaks: aging, root cause, and resolution SLA.
+Procurement Leadership
+RFQ cycle time, award justification, single-source exceptions, and savings vs baseline.
+Supplier scorecards: on-time delivery, quality issues, dispute rate, and document completeness.
+Contract compliance: off-contract spend, expiry risk, renewal pipeline.
+HR Leadership
+Payroll variance: month-over-month deltas by BU and cost center with explanations.
+Headcount and attrition trends (if HR data integrated).
+Reimbursements: volumes, exception rates, policy override hotspots.
+COO / Supply Chain
+Inventory turns, stockout risk, and receiving delays (if inventory connected).
+Procurement-to-pay cycle time end-to-end with handoff delays.
+Audit / Compliance
+Evidence completeness score by workflow and department.
+Policy overrides report with reasons, approvers, and amounts.
+SoD violations blocked and attempted actions (security posture).
+One-click audit pack export per period and per control.
+UI/UX System
+Navigation and Layout
+Left navigation: modules and admin.
+Center: lists, inbox, dashboards.
+Right: persistent detail panel with actions, evidence, and timeline.
+Global top bar: tenant, BU, search, notifications, profile.
+Design Rules
+Action-first screens, minimal clutter.
+Status, next step, SLA, and risk label always visible.
+Inline policy preview: show the exact policy result that triggered routing.
+Evidence checklist always visible for tasks that require docs.
+No dead ends: every report and list drills into a work item detail.
+Core Database Entities
+Entity List
+Entity
+Type
+Key Fields
+Notes
+Tenant
+Master
+tenant_id, name, settings
+Per-client isolation in deploy-per-client mode.
+OrgUnit
+Master
+org_unit_id, tenant_id, type, parent_id
+Business unit, location, department hierarchy.
+User
+Identity
+user_id, tenant_id, email, status
+Linked to roles and scopes.
+Role
+Identity
+role_id, name, permissions
+RBAC plus scopes.
+Vendor
+Master
+vendor_id, risk_tier, status
+Trust signals and due diligence.
+WorkItem
+Workflow
+work_item_id, type, status, owner, sla_due
+Backbone of Decision Inbox.
+PolicyEval
+Controls
+policy_eval_id, policy_key, version, inputs, output
+Store reasons and snapshot.
+AuditEvent
+Audit
+event_id, actor, action, entity, before, after
+Append-only.
+EvidencePack
+Evidence
+evidence_id, hashes, attachments, extraction
+Immutable references.
+
+Variant Packs
+Each variant below is a pack on top of the Core Platform. Each pack includes scope, workflows, controls, AI assists, UI screens, reports, integrations, and test pack.
+Variant A: Finance OS
+A1 Procure-to-Pay
+Vendor onboarding: request, due diligence, approvals, activation.
+Requisition to PO: request, approvals, PO issuance.
+Receiving: GRN and service confirmation.
+Invoice capture: PO and non-PO invoices with evidence and extraction review.
+2-way and 3-way matching with tolerance matrices.
+Exception management: price variance, quantity variance, missing GRN, duplicate invoice, vendor mismatch.
+Payment proposal: approvals, execution, remittance, payment failures and retries.
+Close-out: audit pack generation per transaction.
+Controls
+Duplicate invoice detection using invoice number, vendor, date, amount similarity, and attachment hash.
+Vendor bank change verification with dual approval and cooling period policy.
+Mandatory evidence per invoice type and vendor risk tier.
+Tolerance thresholds by category and vendor.
+SoD enforcement in AP and Treasury actions.
+AI Assists
+Auto-summarize mismatch cause and propose resolution path.
+Suggest GL, cost center, project coding within policy boundaries.
+Generate approver brief highlighting risks and policy results.
+Draft vendor doc request messages.
+Reports
+AP Aging and DPO.
+Match success rate and top exception causes.
+Payment forecast 7, 30, 90 days.
+Vendor performance: cycle time, exception rate, disputes, document quality.
+Controls dashboard: overrides, SoD violations blocked, missing evidence.
+Integrations
+ERP posting: AP invoices, payments, journals.
+Bank execution: payment file or API plus status callbacks.
+Statement import for reconciliation.
+Email invoice ingestion.
+OCR and document parsing: invoice PDFs and scanned receipts (Document AI) with highlighted extraction evidence.
+Teams/Slack notifications: approval requests and exception alerts with deep-links to the Decision Inbox.
+WhatsApp optional: payment reminders, vendor KYC doc requests, approval nudges (client-controlled templates).
+E-invoicing (jurisdictional): generate compliant e-invoice outputs (UBL/Peppol where applicable) and store as evidence.
+Outgoing invoice generation (if AR is enabled): template-based PDF generation, numbering rules, tax rules, and email delivery with read receipts.
+Email send/receive: shared mailbox ingestion (IMAP/Graph) and outbound notifications with correlation IDs.
+A2 Treasury and Cash
+Daily cash position: import balances, forecast cash outflows from approved payables.
+Bank reconciliation: statement import, auto-match, breaks queue, aging and root causes.
+Payment failure handling: retries, rerouting, and vendor comms templates.
+A3 Record-to-Report
+Journal request and approvals with evidence requirements.
+Accruals, reversals, and close checklist tracking.
+Close dashboard with tasks, SLAs, and bottlenecks.
+Variant B: Procurement OS
+B1 Sourcing and RFQ
+RFQ creation, vendor invites, bid collection, bid evaluation, award, contract creation.
+Renewals and expiry alerts.
+Bid scoring matrix with weights: price, lead time, quality, compliance, risk.
+Controls
+Minimum bid count above threshold, unless exception approved.
+Conflict of interest declaration and audit record.
+Single-source justification workflow with mandatory evidence.
+AI Assists
+Bid comparison summaries and outlier flags.
+Draft negotiation points and award justification.
+Supplier risk summary based on history and evidence.
+Reports
+Savings vs baseline, category spend, maverick spend.
+Supplier scorecards and SLA adherence.
+Cycle time from RFQ to award.
+B2 Purchasing and Vendor Management
+Requisition to PO with approval matrix.
+Vendor performance management and disputes.
+Contract compliance monitoring.
+Variant C: HR OS
+C1 Hiring and Onboarding
+Headcount request, approvals, hiring pipeline checkpoints, offer approvals.
+Onboarding task engine: accounts, devices, access, documentation, training.
+Cross-department handoff tasks to IT and Finance with a single audit chain.
+Controls
+Budget and headcount policy checks against role and department.
+Background verification evidence pack requirements for sensitive roles.
+SoD for HR actions and payroll approvals.
+AI Assists
+Onboarding checklist generator based on role and location.
+Policy Q&A and SOP explanations for managers.
+Draft internal requests to IT and Finance for access provisioning.
+Reports
+Time to hire, onboarding SLA completion.
+Headcount plan vs actual, hiring pipeline health.
+Payroll variance and exception trends.
+C2 Payroll and Cost Allocation
+Payroll change requests, approvals, payroll run evidence capture, posting to finance.
+Expense reimbursements with policy rules and evidence requirements.
+Variant D: Supply Chain OS
+D1 Inventory and Receiving
+Receiving, GRN, quality checks, putaway and stock updates.
+Inventory adjustments approval with thresholds and evidence.
+Returns management with reason codes and vendor accountability.
+Controls
+Adjustment thresholds with dual approval above limit.
+SoD separation between receiver and approver.
+Damage and shortage evidence requirements with photos and QC notes.
+AI Assists
+Exception explanations for shortages, damages, delays.
+Suggest likely root causes and required follow-up tasks.
+Reports
+Stock accuracy and adjustment rate.
+Supplier delivery performance and lead time adherence.
+GRN to invoice latency and impact on AP.
+Variant E: Operations OS
+E1 Operational Requests and Incidents
+Request intake, triage, approvals, execution, closure.
+SLA-based escalation and assignment rules.
+Post-incident review evidence pack.
+E2 Policy Change Management
+Policy change request, review, approval, versioning, and rollout.
+Policy simulator run required for high-impact policies.
+Reports
+Backlog health, SLA adherence, recurring issues.
+Policy changes log and impact summaries.
+Variant F: RevOps OS
+F1 Lead-to-Quote and Pricing Governance
+Lead intake, qualification, and handoff tracking (from CRM or manual).
+Quote creation with SKU catalog, pricing rules, discount approvals, and versioning.
+Deal desk workflow: approvals for discount thresholds, non-standard terms, and payment schedules.
+F2 Contract and Order Approvals
+Contract request, template selection, clause library, and redline workflow.
+E-signature integration with evidence capture and immutable signed PDF storage.
+Obligation extraction: key dates, renewal terms, SLAs, penalties, and billing triggers.
+F3 Order-to-Cash and Collections
+Outgoing invoice generation: numbering rules, tax rules, templates, and delivery via email/portal.
+Accounts receivable aging, reminders, disputes workflow, and credit holds.
+Payments received: gateway/bank feeds, matching, and reconciliation to invoices.
+Controls
+Discount SoD: seller cannot approve their own discount above threshold.
+Credit policy gates: new customers require credit approval and KYC checks.
+Contract term exceptions require legal/finance approval with evidence notes.
+AI Assists
+Deal risk brief: highlights discount leakage, payment risk, and contract deviations with a Why panel.
+Contract summarization into structured fields (dates, obligations) with source highlights.
+Collections next-best-action suggestions based on past recovery patterns.
+Reports
+Pipeline conversion, quote cycle time, discount leakage, and approval bottlenecks.
+AR aging, DSO, dispute rate, and collection effectiveness.
+Renewal calendar and churn risk signals (if CS data connected).
+Integrations
+CRM: Salesforce/HubSpot/Zoho for leads, deals, accounts, and products.
+E-signature: DocuSign/Adobe Sign.
+Email and comms: Outlook/Gmail plus Teams/Slack notifications.
+Payments: Stripe/Wise/Payoneer or bank statement feeds, depending on client.
+Variant G: ITSM OS
+G1 Service Desk and Incident Management
+Ticket intake (portal, email, Teams/Slack), triage, assignment, SLAs, and closure.
+Change requests with approvals, risk classification, and implementation evidence packs.
+Major incident mode: war-room log, timeline, decisions, and post-incident review.
+G2 Access and Asset Governance
+Access request workflows (systems, roles, privileges) with SoD-aware approvals.
+Asset lifecycle: issuance, return, disposal, and compliance evidence.
+Controls
+SoD-aware access approvals (e.g., finance approver cannot request their own payment admin access).
+Change windows and mandatory peer review for high-risk changes.
+AI Assists
+Triage suggestions: category, priority, and routing with explainability.
+Runbook recommendations and similar-incident clustering.
+Draft post-incident review summary and action items.
+Reports
+SLA adherence, MTTR, recurring incident themes, and change failure rate.
+Access request volume and approval cycle times.
+Integrations
+ServiceNow or Jira Service Management where present; else native ticketing in Sarmaya.
+PagerDuty/Opsgenie optional for on-call routing; Teams/Slack for notifications.
+Variant H: GRC and Audit OS
+H1 Controls Library and Policy Registry
+Central registry of policies, controls, owners, frequencies, and required evidence.
+Control-to-workflow linkage: every workflow step can map to specific controls.
+H2 Risk Register and Issue Management
+Risk scoring (likelihood, impact), mitigations, owners, due dates, and status tracking.
+Findings workflow: create, assign, remediate, retest, and close with full evidence.
+H3 Audit Workpapers and Evidence Packs
+Sampling plans, test steps, evidence requests, and audit trail exports.
+One-click evidence pack for any control period: PDFs + CSV logs + hashes.
+AI Assists
+Explain control failures by linking findings back to audit events and missing evidence.
+Draft test procedures and sampling recommendations (always human-reviewed).
+Reports
+Control effectiveness, overdue remediation, repeat findings, and policy override hotspots.
+Audit readiness score: evidence completeness and timeliness by department.
+Integrations
+Ingests audit events from every Sarmaya module via the shared AuditEvent stream.
+Exports to external GRC tools if a client already uses them (optional).
+Variant I: Data Backbone OS
+I1 Canonical Model and Master Data
+Canonical entities: Vendor, Employee, Item, Contract, Cost Center, Project, Location.
+MDM workflows: create, approve, merge duplicates, and change management with evidence.
+I2 Integration Orchestration and Data Quality
+Connector catalog, mapping profiles, transformation rules, and sync schedules.
+Data quality rules: completeness, duplicates, reference integrity, and drift detection.
+I3 Reporting Mart and Metrics Store
+Read-optimized reporting mart with semantic metrics (cycle times, exceptions, cash impact).
+Role-based dashboards and governed exports with watermarking and audit logs.
+AI Assists
+Mapping suggestions: propose field mappings and transformations with preview and validation.
+Data quality copilot: explains why records fail validation and suggests fixes.
+Reports
+Sync health, data freshness, error rates, and reconciliation breaks by connector.
+MDM changes and approvals, duplicate rates, and policy override trends.
+Cross-Department Orchestration
+Handoff Patterns I Require
+Procurement to Finance: PR, PO, GRN, Invoice, Payment as one chain.
+HR to Finance: payroll changes and postings, reimbursements, cost allocations.
+Supply Chain to Finance: receiving and inventory adjustments that affect matching and accruals.
+Ops to all: incident tasks can spawn approval tasks and evidence requests.
+Universal Correlation IDs
+Every transaction chain carries a correlation_id that links every record across modules.
+Search must support correlation_id to reconstruct entire story instantly.
+Admin Console
+Configuration Screens
+Approval matrix builder and versioning.
+Policy rules editor with safe validation and rollout controls.
+Tolerance matrix editor.
+SoD matrix editor.
+Evidence requirements editor.
+Autopilot toggles and limits per workflow.
+Integration credentials management (secrets stored externally).
+Operational Screens
+Job monitor: queues, retries, dead-letter items, reprocess action with audit log.
+Error monitor: grouped errors, last seen, impacted entities, runbook links.
+Audit viewer: filter by actor, entity, action, date, correlation_id.
+Policy simulator UI: run, compare results, export diffs.
+Testing and Quality
+Test Layers
+Unit tests: policy evaluation rules, state machine guards, data validations.
+Integration tests: ERP, bank, email ingestion, statement import with sandbox.
+End-to-end tests: golden flows for each variant.
+Performance tests: inbox queries, reports, audit timeline rendering, export loads.
+Security tests: RBAC scoping, SoD enforcement, audit immutability checks.
+Golden Flows List (Minimum)
+Finance: PO to GRN to invoice to match to payment to reconciliation.
+Finance: non-PO invoice with approval, posting, payment, remittance.
+Procurement: RFQ to award to contract to PO.
+HR: headcount request to hire to onboarding tasks with cross-department handoffs.
+Supply Chain: receiving with QC, then invoice mismatch exception resolution.
+Ops: incident request with approval, execution, closure, and audit pack.
+Seed Data Requirements
+One demo tenant with 3 business units, 5 cost centers, 2 locations, 2 currencies.
+30 vendors: mix of risk tiers and categories.
+200 POs, 300 GRNs, 500 invoices including duplicates and mismatches.
+50 payment runs including failures and retries.
+Inventory movements including adjustments and returns.
+HR headcount, hiring pipeline items, payroll change records, reimbursements.
+Appendix A: Event Types
+work_item.created, work_item.assigned, work_item.completed
+policy.evaluated, policy.override_requested, policy.override_approved
+evidence.added, evidence.extracted, evidence.reviewed
+approval.requested, approval.completed
+integration.job_started, integration.job_failed, integration.job_succeeded
+ai.requested, ai.completed, ai.failed_schema, ai.hitl_requested
+reconciliation.break_found, reconciliation.break_resolved
+Appendix B: Minimal OpenAPI Contract Pattern
+GET  /api/inbox?status=&type=&owner=&queue=&risk=&due_before=
+GET  /api/work-items/{id}
+POST /api/work-items/{id}/actions/approve
+POST /api/work-items/{id}/actions/reject
+POST /api/work-items/{id}/actions/request-info
+POST /api/work-items/{id}/actions/route
+POST /api/evidence/upload
+GET  /api/audit?entity_type=&entity_id=&correlation_id=
+POST /api/policies/simulate
+GET  /api/webhooks
+POST /api/webhooks  (create subscription: event_types[], target_url, secret, enabled)
+POST /api/webhooks/{id}/rotate-secret
+POST /api/webhooks/{id}/test
+POST /api/integrations/{connector}/sync  (manual run)
+GET  /api/integrations/{connector}/runs?status=&since=
+GET  /api/reconciliation/breaks?status=&aging_gt=
+POST /api/reconciliation/breaks/{id}/resolve
+Appendix C: Decision Register Template
+Decision ID:
+Date:
+Context:
+Options:
+Decision:
+Rationale:
+Impact:
+Owner:

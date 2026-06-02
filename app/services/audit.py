@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
-from datetime import datetime
 from typing import Optional, Dict, Any
 from uuid import UUID
 
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from app.utils.datetime_helpers import utc_now
 
 
 def log_audit(
@@ -60,7 +60,7 @@ def log_audit(
         custom_metadata={},
         ip_address=ip_address,
         user_agent=user_agent,
-        timestamp=datetime.utcnow(),
+        timestamp=utc_now(),
         workflow_step=workflow_step,
         workflow_type=workflow_type,
         file_id=file_id,

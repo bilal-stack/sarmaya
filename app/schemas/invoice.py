@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import date, datetime
 from decimal import Decimal
@@ -19,7 +19,9 @@ class InvoiceBase(BaseModel):
 
 
 class InvoiceCreate(InvoiceBase):
-    pass
+    # Optional explicit link to a vendor master record. When given it takes
+    # precedence over vendor_name (the vendor's legal_name becomes canonical).
+    vendor_id: Optional[UUID] = None
 
 
 class InvoiceUpdate(BaseModel):
@@ -35,6 +37,7 @@ class InvoiceUpdate(BaseModel):
 class InvoiceResponse(InvoiceBase):
     id: UUID
     tenant_id: UUID
+    vendor_id: Optional[UUID] = None
     current_state: InvoiceState
     ocr_confidence: Optional[int] = None
     ocr_extracted_data: Optional[Dict[str, Any]] = None
@@ -47,28 +50,29 @@ class InvoiceResponse(InvoiceBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InvoiceListResponse(BaseModel):
     id: UUID
     invoice_number: str
+    vendor_id: Optional[UUID] = None
     vendor_name: str
     invoice_date: date
     total_amount: Decimal
     current_state: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InvoiceUploadResponse(BaseModel):
     success: bool
     invoice_id: Optional[UUID] = None
     invoice_number: Optional[str] = None
+    vendor_id: Optional[UUID] = None
     vendor_name: Optional[str] = None
+    vendor_status: Optional[str] = None
     invoice_date: Optional[str] = None
     total_amount: Optional[float] = None
     tax_amount: Optional[float] = None

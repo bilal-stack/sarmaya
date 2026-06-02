@@ -11,30 +11,34 @@ logger = logging.getLogger(__name__)
 
 def transition_state(db: Session, obj, target_state: str, user_id: str | UUID) -> bool:
     """
-    Validate and apply state transition using workflow_states table
-    
-    Returns True if transition successful, False otherwise
+    Validate and apply state transition using workflow_states table.
+
+    Returns True on success. Raises ValueError if the transition is not allowed
+    (consistent with the change_state fallback).
     """
     current = (obj.current_state or InvoiceState.DRAFT.value).lower()
     target = target_state.lower()
-    
+
     # Query workflow_states for allowed transitions
     current_workflow = db.query(WorkflowState).filter(
         WorkflowState.tenant_id == obj.tenant_id,
         WorkflowState.workflow_type == "invoice",
         WorkflowState.state_name == current
     ).first()
-    
+
     if not current_workflow:
         # Fallback to hardcoded rules if workflow_states not configured
         return change_state(obj, target_state, db)
-    
+
     allowed_transitions = current_workflow.allowed_transitions or []
-    
+
     if target not in allowed_transitions:
-        print(f"Transition {current} -> {target} not allowed. Allowed: {allowed_transitions}")
-        return False
-    
+        logger.warning(
+            "Transition %s -> %s not allowed. Allowed: %s",
+            current, target, allowed_transitions,
+        )
+        raise ValueError(f"Invalid state transition: {current} -> {target}")
+
     obj.current_state = target
     db.add(obj)
     return True

@@ -1,0 +1,179 @@
+from sqlalchemy.orm import Session
+from typing import Optional, List, Tuple
+from uuid import UUID
+
+from app.repositories.vendor_repository import VendorRepository
+from app.models.vendor import Vendor
+from app.schemas.vendor import VendorCreate, VendorUpdate
+from app.core.enums import VendorStatus
+from app.services.audit import log_audit
+from app.core.roles import has_permission, PERM_MANAGE_VENDORS, PERM_VIEW_VENDORS
+
+
+class VendorService:
+    """Service layer for vendor master business logic."""
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.repository = VendorRepository(db)
+
+    # --- read ---------------------------------------------------------------
+
+    def list_vendors(
+        self,
+        current_user: dict,
+        status_filter: Optional[VendorStatus] = None,
+        search: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[Vendor], int]:
+        self._require_view(current_user)
+        return self.repository.list_vendors(
+            status_filter=status_filter, search=search, limit=limit, offset=offset
+        )
+
+    def get_vendor(self, vendor_id: UUID, current_user: dict) -> Vendor:
+        self._require_view(current_user)
+        vendor = self.repository.get_by_id(vendor_id)
+        if not vendor:
+            raise ValueError("Vendor not found")
+        return vendor
+
+    # --- write --------------------------------------------------------------
+
+    def create_vendor(self, data: VendorCreate, current_user: dict) -> Vendor:
+        self._require_manage(current_user)
+
+        if self.repository.get_by_legal_name(data.legal_name):
+            raise ValueError("A vendor with this legal name already exists")
+
+        if data.vendor_code and self.repository.get_by_vendor_code(data.vendor_code):
+            raise ValueError("A vendor with this vendor code already exists")
+
+        vendor = Vendor(
+            tenant_id=current_user["tenant_id"],
+            created_by=current_user["id"],
+            **data.model_dump(),
+        )
+        vendor = self.repository.create(vendor)
+        self.repository.commit()
+        vendor = self.repository.refresh(vendor)
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="vendor",
+            object_id=vendor.id,
+            action="created",
+            after_value={"legal_name": vendor.legal_name, "status": vendor.status.value},
+        )
+        return vendor
+
+    def update_vendor(
+        self, vendor_id: UUID, data: VendorUpdate, current_user: dict
+    ) -> Vendor:
+        self._require_manage(current_user)
+
+        vendor = self.repository.get_by_id(vendor_id)
+        if not vendor:
+            raise ValueError("Vendor not found")
+
+        changes = data.model_dump(exclude_unset=True)
+
+        # Guard uniqueness if identifying fields change.
+        new_name = changes.get("legal_name")
+        if new_name and new_name.lower() != (vendor.legal_name or "").lower():
+            if self.repository.get_by_legal_name(new_name):
+                raise ValueError("A vendor with this legal name already exists")
+
+        new_code = changes.get("vendor_code")
+        if new_code and new_code != vendor.vendor_code:
+            if self.repository.get_by_vendor_code(new_code):
+                raise ValueError("A vendor with this vendor code already exists")
+
+        before = {"legal_name": vendor.legal_name}
+        for field, value in changes.items():
+            setattr(vendor, field, value)
+
+        vendor = self.repository.update(vendor)
+        self.repository.commit()
+        vendor = self.repository.refresh(vendor)
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="vendor",
+            object_id=vendor.id,
+            action="updated",
+            before_value=before,
+            after_value={"legal_name": vendor.legal_name},
+        )
+        return vendor
+
+    def set_status(
+        self, vendor_id: UUID, new_status: VendorStatus, current_user: dict
+    ) -> Vendor:
+        self._require_manage(current_user)
+
+        vendor = self.repository.get_by_id(vendor_id)
+        if not vendor:
+            raise ValueError("Vendor not found")
+
+        old_status = vendor.status
+        vendor.status = new_status
+        vendor = self.repository.update(vendor)
+        self.repository.commit()
+        vendor = self.repository.refresh(vendor)
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="vendor",
+            object_id=vendor.id,
+            action="status_changed",
+            before_value={"status": old_status.value if hasattr(old_status, "value") else old_status},
+            after_value={"status": new_status.value},
+        )
+        return vendor
+
+    def delete_vendor(self, vendor_id: UUID, current_user: dict) -> None:
+        """Hard-delete a vendor. Blocked if any invoice references it — callers
+        should deactivate (set_status INACTIVE) instead to preserve history."""
+        self._require_manage(current_user)
+
+        vendor = self.repository.get_by_id(vendor_id)
+        if not vendor:
+            raise ValueError("Vendor not found")
+
+        if self.repository.count_linked_invoices(vendor_id) > 0:
+            raise ValueError(
+                "Cannot delete a vendor with linked invoices; deactivate it instead"
+            )
+
+        self.repository.delete(vendor)
+        self.repository.commit()
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="vendor",
+            object_id=vendor_id,
+            action="deleted",
+            before_value={"legal_name": vendor.legal_name},
+        )
+
+    # --- permission helpers -------------------------------------------------
+
+    @staticmethod
+    def _require_manage(current_user: dict) -> None:
+        if not has_permission(current_user["role"], PERM_MANAGE_VENDORS):
+            raise PermissionError("You do not have permission to manage vendors")
+
+    @staticmethod
+    def _require_view(current_user: dict) -> None:
+        if not has_permission(current_user["role"], PERM_VIEW_VENDORS):
+            raise PermissionError("You do not have permission to view vendors")

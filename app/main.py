@@ -5,7 +5,7 @@ from app.api import auth, invoices, dashboard, files, vendors, conversation, aud
 from app.core.middleware import rls_middleware
 import logging
 import uuid
-from datetime import datetime
+from app.utils.datetime_helpers import utc_now
 from app.core.config import settings
 
 # configure logger (uses root logger config; adjust as needed)
@@ -70,7 +70,7 @@ async def internal_exception_handler(request: Request, exc: Exception):
     correlation_id = incoming_req_id or str(uuid.uuid4())
 
     # Timestamp in UTC ISO format
-    ts = datetime.utcnow().isoformat() + "Z"
+    ts = utc_now().isoformat()
 
     # Log full exception + request info server-side (safe)
     try:
