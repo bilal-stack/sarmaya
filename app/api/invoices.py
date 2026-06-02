@@ -229,6 +229,37 @@ async def upload_invoice_with_ocr(
 # WORKFLOW TRANSITIONS
 # ============================================
 
+@router.post("/{invoice_id}/validate")
+def validate_invoice(
+    invoice_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Validate a draft invoice (draft → validated).
+
+    Field-completeness checkpoint before the invoice can be submitted for
+    approval. Requires invoices.create permission.
+    """
+    service = InvoiceService(db)
+
+    try:
+        invoice = service.validate_invoice(invoice_id, current_user)
+        return {
+            "invoice_id": str(invoice.id),
+            "current_state": invoice.current_state,
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
+
+
 @router.post("/{invoice_id}/submit")
 def submit_invoice(
     invoice_id: UUID,

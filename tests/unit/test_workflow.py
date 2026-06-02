@@ -51,12 +51,10 @@ CANCELLED = InvoiceState.CANCELLED.value
 
 class TestChangeStateLegalTransitions:
     @pytest.mark.parametrize("current,target", [
-        (DRAFT, PENDING),
         (DRAFT, VALIDATED),
         (DRAFT, CANCELLED),
         (VALIDATED, PENDING),
-        (VALIDATED, APPROVED),
-        (VALIDATED, REJECTED),
+        (VALIDATED, CANCELLED),
         (PENDING, APPROVED),
         (PENDING, REJECTED),
         (APPROVED, PAID),
@@ -73,8 +71,10 @@ class TestChangeStateLegalTransitions:
 
 class TestChangeStateIllegalTransitions:
     @pytest.mark.parametrize("current,target", [
+        (DRAFT, PENDING),       # must be validated first, no skipping
         (DRAFT, APPROVED),      # cannot skip straight to approved
         (DRAFT, PAID),          # cannot skip to paid
+        (VALIDATED, APPROVED),  # must go through pending approval
         (PENDING, PAID),        # must be approved before paid
         (PENDING, DRAFT),       # no going back to draft from pending
         (APPROVED, REJECTED),   # cannot reject an approved invoice
@@ -99,13 +99,17 @@ class TestChangeStateIllegalTransitions:
 
     def test_case_insensitive_current_state(self):
         inv = FakeInvoice("DRAFT")
-        assert change_state(inv, PENDING, FakeSession()) is True
+        assert change_state(inv, VALIDATED, FakeSession()) is True
 
 
 class TestGetAllowedTransitionsFallback:
     def test_draft_transitions(self):
         result = get_allowed_transitions(FakeSession(), "t-1", DRAFT)
-        assert set(result) == {PENDING, VALIDATED, CANCELLED}
+        assert set(result) == {VALIDATED, CANCELLED}
+
+    def test_validated_transitions(self):
+        result = get_allowed_transitions(FakeSession(), "t-1", VALIDATED)
+        assert set(result) == {PENDING, CANCELLED}
 
     def test_pending_transitions(self):
         result = get_allowed_transitions(FakeSession(), "t-1", PENDING)

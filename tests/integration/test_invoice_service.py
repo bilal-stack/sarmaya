@@ -204,15 +204,64 @@ class TestDuplicateOverride:
         assert "Verified distinct invoice" in (log.comment or "")
 
 
-class TestSubmit:
-    def test_submit_sets_pending_and_required_role(self, db, tenant, make_user):
+class TestValidate:
+    def test_validate_draft_moves_to_validated(self, db, tenant, make_user):
         clerk = make_user(UserRole.AP_CLERK)
         inv = _make_invoice(db, tenant.id, clerk["id"],
                             InvoiceState.DRAFT.value, 100_000)
 
-        result, required_role = InvoiceService(db).submit_for_approval(inv.id, clerk)
+        result = InvoiceService(db).validate_invoice(inv.id, clerk)
+        assert result.current_state == InvoiceState.VALIDATED.value
+
+    def test_validate_blocks_when_fields_missing(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 100_000)
+        # Strip a required field after creation.
+        inv.total_amount = 0
+        db.add(inv)
+        db.flush()
+
+        with pytest.raises(ValueError, match="total_amount"):
+            InvoiceService(db).validate_invoice(inv.id, clerk)
+
+    def test_cannot_validate_non_draft(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.PENDING_APPROVAL.value, 100_000)
+
+        with pytest.raises(ValueError):
+            InvoiceService(db).validate_invoice(inv.id, clerk)
+
+    def test_approver_cannot_validate(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        approver = make_user(UserRole.APPROVER)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 100_000)
+
+        with pytest.raises(PermissionError):
+            InvoiceService(db).validate_invoice(inv.id, approver)
+
+
+class TestSubmit:
+    def test_validate_then_submit_sets_pending_and_required_role(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 100_000)
+
+        svc = InvoiceService(db)
+        svc.validate_invoice(inv.id, clerk)
+        result, required_role = svc.submit_for_approval(inv.id, clerk)
         assert result.current_state == InvoiceState.PENDING_APPROVAL.value
         assert required_role == "manager"
+
+    def test_cannot_submit_unvalidated_draft(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 100_000)
+
+        with pytest.raises(ValueError, match="validated first"):
+            InvoiceService(db).submit_for_approval(inv.id, clerk)
 
 
 class TestReject:
@@ -330,7 +379,9 @@ class TestNotifications:
         inv = _make_invoice(db, tenant.id, clerk["id"],
                             InvoiceState.DRAFT.value, 100_000)
 
-        InvoiceService(db).submit_for_approval(inv.id, clerk)
+        svc = InvoiceService(db)
+        svc.validate_invoice(inv.id, clerk)
+        svc.submit_for_approval(inv.id, clerk)
 
         recipients = [to for to, _, _ in sent]
         assert "mgr@test.com" in recipients  # manager approves <=250k

@@ -396,6 +396,80 @@ class InvoiceService:
         self.repository.delete(invoice)
         self.repository.commit()
     
+    def validate_invoice(
+        self,
+        invoice_id: UUID,
+        current_user: dict
+    ) -> Invoice:
+        """Validate a draft invoice (draft → validated).
+
+        The explicit field-completeness checkpoint the MVP workflow requires
+        before an invoice can be submitted for approval (no skipping straight
+        from draft to pending). Confirms the core fields OCR/data-entry must
+        produce are present; the linked vendor's verification status is enforced
+        later by the approval gate, not here.
+        """
+        invoice = self.repository.get_by_id(invoice_id)
+
+        if not invoice:
+            raise ValueError("Invoice not found")
+
+        if not has_permission(current_user["role"], PERM_CREATE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to validate invoices"
+            )
+
+        if invoice.current_state != InvoiceState.DRAFT.value:
+            raise ValueError(
+                f"Cannot validate invoice from {invoice.current_state} state"
+            )
+
+        missing = self._missing_required_fields(invoice)
+        if missing:
+            raise ValueError(
+                "Cannot validate invoice; missing required fields: "
+                + ", ".join(missing)
+            )
+
+        success = transition_state(
+            db=self.db,
+            obj=invoice,
+            target_state=InvoiceState.VALIDATED.value,
+            user_id=current_user["id"]
+        )
+        if not success:
+            raise ValueError("State transition failed")
+
+        self.repository.commit()
+        invoice = self.repository.refresh(invoice)
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="invoice",
+            object_id=invoice.id,
+            action="validated",
+            workflow_step=invoice.current_state,
+            workflow_type="invoice",
+        )
+
+        return invoice
+
+    @staticmethod
+    def _missing_required_fields(invoice: Invoice) -> List[str]:
+        """Names of the fields an invoice must carry before it can be validated."""
+        missing: List[str] = []
+        if not invoice.vendor_id:
+            missing.append("vendor")
+        if not (invoice.invoice_number or "").strip():
+            missing.append("invoice_number")
+        if not invoice.invoice_date:
+            missing.append("invoice_date")
+        if invoice.total_amount is None or invoice.total_amount <= 0:
+            missing.append("total_amount")
+        return missing
+
     def submit_for_approval(
         self,
         invoice_id: UUID,
@@ -403,30 +477,32 @@ class InvoiceService:
     ) -> Tuple[Invoice, str]:
         """
         Submit invoice for approval
-        
+
         Business logic:
         - Check permission (only AP_CLERK/ADMIN can submit)
-        - Check state (must be draft/validated)
+        - Check state (must be validated — invoices must pass the validate step
+          first; no skipping straight from draft)
         - Transition workflow
         - Determine required approver
-        
+
         Returns: (invoice, required_approver_role)
         """
         invoice = self.repository.get_by_id(invoice_id)
-        
+
         if not invoice:
             raise ValueError("Invoice not found")
-        
+
         # Check permission
         if not has_permission(current_user["role"], PERM_CREATE_INVOICE):
             raise PermissionError(
                 f"Role '{current_user['role']}' does not have permission to submit invoices"
             )
-        
-        # Check state
-        if invoice.current_state not in [InvoiceState.DRAFT.value, InvoiceState.VALIDATED.value]:
+
+        # Check state — must be validated first (no draft → pending skip)
+        if invoice.current_state != InvoiceState.VALIDATED.value:
             raise ValueError(
-                f"Cannot submit invoice from {invoice.current_state} state"
+                f"Cannot submit invoice from {invoice.current_state} state; "
+                "it must be validated first"
             )
         
         # Transition state

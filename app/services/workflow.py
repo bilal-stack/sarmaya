@@ -50,14 +50,12 @@ def change_state(invoice, target_state: str, db: Session):
     """
     ALLOWED_TRANSITIONS = {
         InvoiceState.DRAFT.value: {
-            InvoiceState.PENDING_APPROVAL.value,
             InvoiceState.VALIDATED.value,
             InvoiceState.CANCELLED.value
         },
         InvoiceState.VALIDATED.value: {
             InvoiceState.PENDING_APPROVAL.value,
-            InvoiceState.APPROVED.value,
-            InvoiceState.REJECTED.value
+            InvoiceState.CANCELLED.value
         },
         InvoiceState.PENDING_APPROVAL.value: {
             InvoiceState.APPROVED.value,
@@ -102,14 +100,12 @@ def get_allowed_transitions(db: Session, tenant_id: UUID, current_state: str) ->
     # Fallback with ALL states
     FALLBACK_TRANSITIONS = {
         InvoiceState.DRAFT.value: [
-            InvoiceState.PENDING_APPROVAL.value,
             InvoiceState.VALIDATED.value,
             InvoiceState.CANCELLED.value
         ],
         InvoiceState.VALIDATED.value: [
             InvoiceState.PENDING_APPROVAL.value,
-            InvoiceState.APPROVED.value,
-            InvoiceState.REJECTED.value
+            InvoiceState.CANCELLED.value
         ],
         InvoiceState.PENDING_APPROVAL.value: [
             InvoiceState.APPROVED.value,
