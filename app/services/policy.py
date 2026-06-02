@@ -11,31 +11,52 @@ def evaluate_policy(policy_name: str, context: dict) -> bool:
     return True
 
 
+def _operator_matches(operator: str, amount: float, threshold: float) -> bool:
+    """Compare an invoice amount against a policy threshold.
+
+    Supported operators let an approval matrix be expressed entirely as config
+    rows (e.g. cfo for ``greater_than`` 250k, manager for ``greater_equal`` 0).
+    An unknown operator never matches, so a malformed rule fails closed.
+    """
+    if operator == "greater_than":
+        return amount > threshold
+    if operator == "greater_equal":
+        return amount >= threshold
+    if operator == "less_than":
+        return amount < threshold
+    if operator == "less_equal":
+        return amount <= threshold
+    if operator == "equal":
+        return amount == threshold
+    return False
+
+
 def evaluate_approval_role(db: Session, tenant_id: str | UUID, total_amount: float) -> Optional[str]:
     """
-    Determine required approver role based on amount and policies table
-    
+    Determine required approver role based on amount and the policies table.
+
+    The approval matrix is configuration-first: active ``approval_limit``
+    policies are evaluated in descending priority and the first matching rule
+    wins. The hardcoded split is only a fallback for tenants with no rules.
+
     Returns: 'manager' | 'cfo' | 'admin' | None
     """
-    # Query active approval_limit policies for tenant, ordered by priority
     policies = db.query(Policy).filter(
         Policy.tenant_id == tenant_id,
         Policy.policy_type == "approval_limit",
         Policy.is_active == True
     ).order_by(Policy.priority.desc()).all()
-    
+
     for policy in policies:
         rule = policy.rule_config or {}
         threshold = rule.get("amount_threshold", 0)
         operator = rule.get("operator", "greater_equal")
         required_role = rule.get("required_role", "manager")
-        
-        if operator == "less_than" and total_amount < threshold:
+
+        if _operator_matches(operator, total_amount, threshold):
             return required_role
-        elif operator == "greater_equal" and total_amount >= threshold:
-            return required_role
-    
-    # Default fallback if no policies match
+
+    # Default fallback if no policies are configured for this tenant.
     return "manager" if total_amount <= 250_000 else "cfo"
 
 

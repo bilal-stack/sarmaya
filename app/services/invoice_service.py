@@ -17,7 +17,6 @@ from app.services.audit import log_audit
 from app.services.notification_service import NotificationService
 from app.core.roles import (
     has_permission,
-    can_approve_amount,
     PERM_CREATE_INVOICE,
     PERM_APPROVE_INVOICE,
     PERM_REJECT_INVOICE,
@@ -582,22 +581,21 @@ class InvoiceService:
         # overridden (with a logged reason) before approval.
         self._assert_duplicate_resolved(invoice)
 
-        # Check approval permissions
-        can_approve, error_msg = can_approve_amount(
-            current_user["role"],
-            float(invoice.total_amount or 0)
-        )
-        
-        if not can_approve:
-            raise PermissionError(error_msg)
-        
-        # Check policy requirements
+        # Must be able to approve invoices at all.
+        if not has_permission(current_user["role"], PERM_APPROVE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to approve invoices"
+            )
+
+        # Configuration-first approval routing: the required approver role is
+        # derived from the tenant's approval_limit policies (evaluate_approval_role),
+        # so the amount limit lives in editable config, not hardcoded here.
         required_role = evaluate_approval_role(
             self.db,
             current_user["tenant_id"],
             float(invoice.total_amount or 0)
         )
-        
+
         if required_role and current_user["role"].lower() != required_role.lower() and current_user["role"] != "admin":
             raise PermissionError(
                 f"{required_role.upper()} role required to approve this invoice"
