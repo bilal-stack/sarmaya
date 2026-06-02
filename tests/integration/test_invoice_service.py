@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 
 from app.services.invoice_service import InvoiceService
+from app.services.notification_service import NotificationService
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from app.schemas.invoice import InvoiceCreate
@@ -189,6 +190,71 @@ class TestMarkPaid:
 
         with pytest.raises(PermissionError):
             InvoiceService(db).mark_as_paid(inv.id, clerk)
+
+
+class TestNotifications:
+    """Workflow events fire emails to the right people, and delivery failures
+    never break the workflow. SMTP is patched out at the _deliver boundary."""
+
+    @staticmethod
+    def _capture(monkeypatch):
+        sent = []
+        monkeypatch.setattr(
+            NotificationService,
+            "_deliver",
+            lambda self, to, subject, body: sent.append((to, subject, body)),
+        )
+        return sent
+
+    def test_submit_notifies_approvers(self, db, tenant, make_user, monkeypatch):
+        sent = self._capture(monkeypatch)
+        clerk = make_user(UserRole.AP_CLERK)
+        make_user(UserRole.MANAGER, email="mgr@test.com")
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 100_000)
+
+        InvoiceService(db).submit_for_approval(inv.id, clerk)
+
+        recipients = [to for to, _, _ in sent]
+        assert "mgr@test.com" in recipients  # manager approves <=250k
+
+    def test_approve_notifies_creator(self, db, tenant, make_user, monkeypatch):
+        sent = self._capture(monkeypatch)
+        clerk = make_user(UserRole.AP_CLERK, email="clerk@test.com")
+        manager = make_user(UserRole.MANAGER)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.PENDING_APPROVAL.value, 100_000)
+
+        InvoiceService(db).approve_invoice(inv.id, manager)
+
+        assert "clerk@test.com" in [to for to, _, _ in sent]
+        assert any("approved" in subj.lower() for _, subj, _ in sent)
+
+    def test_reject_notifies_creator_with_reason(self, db, tenant, make_user, monkeypatch):
+        sent = self._capture(monkeypatch)
+        clerk = make_user(UserRole.AP_CLERK, email="clerk@test.com")
+        manager = make_user(UserRole.MANAGER)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.PENDING_APPROVAL.value, 100_000)
+
+        InvoiceService(db).reject_invoice(inv.id, "missing PO", manager)
+
+        assert "clerk@test.com" in [to for to, _, _ in sent]
+        assert any("missing PO" in body for _, _, body in sent)
+
+    def test_delivery_failure_does_not_break_approval(self, db, tenant, make_user, monkeypatch):
+        def boom(self, to, subject, body):
+            raise RuntimeError("smtp down")
+
+        monkeypatch.setattr(NotificationService, "_deliver", boom)
+        clerk = make_user(UserRole.AP_CLERK)
+        manager = make_user(UserRole.MANAGER)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.PENDING_APPROVAL.value, 100_000)
+
+        # A dead SMTP server must not stop the invoice from being approved.
+        result = InvoiceService(db).approve_invoice(inv.id, manager)
+        assert result.current_state == InvoiceState.APPROVED.value
 
 
 class TestVendorGovernanceGate:

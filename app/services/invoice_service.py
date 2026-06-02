@@ -14,6 +14,7 @@ from app.core.enums import InvoiceState, VendorStatus
 from app.services.workflow import transition_state
 from app.services.policy import evaluate_approval_role
 from app.services.audit import log_audit
+from app.services.notification_service import NotificationService
 from app.core.roles import (
     has_permission,
     can_approve_amount,
@@ -36,6 +37,7 @@ class InvoiceService:
         self.repository = InvoiceRepository(db)
         self.vendor_repository = VendorRepository(db)
         self.file_service = FileService(db)
+        self.notification_service = NotificationService(db)
 
     def get_invoice(self, invoice_id: UUID) -> Optional[Invoice]:
         """Get invoice by ID"""
@@ -405,7 +407,9 @@ class InvoiceService:
             workflow_type="invoice",
             after_value={"required_role": required_role}
         )
-        
+
+        self.notification_service.notify_submitted_for_approval(invoice, required_role)
+
         return invoice, required_role
     
     def approve_invoice(
@@ -496,7 +500,9 @@ class InvoiceService:
             workflow_type="invoice",
             file_id=invoice.pdf_file_id
         )
-        
+
+        self.notification_service.notify_approved(invoice)
+
         return invoice
     
     def reject_invoice(
@@ -560,7 +566,9 @@ class InvoiceService:
             workflow_type="invoice",
             comment=reason
         )
-        
+
+        self.notification_service.notify_rejected(invoice, reason)
+
         return invoice
     
     def mark_as_paid(self, invoice_id: UUID, current_user: dict) -> Invoice:
