@@ -13,6 +13,8 @@ from app.schemas.workflow import WorkflowStateResponse, WorkflowTransitionsUpdat
 from app.services.policy_service import ApprovalPolicyService
 from app.services.workflow_config_service import WorkflowConfigService
 from app.services.config_provisioning import ConfigProvisioningService
+from app.schemas.autopilot import AutopilotConfig
+from app.services.autopilot_service import AutopilotService
 
 router = APIRouter(prefix="/config", tags=["Configuration"])
 
@@ -34,6 +36,36 @@ def initialize_default_config(
     """
     try:
         return ConfigProvisioningService(db).initialize_defaults(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+# ============================================
+# RESTRICTED AUTOPILOT SETTINGS
+# ============================================
+
+@router.get("/autopilot", response_model=AutopilotConfig)
+def get_autopilot_config(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Read this tenant's Restricted Autopilot settings (disabled by default)."""
+    try:
+        return AutopilotService(db).get_config(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.put("/autopilot", response_model=AutopilotConfig)
+def set_autopilot_config(
+    payload: AutopilotConfig,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Enable/adjust Restricted Autopilot bounds (opt-in, amount limit, vendor and
+    duplicate guards)."""
+    try:
+        return AutopilotService(db).set_config(payload, current_user)
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 

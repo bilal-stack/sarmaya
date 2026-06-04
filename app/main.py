@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
-from app.api import auth, invoices, dashboard, files, vendors, conversation, audit, config, inbox
+from app.api import auth, invoices, dashboard, files, vendors, conversation, audit, config, inbox, autopilot
 from app.core.middleware import rls_middleware
 import logging
 import uuid
@@ -40,6 +40,7 @@ api_v1.include_router(vendors.router)
 api_v1.include_router(audit.router)
 api_v1.include_router(config.router)
 api_v1.include_router(inbox.router)
+api_v1.include_router(autopilot.router)
 
 # register versioned router once
 app.include_router(api_v1)
