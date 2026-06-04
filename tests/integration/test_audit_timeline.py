@@ -88,6 +88,29 @@ class TestTimeline:
         # No policy configured for this tenant -> default-routing explanation.
         assert "default routing" in tl["policy_reason"]
 
+    def test_policy_reason_uses_snapshot_not_recomputed(self, db, tenant, make_user):
+        # Current policy routes 300k to CFO, but the decision was recorded earlier
+        # under a different rule. The timeline must show the snapshot, not drift.
+        admin = make_user(UserRole.ADMIN)
+        ConfigProvisioningService(db).initialize_defaults(admin)  # 300k -> CFO now
+
+        inv = _make_invoice(db, tenant.id, admin["id"], amount=300_000, state="approved")
+        _log(
+            db, tenant.id, inv.id, "submitted_for_approval", offset_s=1,
+            after={
+                "required_role": "manager",
+                "policy_name": "Old rule",
+                "routing_reason": "Amount 300,000 routed to MANAGER under the policy in effect then.",
+            },
+        )
+        _log(db, tenant.id, inv.id, "approved", offset_s=2, after={"state": "approved"})
+
+        tl = AuditService(db).get_timeline("invoice", inv.id, admin)
+        assert "MANAGER" in tl["policy_reason"]
+        assert "in effect then" in tl["policy_reason"]
+        submitted = next(e for e in tl["events"] if e["action"] == "submitted_for_approval")
+        assert "MANAGER" in submitted["summary"]
+
     def test_empty_timeline_for_object_without_events(self, db, tenant, make_user):
         admin = make_user(UserRole.ADMIN)
         inv = _make_invoice(db, tenant.id, admin["id"], state="draft")

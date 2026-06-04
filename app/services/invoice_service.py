@@ -12,7 +12,7 @@ from app.models.file import File as FileModel
 from app.schemas.invoice import InvoiceCreate, InvoiceUpdate
 from app.core.enums import InvoiceState, VendorStatus
 from app.services.workflow import transition_state
-from app.services.policy import evaluate_approval_role
+from app.services.policy import explain_approval_routing
 from app.services.audit import log_audit
 from app.services.notification_service import NotificationService
 from app.core.roles import (
@@ -518,13 +518,16 @@ class InvoiceService:
         self.repository.commit()
         invoice = self.repository.refresh(invoice)
         
-        # Determine required approver
-        required_role = evaluate_approval_role(
+        # Determine required approver and snapshot the routing decision as it
+        # stood now, so the audit trail records the policy actually applied (not
+        # whatever the policy is recomputed to later).
+        routing = explain_approval_routing(
             self.db,
             current_user["tenant_id"],
             float(invoice.total_amount or 0)
         )
-        
+        required_role = routing["required_role"]
+
         # Log audit
         log_audit(
             db=self.db,
@@ -535,7 +538,11 @@ class InvoiceService:
             action="submitted_for_approval",
             workflow_step=invoice.current_state,
             workflow_type="invoice",
-            after_value={"required_role": required_role}
+            after_value={
+                "required_role": required_role,
+                "policy_name": routing["policy_name"],
+                "routing_reason": routing["reason"],
+            }
         )
 
         self.notification_service.notify_submitted_for_approval(invoice, required_role)
@@ -588,13 +595,15 @@ class InvoiceService:
             )
 
         # Configuration-first approval routing: the required approver role is
-        # derived from the tenant's approval_limit policies (evaluate_approval_role),
-        # so the amount limit lives in editable config, not hardcoded here.
-        required_role = evaluate_approval_role(
+        # derived from the tenant's approval_limit policies, so the amount limit
+        # lives in editable config, not hardcoded here. Capture the routing
+        # explanation to snapshot in the audit trail at decision time.
+        routing = explain_approval_routing(
             self.db,
             current_user["tenant_id"],
             float(invoice.total_amount or 0)
         )
+        required_role = routing["required_role"]
 
         if required_role and current_user["role"].lower() != required_role.lower() and current_user["role"] != "admin":
             raise PermissionError(
@@ -628,7 +637,12 @@ class InvoiceService:
             object_id=invoice.id,
             action="approved",
             before_value={"state": "pending_approval"},
-            after_value={"state": "approved"},
+            after_value={
+                "state": "approved",
+                "required_role": required_role,
+                "policy_name": routing["policy_name"],
+                "routing_reason": routing["reason"],
+            },
             workflow_step="approved",
             workflow_type="invoice",
             file_id=invoice.pdf_file_id

@@ -46,9 +46,17 @@ class AuditService:
             invoice = self.db.query(Invoice).filter(Invoice.id == object_id).first()
             if invoice:
                 current_state = invoice.current_state
-                policy_reason = explain_approval_routing(
-                    self.db, current_user["tenant_id"], float(invoice.total_amount or 0)
-                )["reason"]
+                # Prefer the routing snapshot recorded at the last decision, so
+                # the timeline reflects the policy actually applied — not what it
+                # would be recomputed to under a since-edited policy. Only project
+                # from the current policy when no decision has been made yet.
+                snapshot = self._latest_routing_reason(logs)
+                if snapshot:
+                    policy_reason = snapshot
+                else:
+                    policy_reason = explain_approval_routing(
+                        self.db, current_user["tenant_id"], float(invoice.total_amount or 0)
+                    )["reason"]
 
         return {
             "object_type": object_type,
@@ -78,6 +86,15 @@ class AuditService:
         }
 
     @staticmethod
+    def _latest_routing_reason(logs) -> Optional[str]:
+        """The routing reason snapshotted at the most recent approval decision."""
+        for log in reversed(logs):
+            after = log.after_value or {}
+            if after.get("routing_reason"):
+                return after["routing_reason"]
+        return None
+
+    @staticmethod
     def _summarize(log: AuditLog) -> str:
         action = (log.action or "").lower()
         after = log.after_value or {}
@@ -91,6 +108,9 @@ class AuditService:
         if action == "validated":
             return "Validated — all required fields present."
         if action == "submitted_for_approval":
+            reason = after.get("routing_reason")
+            if reason:
+                return f"Submitted for approval. {reason}"
             role = after.get("required_role")
             return (
                 f"Submitted for approval; routed to {role.upper()}."
@@ -98,6 +118,10 @@ class AuditService:
             )
         if action == "approved":
             return "Approved."
+        if action == "auto_approved":
+            return log.comment or "Auto-approved by Restricted Autopilot."
+        if action == "auto_approval_reverted":
+            return "Autopilot approval reverted to pending for manual review."
         if action == "rejected":
             return f"Rejected: {log.comment}" if log.comment else "Rejected."
         if action == "duplicate_overridden":
