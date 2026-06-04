@@ -60,6 +60,57 @@ def evaluate_approval_role(db: Session, tenant_id: str | UUID, total_amount: flo
     return "manager" if total_amount <= 250_000 else "cfo"
 
 
+_OPERATOR_PHRASE = {
+    "greater_than": "exceeds",
+    "greater_equal": "is at least",
+    "less_than": "is below",
+    "less_equal": "is at most",
+    "equal": "equals",
+}
+
+
+def explain_approval_routing(db: Session, tenant_id: str | UUID, total_amount: float) -> dict:
+    """Explain *why* an amount routes to a given approver — the policy reason
+    surfaced in Live Audit Mode.
+
+    Returns {required_role, reason, policy_name}. Mirrors evaluate_approval_role
+    so the explanation always matches the decision.
+    """
+    policies = db.query(Policy).filter(
+        Policy.tenant_id == tenant_id,
+        Policy.policy_type == "approval_limit",
+        Policy.is_active == True
+    ).order_by(Policy.priority.desc()).all()
+
+    for policy in policies:
+        rule = policy.rule_config or {}
+        threshold = rule.get("amount_threshold", 0)
+        operator = rule.get("operator", "greater_equal")
+        required_role = rule.get("required_role", "manager")
+
+        if _operator_matches(operator, total_amount, threshold):
+            phrase = _OPERATOR_PHRASE.get(operator, operator)
+            return {
+                "required_role": required_role,
+                "policy_name": policy.policy_name,
+                "reason": (
+                    f"Amount {total_amount:,.0f} {phrase} {threshold:,.0f} → "
+                    f"requires {required_role.upper()} approval "
+                    f"(policy '{policy.policy_name}')."
+                ),
+            }
+
+    required_role = "manager" if total_amount <= 250_000 else "cfo"
+    return {
+        "required_role": required_role,
+        "policy_name": None,
+        "reason": (
+            f"No approval policy configured; default routing sends "
+            f"{total_amount:,.0f} to {required_role.upper()}."
+        ),
+    }
+
+
 def check_user_can_approve(user_role: str, total_amount: float) -> bool:
     """
     Check if user role has permission to approve invoice of given amount

@@ -9,6 +9,8 @@ from app.api.deps import get_current_user, get_db_session
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.core.enums import UserRole
+from app.schemas.audit import AuditTimeline
+from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -105,6 +107,25 @@ def get_audit_logs(
             for log in logs
         ]
     }
+
+
+@router.get("/timeline/{object_type}/{object_id}", response_model=AuditTimeline)
+def get_audit_timeline(
+    object_type: str,
+    object_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Live Audit Mode: open any object as a full timeline where each event has a
+    plain-English reason, plus (for invoices) the current policy routing reason.
+
+    Visible to whoever can view the object (e.g. invoice viewers), not only
+    auditors — unlike /trail and /logs.
+    """
+    try:
+        return AuditService(db).get_timeline(object_type, object_id, current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 
 @router.get("/trail/{object_type}/{object_id}")
