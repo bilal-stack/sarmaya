@@ -18,6 +18,8 @@ from app.services.notification_service import NotificationService
 from app.core.roles import (
     has_permission,
     PERM_CREATE_INVOICE,
+    PERM_UPDATE_INVOICE,
+    PERM_DELETE_INVOICE,
     PERM_APPROVE_INVOICE,
     PERM_REJECT_INVOICE,
     PERM_MARK_PAID_INVOICE,
@@ -255,6 +257,11 @@ class InvoiceService:
         - Create invoice
         - Log audit
         """
+        if not has_permission(current_user["role"], PERM_CREATE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to create invoices"
+            )
+
         # Link to a vendor master record (explicit id wins, else name match,
         # else auto-create a pending-verification vendor so vendor_id is always
         # set and dedup can key on it).
@@ -325,10 +332,15 @@ class InvoiceService:
         - Track changes for audit
         """
         invoice = self.repository.get_by_id(invoice_id)
-        
+
         if not invoice:
             raise ValueError("Invoice not found")
-        
+
+        if not has_permission(current_user["role"], PERM_UPDATE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to update invoices"
+            )
+
         # Check if editable
         if invoice.current_state not in [InvoiceState.DRAFT.value, InvoiceState.REJECTED.value]:
             raise ValueError(f"Cannot edit invoice in {invoice.current_state} state")
@@ -374,10 +386,15 @@ class InvoiceService:
         - Only allow delete in draft state
         """
         invoice = self.repository.get_by_id(invoice_id)
-        
+
         if not invoice:
             raise ValueError("Invoice not found")
-        
+
+        if not has_permission(current_user["role"], PERM_DELETE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to delete invoices"
+            )
+
         if invoice.current_state != InvoiceState.DRAFT.value:
             raise ValueError("Can only delete draft invoices")
         
@@ -845,6 +862,11 @@ class InvoiceService:
         Returns:
             Upload response dict
         """
+        if not has_permission(current_user["role"], PERM_CREATE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to create invoices"
+            )
+
         # Save file
         file_record, stored_path, file_hash = self.file_service.save_file(
             tenant_id=current_user["tenant_id"],

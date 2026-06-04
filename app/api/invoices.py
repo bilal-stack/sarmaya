@@ -108,6 +108,11 @@ def create_invoice_manual(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
 
 
 @router.put("/{invoice_id}", response_model=InvoiceResponse)
@@ -130,6 +135,11 @@ def update_invoice(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
 
 
 @router.delete("/{invoice_id}")
@@ -149,6 +159,11 @@ def delete_invoice(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
 
@@ -209,6 +224,11 @@ async def upload_invoice_with_ocr(
             current_user=current_user
         )
         return result
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e)
+        )
     except RuntimeError:
         # OCR or processing errors — log internals, return a generic message.
         logger.exception("Invoice upload OCR/processing failed")

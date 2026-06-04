@@ -1,8 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
-from app.api import auth, invoices, dashboard, files, vendors, conversation, audit, config, inbox, autopilot
-from app.core.middleware import rls_middleware
+from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot
 import logging
 import uuid
 from app.utils.datetime_helpers import utc_now
@@ -34,7 +33,6 @@ api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(auth.router)
 api_v1.include_router(invoices.router)
 api_v1.include_router(dashboard.router)
-api_v1.include_router(files.router)
 api_v1.include_router(conversation.router)
 api_v1.include_router(vendors.router)
 api_v1.include_router(audit.router)
@@ -44,9 +42,6 @@ api_v1.include_router(autopilot.router)
 
 # register versioned router once
 app.include_router(api_v1)
-
-# register middleware after import
-app.middleware("http")(rls_middleware)
 
 # root redirect to /api/v1
 @app.get("/")

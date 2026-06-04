@@ -18,7 +18,7 @@ from app.services.invoice_service import InvoiceService
 from app.services.notification_service import NotificationService
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
-from app.schemas.invoice import InvoiceCreate
+from app.schemas.invoice import InvoiceCreate, InvoiceUpdate
 from app.core.enums import InvoiceState, UserRole, VendorStatus
 
 pytestmark = pytest.mark.integration
@@ -323,6 +323,44 @@ class TestMarkPaid:
 
         with pytest.raises(PermissionError):
             InvoiceService(db).mark_as_paid(inv.id, clerk)
+
+
+class TestCreateUpdateDeletePermissions:
+    """Invoice create/update/delete must enforce permissions, like the workflow
+    transitions do. A read-only AUDITOR must not be able to mutate invoices."""
+
+    def test_clerk_can_create(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        inv = InvoiceService(db).create_manual_invoice(_invoice_payload(), clerk)
+        assert inv.current_state == InvoiceState.DRAFT.value
+
+    def test_auditor_cannot_create(self, db, tenant, make_user):
+        auditor = make_user(UserRole.AUDITOR)
+        with pytest.raises(PermissionError):
+            InvoiceService(db).create_manual_invoice(_invoice_payload(), auditor)
+
+    def test_approver_cannot_create(self, db, tenant, make_user):
+        approver = make_user(UserRole.APPROVER)
+        with pytest.raises(PermissionError):
+            InvoiceService(db).create_manual_invoice(_invoice_payload(), approver)
+
+    def test_auditor_cannot_update(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        auditor = make_user(UserRole.AUDITOR)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 1000)
+        with pytest.raises(PermissionError):
+            InvoiceService(db).update_invoice(
+                inv.id, InvoiceUpdate(vendor_name="Hacked"), auditor
+            )
+
+    def test_auditor_cannot_delete(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        auditor = make_user(UserRole.AUDITOR)
+        inv = _make_invoice(db, tenant.id, clerk["id"],
+                            InvoiceState.DRAFT.value, 1000)
+        with pytest.raises(PermissionError):
+            InvoiceService(db).delete_invoice(inv.id, auditor)
 
 
 class TestDashboardSummary:

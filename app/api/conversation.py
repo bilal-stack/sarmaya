@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from uuid import UUID
+import logging
 
 from app.api.deps import get_current_user, get_db_session
+from app.core.roles import has_permission, PERM_VIEW_INVOICE
 from app.services.ai import get_ai_provider
 from app.services.conversation_service import ConversationService
 from app.schemas.conversation import (
@@ -19,6 +21,7 @@ from datetime import date
 from app.agents.duplicate_agent import DuplicateDetectionAgent
 from app.agents.query_agent import QueryAgent
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversation", tags=["Conversation"])
 
 
@@ -42,7 +45,8 @@ def list_conversations(
         offset=offset
     )
     
-    # Add message count
+    # Add message count (single grouped query, not a lazy load per conversation)
+    counts = service.message_counts([conv.id for conv in conversations])
     result = []
     for conv in conversations:
         result.append({
@@ -50,7 +54,7 @@ def list_conversations(
             "title": conv.title,
             "created_at": conv.created_at,
             "updated_at": conv.updated_at,
-            "message_count": len(conv.messages)
+            "message_count": counts.get(conv.id, 0)
         })
     
     return {
@@ -183,10 +187,11 @@ def chat(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception("AI chat failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"AI chat failed: {str(e)}"
+            detail="The assistant could not process your message. Please try again."
         )
 
 
@@ -208,6 +213,11 @@ def query_invoices(
     - "Invoices below 25000"
     - "Top 5 vendors"
     """
+    if not has_permission(current_user["role"], PERM_VIEW_INVOICE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to query invoices"
+        )
     try:
         # Use Query Agent
         agent = QueryAgent(
@@ -219,14 +229,15 @@ def query_invoices(
                 "email": current_user["email"]
             }
         )
-        
+
         result = agent.query(query)
         return result
-    
-    except Exception as e:
+
+    except Exception:
+        logger.exception("Invoice query agent failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Query failed: {str(e)}"
+            detail="The query could not be processed. Please try again."
         )
 
 
@@ -248,13 +259,18 @@ def detect_duplicate(
         "line_items": [...]
     }
     """
+    if not has_permission(current_user["role"], PERM_VIEW_INVOICE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to run duplicate detection"
+        )
     try:
         # Use Duplicate Detection Agent
         agent = DuplicateDetectionAgent(
             db=db,
             tenant_id=current_user["tenant_id"]
         )
-        
+
         result = agent.detect(
             vendor_name=invoice_data.get("vendor_name"),
             invoice_number=invoice_data.get("invoice_number"),
@@ -262,11 +278,12 @@ def detect_duplicate(
             total_amount=invoice_data.get("total_amount"),
             line_items=invoice_data.get("line_items")
         )
-        
+
         return result
-    
-    except Exception as e:
+
+    except Exception:
+        logger.exception("Duplicate detection failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Duplicate detection failed: {str(e)}"
+            detail="Duplicate detection could not be completed. Please try again."
         )

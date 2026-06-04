@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy import func
+from typing import List, Optional, Dict
 from uuid import UUID
 
 from app.models.conversation import Conversation, ConversationMessage
@@ -48,6 +49,22 @@ class ConversationService:
         total = query.count()
         conversations = query.offset(offset).limit(limit).all()
         return conversations, total
+
+    def message_counts(self, conversation_ids: List[UUID]) -> Dict[UUID, int]:
+        """Message counts keyed by conversation_id in a single grouped query
+        (avoids an N+1 lazy-load per conversation)."""
+        if not conversation_ids:
+            return {}
+        rows = (
+            self.db.query(
+                ConversationMessage.conversation_id,
+                func.count(ConversationMessage.id),
+            )
+            .filter(ConversationMessage.conversation_id.in_(conversation_ids))
+            .group_by(ConversationMessage.conversation_id)
+            .all()
+        )
+        return {cid: cnt for cid, cnt in rows}
     
     def add_message(
         self, 
