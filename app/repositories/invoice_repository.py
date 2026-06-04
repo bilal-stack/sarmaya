@@ -112,6 +112,21 @@ class InvoiceRepository:
             .all()
         )
 
+    def get_pending_with_vendor(self, limit: int = 200) -> List[Tuple[Invoice, Optional[Vendor]]]:
+        """Pending-approval invoices with their linked vendor (if any), highest
+        value first. Feeds the Decision Inbox, which classifies each by its most
+        blocking next action. Tenant scoping is handled by RLS.
+        Returns [(invoice, vendor_or_None), ...].
+        """
+        return (
+            self.db.query(Invoice, Vendor)
+            .outerjoin(Vendor, Invoice.vendor_id == Vendor.id)
+            .filter(Invoice.current_state == InvoiceState.PENDING_APPROVAL.value)
+            .order_by(Invoice.total_amount.desc())
+            .limit(limit)
+            .all()
+        )
+
     def get_stats_by_status(self) -> List[Tuple[str, int, float]]:
         """
         Get invoice counts and totals grouped by status
