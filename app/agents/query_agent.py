@@ -69,9 +69,11 @@ Always call a function when possible. If ambiguous, ask clarifying questions.
         ]
         
         try:
-            # Use AI with function calling
+            # Use AI with function calling. Pass tenant context so the executed
+            # tool query is scoped to this tenant (defense-in-depth with RLS).
             result = self.ai.chat_with_tools(
                 messages=messages,
+                context={"tenant_id": self.tenant_id},
                 tools=get_tool_definitions(),
                 db=self.db
             )
@@ -95,11 +97,11 @@ Always call a function when possible. If ambiguous, ask clarifying questions.
                     "sql_executed": False
                 }
         
-        except Exception as e:
-            logger.error(f"Query agent failed: {str(e)}")
+        except Exception:
+            logger.exception("Query agent failed")
             return {
                 "query": natural_language_query,
-                "ai_response": f"Sorry, I encountered an error: {str(e)}",
+                "ai_response": "Sorry, the query could not be processed. Please try again.",
                 "data": None,
                 "function_called": None,
                 "sql_executed": False

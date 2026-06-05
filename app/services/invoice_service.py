@@ -596,6 +596,14 @@ class InvoiceService:
                 f"Cannot approve invoice in '{invoice.current_state}' state"
             )
 
+        # Authorize first — fail fast before the governance gates run (those
+        # write/commit audit records, which a non-approver shouldn't be able to
+        # trigger).
+        if not has_permission(current_user["role"], PERM_APPROVE_INVOICE):
+            raise PermissionError(
+                f"Role '{current_user['role']}' does not have permission to approve invoices"
+            )
+
         # Governance gate: vendor must be verified/active before approval
         self._assert_vendor_active(
             invoice, "approve invoice", current_user, "approval_blocked"
@@ -604,12 +612,6 @@ class InvoiceService:
         # Governance gate: a flagged potential duplicate must be reviewed and
         # overridden (with a logged reason) before approval.
         self._assert_duplicate_resolved(invoice)
-
-        # Must be able to approve invoices at all.
-        if not has_permission(current_user["role"], PERM_APPROVE_INVOICE):
-            raise PermissionError(
-                f"Role '{current_user['role']}' does not have permission to approve invoices"
-            )
 
         # Configuration-first approval routing: the required approver role is
         # derived from the tenant's approval_limit policies, so the amount limit

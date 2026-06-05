@@ -1,5 +1,3 @@
-from argparse import OPTIONAL
-from fastapi import HTTPException
 from openai import OpenAI
 import json
 import logging
@@ -34,10 +32,11 @@ class OpenAIProvider(AIProvider):
             
             content = response.choices[0].message.content or ""
             return content
-        
-        except Exception as e:
-            logger.error(f"OpenAI chat failed: {str(e)}")
-            return f"AI error: {str(e)}"
+
+        except Exception:
+            # Log internals server-side; never return raw error text to the client.
+            logger.exception("OpenAI chat failed")
+            return "The assistant is temporarily unavailable. Please try again."
     
     def extract_invoice_fields(
         self, 
@@ -107,11 +106,8 @@ OCR Text:
             # Parse JSON response
             try:
                 result = json.loads(result_text) #type: ignore
-            except json.JSONDecodeError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to parse LLM response as JSON: {e}"
-                )
+            except json.JSONDecodeError:
+                raise ValueError("LLM did not return valid JSON")
             
             # Ensure required fields
             result.setdefault("vendor_name", "")
@@ -127,8 +123,8 @@ OCR Text:
             
             return result
         
-        except Exception as e:
-            logger.error(f"AI invoice extraction failed: {str(e)}")
+        except Exception:
+            logger.exception("AI invoice extraction failed")
             return {
                 "vendor_name": "",
                 "invoice_number": "",
@@ -137,7 +133,7 @@ OCR Text:
                 "tax_amount": 0.0,
                 "confidence": 0,
                 "line_items": [],
-                "error": str(e)
+                "error": "AI extraction failed",
             }
     
     def detect_duplicate_invoices(
@@ -211,62 +207,20 @@ Return ONLY a JSON object:
             
             try:
                 result = json.loads(response.choices[0].message.content) #type: ignore
-            except json.JSONDecodeError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to parse LLM response as JSON: {e}"
-                )
-            
+            except json.JSONDecodeError:
+                raise ValueError("LLM did not return valid JSON")
+
             return result
-        
-        except Exception as e:
-            logger.error(f"AI duplicate detection failed: {str(e)}")
+
+        except Exception:
+            logger.exception("AI duplicate detection failed")
             return {
                 "is_duplicate": False,
                 "confidence": 0.0,
                 "matched_invoice_id": None,
                 "similarity_score": 0.0,
-                "reasoning": f"Error: {str(e)}"
+                "reasoning": "Duplicate analysis is temporarily unavailable.",
             }
-    
-    def query_system(self, query: str, context: Dict[str, Any]) -> str:
-        """Natural language query agent"""
-        try:
-            # Build context-aware prompt
-            system_prompt = f"""You are Sarmaya OS AI Assistant. You help users query invoices, vendors, and financial data.
-
-User Context:
-- Tenant: {context.get('tenant_name', 'Unknown')}
-- Role: {context.get('role', 'user')}
-- Available data: {context.get('data_summary', 'invoices, vendors, policies')}
-
-Answer questions about:
-- Pending invoices
-- Invoice status
-- Vendor information
-- Financial summaries
-- Approval requirements
-
-If you need specific data, say "I need to query the database for..." and suggest a SQL-like filter.
-"""
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": query}
-            ]
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=800
-            )
-            
-            return response.choices[0].message.content or ""
-        
-        except Exception as e:
-            logger.error(f"AI query failed: {str(e)}")
-            return f"Sorry, I encountered an error: {str(e)}"
     
     def chat_with_tools(
         self,
@@ -294,9 +248,10 @@ If you need specific data, say "I need to query the database for..." and suggest
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
                 
-                # Execute the function
+                # Execute the function — scope to the caller's tenant.
                 if db and function_name == "query_invoices":
-                    result = self._execute_invoice_query(db, function_args)
+                    tenant_id = (context or {}).get("tenant_id")
+                    result = self._execute_invoice_query(db, function_args, tenant_id)
                     
                     # Add function result to messages
                     messages.append({
@@ -330,21 +285,26 @@ If you need specific data, say "I need to query the database for..." and suggest
                 "function_result": None
             }
         
-        except Exception as e:
-            logger.error(f"OpenAI chat with tools failed: {str(e)}")
+        except Exception:
+            logger.exception("OpenAI chat with tools failed")
             return {
-                "content": f"AI error: {str(e)}",
+                "content": "The assistant is temporarily unavailable. Please try again.",
                 "function_called": None,
                 "function_result": None
             }
-    
-    def _execute_invoice_query(self, db, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute invoice query based on AI parameters"""
+
+    def _execute_invoice_query(self, db, args: Dict[str, Any], tenant_id: Optional[Any] = None) -> Dict[str, Any]:
+        """Execute invoice query based on AI parameters.
+
+        Always scoped to the caller's tenant: defense-in-depth alongside RLS, so
+        the AI tool can never read another tenant's invoices even if the session
+        is not RLS-bound. A missing tenant_id yields no rows rather than a leak.
+        """
         from app.models.invoice import Invoice
-        from sqlalchemy import func, desc
-        
-        query = db.query(Invoice)
-        
+        from sqlalchemy import desc
+
+        query = db.query(Invoice).filter(Invoice.tenant_id == tenant_id)
+
         # Apply filters
         if args.get("status"):
             query = query.filter(Invoice.current_state == args["status"])

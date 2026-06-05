@@ -15,14 +15,15 @@ DEBUG = settings.DEBUG
 
 app = FastAPI(title="Sarmaya OS")
 
-# CORS Configuration - MUST be added before routes
+# CORS Configuration - MUST be added before routes. Origins come from settings
+# (not a wildcard): "*" with allow_credentials=True is rejected by browsers and
+# would defeat the credentialed (JWT) requests the frontend makes.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods including OPTIONS
-    allow_headers=["*"],  # Allows all headers
-    expose_headers=["*"],
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=settings.CORS_ALLOW_METHODS,
+    allow_headers=settings.CORS_ALLOW_HEADERS,
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 

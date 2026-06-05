@@ -76,20 +76,6 @@ class AIProvider(ABC):
         pass
     
     @abstractmethod
-    def query_system(self, query: str, context: Dict[str, Any]) -> str:
-        """
-        Natural language query for invoices/vendors/stats
-        
-        Args:
-            query: User question ("Show me pending invoices over 100k")
-            context: User context (tenant_id, role, permissions)
-        
-        Returns:
-            Natural language response with data
-        """
-        pass
-    
-    @abstractmethod
     def chat_with_tools(
         self,
         messages: List[Dict[str, str]],

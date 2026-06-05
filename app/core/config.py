@@ -11,8 +11,13 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     
-    # CORS Configuration
-    CORS_ORIGINS: list = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"]
+    # CORS Configuration. Includes the Next.js frontend dev port (9002) plus the
+    # common Vite/CRA ports. Override via the CORS_ORIGINS env var in production.
+    CORS_ORIGINS: list = [
+        "http://localhost:9002", "http://127.0.0.1:9002",
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+    ]
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: list = ["*"]
     CORS_ALLOW_HEADERS: list = ["*"]

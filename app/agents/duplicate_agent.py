@@ -171,11 +171,11 @@ Return ONLY valid JSON (no markdown, no code blocks):
             return result
         
         except Exception as e:
-            print(f"AI comparison failed: {str(e)}")
+            print(f"AI comparison failed: {str(e)}")  # debug
             return {
                 "is_duplicate": False,
                 "confidence": 0.5,
                 "strategy": "fuzzy_ai_failed",
                 "matched_invoice_id": None,
-                "reasoning": f"AI comparison failed: {str(e)}"
+                "reasoning": "Automated comparison was inconclusive; please review manually."
             }
