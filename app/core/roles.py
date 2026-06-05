@@ -154,25 +154,34 @@ def is_valid_role(role: str) -> bool:
 def list_roles() -> list[str]:
     return [r.value for r in UserRole]
 
+def _normalize_role(role: str) -> str:
+    """Roles are stored/compared as their lowercase enum values. Normalize
+    defensively so permission checks never hinge on the casing of the role
+    string carried in a token or passed by a caller."""
+    return (role or "").strip().lower()
+
+
 def get_role_permissions(role: str) -> list[str]:
     """Get all permissions for a given role"""
-    return ROLE_PERMISSIONS.get(role, [])
+    return ROLE_PERMISSIONS.get(_normalize_role(role), [])
 
 def has_permission(role: str, permission: str) -> bool:
     """Check if role has specific permission"""
+    role = _normalize_role(role)
     if role == ADMIN:
         return True  # Admin has all permissions
     return permission in ROLE_PERMISSIONS.get(role, [])
 
 def get_approval_limit(role: str) -> int | None:
     """Get approval limit for role (None = unlimited, 0 = no approval permission)"""
+    role = _normalize_role(role)
     if role == ADMIN:
         return None  # Unlimited
-    
+
     # Only roles with explicit approval permission should have limits
     if role not in APPROVAL_LIMITS:
         return 0  # No approval permission
-    
+
     return APPROVAL_LIMITS.get(role)
 
 def can_approve_invoices(role: str) -> bool:

@@ -42,6 +42,14 @@ class TestHasPermission:
         assert has_permission(MANAGER, PERM_REJECT_INVOICE) is True
         assert has_permission(MANAGER, PERM_CREATE_INVOICE) is False
 
+    def test_permission_check_is_case_insensitive(self):
+        # Roles are lowercase enum values everywhere, but the check must not
+        # hinge on casing of the role string passed in.
+        assert has_permission("ADMIN", PERM_APPROVE_INVOICE) is True
+        assert has_permission("Ap_Clerk", PERM_CREATE_INVOICE) is True
+        assert has_permission("  manager  ", PERM_APPROVE_INVOICE) is True
+        assert has_permission("AUDITOR", PERM_APPROVE_INVOICE) is False
+
     def test_cfo_can_mark_paid(self):
         assert has_permission(CFO, PERM_MARK_PAID_INVOICE) is True
 
