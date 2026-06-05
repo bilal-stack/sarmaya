@@ -73,8 +73,13 @@ Tests: **171 passing** (`./.venv/Scripts/python.exe -m pytest`).
   one. (Tradeoff: logout invalidates all sessions/devices, not just one.)
 - **Workflow/policy versioning** — config is edited in place; Build Book wants
   versioned JSON per workflow.
-- **Cryptographic audit immutability** — audit trail is append-only by
-  convention, not hash-chained.
+- ~~**Cryptographic audit immutability**~~ — **done** (migration `010_audit_hash_chain`):
+  per-object hash chain on `audit_logs` (`prev_hash`/`entry_hash`, SHA-256 of
+  prev + canonical row), written in `log_audit` and verifiable via
+  `GET /audit/verify/{object_type}/{object_id}`. Detects altered/deleted/reordered
+  events within an object. (Scope: per-object, not a tenant-wide ledger; ordering
+  uses `(timestamp, id)`, so two same-microsecond events for one object are a
+  known edge — a tenant-wide sequenced ledger is the next step if needed.)
 - **Decision Register** — Build Book process for logging ambiguities/defaults.
 - **AI-gating discipline** for the existing chat / NL→SQL query agent
   (schema-validated JSON, explainability trace, prompt/model version).
@@ -91,4 +96,4 @@ Tests: **171 passing** (`./.venv/Scripts/python.exe -m pytest`).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `009_user_token_version`.
+- Migration head: `010_audit_hash_chain`.

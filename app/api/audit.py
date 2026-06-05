@@ -9,7 +9,7 @@ from app.api.deps import get_current_user, get_db_session
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.core.enums import UserRole
-from app.schemas.audit import AuditTimeline
+from app.schemas.audit import AuditTimeline, AuditChainVerification
 from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
@@ -124,6 +124,25 @@ def get_audit_timeline(
     """
     try:
         return AuditService(db).get_timeline(object_type, object_id, current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/verify/{object_type}/{object_id}", response_model=AuditChainVerification)
+def verify_audit_chain(
+    object_type: str,
+    object_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Verify that an object's audit trail has not been tampered with.
+
+    Recomputes the per-object hash chain and reports whether it is intact, and
+    if not, the first event where it breaks. Visible to whoever can view the
+    object (same rule as the Live Audit timeline).
+    """
+    try:
+        return AuditService(db).verify_chain(object_type, object_id, current_user)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 

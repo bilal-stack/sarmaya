@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.models.audit_log import AuditLog
 from app.models.invoice import Invoice
+from app.services.audit_integrity import verify_object_chain
 from app.services.policy import explain_approval_routing
 from app.core.roles import (
     has_permission,
@@ -66,6 +67,12 @@ class AuditService:
             "total_events": len(events),
             "events": events,
         }
+
+    def verify_chain(self, object_type: str, object_id: UUID, current_user: dict) -> dict:
+        """Verify the tamper-evident hash chain for an object's audit trail.
+        Visible to whoever can view the object (same rule as the timeline)."""
+        self._require_view(object_type, current_user)
+        return verify_object_chain(self.db, object_type, object_id)
 
     # --- event rendering ----------------------------------------------------
 

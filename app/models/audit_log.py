@@ -45,6 +45,13 @@ class AuditLog(BaseModel):
     ai_provider = Column(String(50), nullable=True)    # "openai", "claude", etc.
     ai_confidence = Column(Integer, nullable=True)     # 0-100
     
+    # Tamper-evidence: each entry is hash-chained to the previous entry for the
+    # same object. entry_hash = SHA-256(prev_hash + canonical(this row)); the
+    # first event for an object has prev_hash = NULL. Altering, deleting, or
+    # reordering an object's history breaks the chain (see audit_integrity).
+    prev_hash = Column(String(64), nullable=True)
+    entry_hash = Column(String(64), nullable=True)
+
     # Timestamp (override to use timestamp instead of created_at)
     timestamp = Column(DateTime, server_default=func.now(), nullable=False)
     

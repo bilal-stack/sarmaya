@@ -1,9 +1,11 @@
+import uuid
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 from uuid import UUID
 
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from app.services.audit_integrity import append_to_chain
 from app.utils.datetime_helpers import utc_now
 
 
@@ -47,6 +49,9 @@ def log_audit(
     user_role = user.role if user else None
 
     audit = AuditLog(
+        # Assign the id up front so it is part of the integrity hash (the chain
+        # is computed before flush, where the column default would not yet run).
+        id=uuid.uuid4(),
         tenant_id=tenant_id,
         user_id=user_id,
         user_email=user_email,
@@ -70,6 +75,8 @@ def log_audit(
         ai_provider=ai_provider,
         ai_confidence=ai_confidence,
     )
+    # Tamper-evident chaining: link this entry to the object's latest entry.
+    append_to_chain(db, audit)
     db.add(audit)
     db.flush()
 

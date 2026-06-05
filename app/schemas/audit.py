@@ -28,3 +28,14 @@ class AuditTimeline(BaseModel):
     policy_reason: Optional[str] = None
     total_events: int
     events: List[AuditTimelineEvent]
+
+
+class AuditChainVerification(BaseModel):
+    """Result of verifying an object's tamper-evident audit hash chain."""
+    object_type: str
+    object_id: UUID
+    total_events: int
+    verified: bool
+    # 0-based index of the first event that fails verification, or None if intact.
+    broken_at_index: Optional[int] = None
+    detail: Optional[str] = None
