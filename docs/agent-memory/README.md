@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **171 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **181 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
