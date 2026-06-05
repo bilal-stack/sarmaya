@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **183 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **192 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
@@ -71,8 +71,12 @@ Tests: **183 passing** (`./.venv/Scripts/python.exe -m pytest`).
   invalidating all of that user's outstanding tokens. `/auth/refresh` now routes
   through `get_current_user`, so a revoked token can't be exchanged for a fresh
   one. (Tradeoff: logout invalidates all sessions/devices, not just one.)
-- **Workflow/policy versioning** — config is edited in place; Build Book wants
-  versioned JSON per workflow.
+- ~~**Workflow/policy versioning**~~ — **done** (migration `011_config_versions`):
+  append-only `config_versions` table stores a full JSON snapshot + monotonic
+  version per config object on every change (approval policy, autopilot settings,
+  workflow transitions — the whole workflow as one versioned document). History
+  is read via `GET /config/versions/{config_type}/{config_key}[/{version}]`. Live
+  tables stay the current source of truth; rollback is the natural next step.
 - ~~**Cryptographic audit immutability**~~ — **done** (migration `010_audit_hash_chain`):
   per-object hash chain on `audit_logs` (`prev_hash`/`entry_hash`, SHA-256 of
   prev + canonical row), written in `log_audit` and verifiable via
@@ -96,4 +100,4 @@ Tests: **183 passing** (`./.venv/Scripts/python.exe -m pytest`).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `010_audit_hash_chain`.
+- Migration head: `011_config_versions`.

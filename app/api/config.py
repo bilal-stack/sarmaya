@@ -15,6 +15,8 @@ from app.services.workflow_config_service import WorkflowConfigService
 from app.services.config_provisioning import ConfigProvisioningService
 from app.schemas.autopilot import AutopilotConfig
 from app.services.autopilot_service import AutopilotService
+from app.schemas.config_version import ConfigVersionResponse
+from app.services.config_versioning import ConfigVersionService
 
 router = APIRouter(prefix="/config", tags=["Configuration"])
 
@@ -74,6 +76,48 @@ def _raise_for(exc: Exception) -> None:
     if isinstance(exc, PermissionError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# ============================================
+# CONFIG VERSION HISTORY (append-only)
+# ============================================
+
+@router.get(
+    "/versions/{config_type}/{config_key}",
+    response_model=List[ConfigVersionResponse],
+)
+def list_config_versions(
+    config_type: str,
+    config_key: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Full edit history (newest first) of a config object: an approval policy
+    (`approval_policy/{policy_id}`), the autopilot settings (`autopilot/autopilot`),
+    or a workflow (`workflow/{workflow_type}`). Each entry is the post-change JSON
+    snapshot under a monotonic version number."""
+    try:
+        return ConfigVersionService(db).list_versions(config_type, config_key, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get(
+    "/versions/{config_type}/{config_key}/{version}",
+    response_model=ConfigVersionResponse,
+)
+def get_config_version(
+    config_type: str,
+    config_key: str,
+    version: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Fetch a single historical version snapshot of a config object."""
+    try:
+        return ConfigVersionService(db).get_version(config_type, config_key, version, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 # ============================================

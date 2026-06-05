@@ -10,6 +10,7 @@ from app.models.audit_log import AuditLog
 from app.services.invoice_service import InvoiceService
 from app.services.workflow import transition_state
 from app.services.audit import log_audit
+from app.services.config_versioning import record_version, TYPE_AUTOPILOT
 from app.schemas.autopilot import AutopilotConfig
 from app.core.enums import InvoiceState, VendorStatus
 from app.core.roles import has_permission, PERM_APPROVE_INVOICE, PERM_MANAGE_POLICIES
@@ -51,6 +52,7 @@ class AutopilotService:
             policy.rule_config = rule
             policy.is_active = True
             self.policy_repo.update(policy)
+            change_action = "updated"
         else:
             policy = Policy(
                 tenant_id=current_user["tenant_id"],
@@ -63,6 +65,14 @@ class AutopilotService:
                 priority=0,
             )
             self.policy_repo.create(policy)
+            change_action = "created"
+
+        # Autopilot settings are a per-tenant singleton; version them under a
+        # fixed key so their full edit history is preserved.
+        record_version(
+            self.db, current_user["tenant_id"], TYPE_AUTOPILOT, TYPE_AUTOPILOT,
+            rule, change_action, current_user["id"],
+        )
         self.policy_repo.commit()
 
         log_audit(

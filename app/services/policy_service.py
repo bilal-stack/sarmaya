@@ -6,6 +6,7 @@ from app.repositories.policy_repository import PolicyRepository
 from app.models.policy import Policy
 from app.schemas.policy import ApprovalPolicyCreate, ApprovalPolicyUpdate
 from app.services.audit import log_audit
+from app.services.config_versioning import record_version, policy_snapshot, TYPE_APPROVAL_POLICY
 from app.core.roles import has_permission, PERM_MANAGE_POLICIES
 
 POLICY_TYPE = "approval_limit"
@@ -47,6 +48,10 @@ class ApprovalPolicyService:
             priority=data.priority,
         )
         policy = self.repository.create(policy)
+        record_version(
+            self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy.id,
+            policy_snapshot(policy), "created", current_user["id"],
+        )
         self.repository.commit()
         policy = self.repository.refresh(policy)
 
@@ -88,6 +93,10 @@ class ApprovalPolicyService:
             policy.rule_config = data.rule.model_dump()
 
         policy = self.repository.update(policy)
+        record_version(
+            self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy.id,
+            policy_snapshot(policy), "updated", current_user["id"],
+        )
         self.repository.commit()
         policy = self.repository.refresh(policy)
 
@@ -107,7 +116,14 @@ class ApprovalPolicyService:
         self._require_manage(current_user)
         policy = self._load(policy_id)
 
+        # Snapshot the final state before removal so the deletion is itself a
+        # recorded version in the object's history.
+        final_snapshot = policy_snapshot(policy)
         self.repository.delete(policy)
+        record_version(
+            self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy_id,
+            final_snapshot, "deleted", current_user["id"],
+        )
         self.repository.commit()
 
         log_audit(

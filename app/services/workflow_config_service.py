@@ -4,6 +4,7 @@ from typing import List
 from app.repositories.workflow_repository import WorkflowRepository
 from app.models.workflow_state import WorkflowState
 from app.services.audit import log_audit
+from app.services.config_versioning import record_version, workflow_snapshot, TYPE_WORKFLOW
 from app.core.roles import has_permission, PERM_MANAGE_WORKFLOW
 
 
@@ -46,6 +47,13 @@ class WorkflowConfigService:
         before = list(state.allowed_transitions or [])
         state.allowed_transitions = allowed_transitions
         state = self.repository.update(state)
+
+        # Version the whole workflow (all states + transitions) as one document.
+        record_version(
+            self.db, current_user["tenant_id"], TYPE_WORKFLOW, workflow_type,
+            workflow_snapshot(self.repository.list_states(workflow_type)),
+            "updated", current_user["id"],
+        )
         self.repository.commit()
         state = self.repository.refresh(state)
 

@@ -8,6 +8,7 @@ from app.models.file import File
 from app.models.invoice import Invoice
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.audit_log import AuditLog
+from app.models.config_version import ConfigVersion
 
 __all__ = [
     "Base",
@@ -21,5 +22,6 @@ __all__ = [
     "Invoice",
     "AuditLog",
     "Conversation",
-    "ConversationMessage"
+    "ConversationMessage",
+    "ConfigVersion",
 ]
