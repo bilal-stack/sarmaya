@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, JSON, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, DateTime, JSON, ForeignKey, Integer, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
@@ -17,6 +17,11 @@ class User(BaseModel):
     
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime, nullable=True)
+
+    # Monotonic counter embedded in every JWT this user is issued. Logout (and
+    # password change) increments it, which invalidates all previously issued
+    # tokens on their next request — the revocation mechanism for stateless JWTs.
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
     
     # Relationships
     tenant = relationship("Tenant", backref="users")

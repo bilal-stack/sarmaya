@@ -65,8 +65,12 @@ Tests: **171 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
-- **Token revocation on logout** — stateless JWT can't be revoked; needs a token
-  store or per-user token version. (Claim *staleness* is already fixed.)
+- ~~**Token revocation on logout**~~ — **done** (migration `009_user_token_version`):
+  a per-user `token_version` is embedded in every JWT and checked live in
+  `get_current_user`; `/auth/logout` and `/auth/change-password` bump it,
+  invalidating all of that user's outstanding tokens. `/auth/refresh` now routes
+  through `get_current_user`, so a revoked token can't be exchanged for a fresh
+  one. (Tradeoff: logout invalidates all sessions/devices, not just one.)
 - **Workflow/policy versioning** — config is edited in place; Build Book wants
   versioned JSON per workflow.
 - **Cryptographic audit immutability** — audit trail is append-only by
@@ -87,4 +91,4 @@ Tests: **171 passing** (`./.venv/Scripts/python.exe -m pytest`).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `008_seed_config_policies`.
+- Migration head: `009_user_token_version`.

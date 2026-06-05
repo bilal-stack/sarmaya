@@ -43,6 +43,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             detail="User not found or inactive",
         )
 
+    # Token revocation: every token carries the user's token_version at issue
+    # time. Logout (and password change) bumps the live counter, so a token
+    # minted before the bump no longer matches and is rejected here. Tokens
+    # issued before this feature lack the claim — default both sides to 0 so
+    # they keep working until they expire or the user logs out once.
+    if payload.get("token_version", 0) != (user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+        )
+
     # Read identity (role, email, active) live from the user row rather than
     # trusting the token claims. A JWT is valid for hours, so a role change or
     # deactivation must take effect on the next request — not at token expiry.
@@ -51,6 +62,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         "tenant_id": str(user.tenant_id),
         "email": user.email,
         "role": getattr(user.role, "value", user.role) or "user",
+        "token_version": user.token_version or 0,
     }
 
 

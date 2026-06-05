@@ -21,6 +21,18 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
+def _token_claims(user: User) -> dict:
+    """Claims embedded in every issued token. token_version is what makes
+    logout/password-change able to revoke previously issued tokens."""
+    return {
+        "sub": str(user.id),
+        "tenant_id": str(user.tenant_id),
+        "email": user.email,
+        "role": getattr(user.role, "value", user.role),
+        "token_version": user.token_version or 0,
+    }
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     payload = decode_access_token(token)
     if not payload:
@@ -34,6 +46,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Reject tokens minted before the user's current token_version (revoked on
+    # logout / password change). Defaults to 0 for tokens predating the feature.
+    if payload.get("token_version", 0) != (user.token_version or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
     return user
 
 
@@ -71,13 +87,7 @@ def register(
     db.commit()
     db.refresh(user)
 
-    token_payload = {
-        "sub": str(user.id),
-        "tenant_id": str(user.tenant_id),
-        "email": user.email,
-        "role": user.role,
-    }
-    access_token = create_access_token(token_payload)
+    access_token = create_access_token(_token_claims(user))
 
     return {"access_token": access_token, "token_type": "bearer", "user": user}
 
@@ -97,13 +107,7 @@ def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("dem
     if not user or not verify_password(data.password, hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    token_payload = {
-        "sub": str(user.id),
-        "tenant_id": str(user.tenant_id),
-        "email": user.email,
-        "role": user.role,
-    }
-    access_token = create_access_token(token_payload)
+    access_token = create_access_token(_token_claims(user))
     return {"access_token": access_token, "token_type": "bearer", "user": user}
 
 
@@ -113,9 +117,15 @@ def me(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
-def logout():
-    # Stateless JWT: cannot truly invalidate without a token store/blacklist.
-    # Placeholder: client should delete token; add blacklist later if needed.
+def logout(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # Revoke every token issued to this user by bumping token_version: the next
+    # request carrying an old token fails the version check in get_current_user.
+    current_user.token_version = (current_user.token_version or 0) + 1
+    db.add(current_user)
+    db.commit()
     return {"ok": True}
 
 
@@ -140,7 +150,7 @@ def update_me(
     return current_user
 
 
-@router.post("/change-password", status_code=status.HTTP_200_OK)
+@router.post("/change-password", response_model=Token)
 def change_password(
     current_password: str,
     new_password: str,
@@ -151,25 +161,22 @@ def change_password(
     hashed_password = cast(str, current_user.password)
     if not verify_password(current_password, hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password invalid")
-    # Update to new password
+    # Update password and bump token_version so any OTHER session that knew the
+    # old password is logged out. The caller would be logged out too, so we
+    # hand back a fresh token carrying the new version to keep this session live.
     current_user.password = get_password_hash(new_password)
+    current_user.token_version = (current_user.token_version or 0) + 1
     db.add(current_user)
     db.commit()
-    return {"ok": True}
+    db.refresh(current_user)
+    new_token = create_access_token(_token_claims(current_user))
+    return {"access_token": new_token, "token_type": "bearer"}
 
 
 @router.post("/refresh", response_model=Token)
-def refresh(token: str = Depends(oauth2_scheme)):
-    payload = decode_access_token(token)
-    if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    # Issue new token with same subject/claims and new expiry
-    new_token = create_access_token(
-        {
-            "sub": payload.get("sub"),
-            "tenant_id": payload.get("tenant_id"),
-            "email": payload.get("email"),
-            "role": payload.get("role"),
-        }
-    )
+def refresh(current_user: User = Depends(get_current_user)):
+    # Depending on get_current_user means a revoked/stale token cannot be
+    # exchanged for a new one (it fails the token_version check first). The new
+    # token carries the live claims (incl. current token_version) and a fresh exp.
+    new_token = create_access_token(_token_claims(current_user))
     return {"access_token": new_token, "token_type": "bearer"}

@@ -63,3 +63,53 @@ class TestGetCurrentUser:
         with pytest.raises(HTTPException) as exc:
             get_current_user(token="not-a-jwt", db=db)
         assert exc.value.status_code == 401
+
+
+class TestTokenRevocation:
+    """token_version embedded in the JWT is the revocation mechanism: logout
+    (and password change) bumps the user's counter, so older tokens stop
+    matching and are rejected on their next request."""
+
+    def _token(self, user: dict, token_version) -> str:
+        claims = {
+            "sub": user["id"],
+            "tenant_id": user["tenant_id"],
+            "email": user["email"],
+            "role": user["role"],
+        }
+        if token_version is not None:
+            claims["token_version"] = token_version
+        return create_access_token(claims)
+
+    def test_token_matching_current_version_is_accepted(self, db, make_user):
+        user = make_user(UserRole.AP_CLERK)
+        token = self._token(user, token_version=0)
+
+        result = get_current_user(token=token, db=db)
+        assert result["id"] == user["id"]
+        assert result["token_version"] == 0
+
+    def test_token_rejected_after_version_bump(self, db, make_user):
+        user = make_user(UserRole.AP_CLERK)
+        # Token issued at version 0 (i.e. before logout).
+        token = self._token(user, token_version=0)
+
+        # Logout / password-change bumps the live counter.
+        row = db.query(User).filter(User.id == user["id"]).first()
+        row.token_version = 1
+        db.flush()
+
+        with pytest.raises(HTTPException) as exc:
+            get_current_user(token=token, db=db)
+        assert exc.value.status_code == 401
+        assert "revoked" in exc.value.detail.lower()
+
+    def test_token_without_version_claim_defaults_to_zero(self, db, make_user):
+        """Tokens minted before this feature carry no token_version claim; they
+        must keep working (treated as version 0) until they expire or a logout
+        bumps the counter."""
+        user = make_user(UserRole.AP_CLERK)
+        token = self._token(user, token_version=None)
+
+        result = get_current_user(token=token, db=db)
+        assert result["id"] == user["id"]
