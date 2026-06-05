@@ -24,9 +24,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     
     user_id = payload.get("sub")
     tenant_id = payload.get("tenant_id")
-    email = payload.get("email")
-    role = payload.get("role")
-    
+
     if not user_id or not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -44,12 +42,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
-    
+
+    # Read identity (role, email, active) live from the user row rather than
+    # trusting the token claims. A JWT is valid for hours, so a role change or
+    # deactivation must take effect on the next request — not at token expiry.
     return {
-        "id": user_id,
-        "tenant_id": tenant_id,
-        "email": email,
-        "role": role or "user",
+        "id": str(user.id),
+        "tenant_id": str(user.tenant_id),
+        "email": user.email,
+        "role": getattr(user.role, "value", user.role) or "user",
     }
 
 
