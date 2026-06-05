@@ -49,8 +49,6 @@ def log_audit(
     user_role = user.role if user else None
 
     audit = AuditLog(
-        # Assign the id up front so it is part of the integrity hash (the chain
-        # is computed before flush, where the column default would not yet run).
         id=uuid.uuid4(),
         tenant_id=tenant_id,
         user_id=user_id,
@@ -75,9 +73,15 @@ def log_audit(
         ai_provider=ai_provider,
         ai_confidence=ai_confidence,
     )
+    db.add(audit)
+    # Persist first, then reload, so the integrity hash is computed over the
+    # exact values Postgres stores (e.g. enums and tz-naive timestamps), which
+    # is what verification later re-reads. Hashing the in-memory Python values
+    # instead would not match after a round-trip.
+    db.flush()
+    db.refresh(audit)
     # Tamper-evident chaining: link this entry to the object's latest entry.
     append_to_chain(db, audit)
-    db.add(audit)
     db.flush()
 
 
