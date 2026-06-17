@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     
     # Anthropic Configuration
     ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-opus-4-8"  # override in .env (e.g. claude-haiku-4-5 for cheaper)
 
     # Google Gemini Configuration
     GOOGLE_AI_API_KEY: str = ""

@@ -13,8 +13,8 @@ def get_ai_provider() -> AIProvider:
     if provider == "openai":
         return OpenAIProvider()
     elif provider == "claude":
-        # Future: Anthropic Claude
-        raise NotImplementedError("Claude provider not yet implemented")
+        from app.services.ai.claude_provider import ClaudeProvider
+        return ClaudeProvider()
     elif provider == "gemini":
         # Future: Google Gemini
         raise NotImplementedError("Gemini provider not yet implemented")

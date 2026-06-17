@@ -20,6 +20,7 @@ passlib[bcrypt]>=1.7.4,<2
 google-cloud-vision>=3.8,<4
 google-cloud-documentai>=3.1,<4  # Document AI
 openai>=1.50
+anthropic>=0.40  # Claude provider
 
 # Utilities / Settings
 python-dotenv>=1.0
