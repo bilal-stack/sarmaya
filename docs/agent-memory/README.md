@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **203 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **208 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
@@ -87,8 +87,12 @@ Tests: **203 passing** (`./.venv/Scripts/python.exe -m pytest`).
   uses `(timestamp, id)`, so two same-microsecond events for one object are a
   known edge — a tenant-wide sequenced ledger is the next step if needed.)
 - **Decision Register** — Build Book process for logging ambiguities/defaults.
-- **AI-gating discipline** for the existing chat / NL→SQL query agent
-  (schema-validated JSON, explainability trace, prompt/model version).
+- **AI-gating discipline** — *started*: duplicate-detection output is now
+  schema-validated (`app/schemas/ai.py` `DuplicateDetectionResult`) with
+  model/provider provenance, and malformed AI output falls back to a safe
+  non-duplicate "manual review" result (AI never finalizes). Still to do: same
+  gating for the chat / NL→SQL query agent and the OCR extraction result, plus a
+  fuller explainability trace.
 - **`print()` → logging** in `app/agents/**` (left intentionally for now —
   console logging wasn't surfacing).
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,

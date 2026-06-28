@@ -12,16 +12,30 @@ from sqlalchemy.orm import Session
 
 from app.services.ai import get_ai_provider
 from app.agents.tools.sql_tools import SQLTools
+from app.schemas.ai import DuplicateDetectionResult
+from app.core.config import settings
 
 
 class DuplicateDetectionAgent:
     """Agent for intelligent duplicate detection"""
-    
+
     def __init__(self, db: Session, tenant_id: str):
         self.db = db
         self.tenant_id = tenant_id
         self.tools = SQLTools(db, tenant_id)
         self.ai = get_ai_provider()
+
+    def _finalize(self, raw: Dict[str, Any], ai_used: bool = False) -> Dict[str, Any]:
+        """Schema-validate every result the agent returns. AI-produced results
+        also carry model/provider provenance; malformed AI output is replaced
+        with a safe non-duplicate result (see DuplicateDetectionResult)."""
+        provenance = None
+        if ai_used:
+            provenance = {
+                "ai_provider": settings.AI_PROVIDER,
+                "ai_model": getattr(self.ai, "model", None),
+            }
+        return DuplicateDetectionResult.validated(raw, provenance).model_dump()
     
     def detect(
         self,
@@ -49,13 +63,13 @@ class DuplicateDetectionAgent:
         exact_match = self.tools.check_exact_duplicate(vendor_name, invoice_number)
         if exact_match:
             print(f"✅ EXACT MATCH found: {exact_match['id']}")
-            return {
+            return self._finalize({
                 "is_duplicate": True,
                 "confidence": 1.0,
                 "strategy": "exact",
                 "matched_invoice_id": exact_match["id"],
                 "reasoning": f"Exact match: Invoice {invoice_number} already exists for {exact_match['vendor_name']}"
-            }
+            })
         
         print("❌ No exact match, trying fuzzy search...")
         
@@ -70,13 +84,13 @@ class DuplicateDetectionAgent:
         
         if not similar:
             print("❌ No similar invoices found")
-            return {
+            return self._finalize({
                 "is_duplicate": False,
                 "confidence": 1.0,
                 "strategy": "none",
                 "matched_invoice_id": None,
                 "reasoning": "No similar invoices found"
-            }
+            })
         
         print(f"🤖 Sending {len(similar)} candidates to AI for analysis...")
         
@@ -93,8 +107,9 @@ class DuplicateDetectionAgent:
         )
         
         print(f"🤖 AI result: {ai_result}")
-        
-        return ai_result
+
+        # AI-produced result: schema-validate and attach model/provider provenance.
+        return self._finalize(ai_result, ai_used=True)
     
     def _ai_comprehensive_comparison(
         self,
