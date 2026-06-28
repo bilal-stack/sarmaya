@@ -9,6 +9,7 @@ from app.models.invoice import Invoice
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.audit_log import AuditLog
 from app.models.config_version import ConfigVersion
+from app.models.ai_action_log import AIActionLog
 
 __all__ = [
     "Base",
@@ -24,4 +25,5 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "ConfigVersion",
+    "AIActionLog",
 ]

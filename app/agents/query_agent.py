@@ -9,13 +9,18 @@ Examples:
 
 import logging
 import json
+import time
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
 from app.services.ai import get_ai_provider
 from app.agents.tools.sql_tools import SQLTools, get_tool_definitions
+from app.services.ai_action_log import log_ai_action, STATUS_COMPLETED, STATUS_ERROR
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+PROMPT_VERSION = "nl-query-v1"
 
 
 class QueryAgent:
@@ -68,6 +73,7 @@ Always call a function when possible. If ambiguous, ask clarifying questions.
             {"role": "user", "content": natural_language_query}
         ]
         
+        started = time.monotonic()
         try:
             # Use AI with function calling. Pass tenant context so the executed
             # tool query is scoped to this tenant (defense-in-depth with RLS).
@@ -77,7 +83,12 @@ Always call a function when possible. If ambiguous, ask clarifying questions.
                 tools=get_tool_definitions(),
                 db=self.db
             )
-            
+
+            self._log(
+                STATUS_COMPLETED, started, natural_language_query,
+                output_summary=f"function={result.get('function_called')}",
+            )
+
             if result.get("function_called"):
                 # Function was executed
                 return {
@@ -96,9 +107,10 @@ Always call a function when possible. If ambiguous, ask clarifying questions.
                     "function_called": None,
                     "sql_executed": False
                 }
-        
+
         except Exception:
             logger.exception("Query agent failed")
+            self._log(STATUS_ERROR, started, natural_language_query, output_summary="error")
             return {
                 "query": natural_language_query,
                 "ai_response": "Sorry, the query could not be processed. Please try again.",
@@ -106,6 +118,20 @@ Always call a function when possible. If ambiguous, ask clarifying questions.
                 "function_called": None,
                 "sql_executed": False
             }
+
+    def _log(self, status: str, started: float, query_text: str, output_summary: str) -> None:
+        """Record the AI action (Build Book: every AI action logged)."""
+        log_ai_action(
+            self.db, self.tenant_id, self.user_context.get("id"),
+            action="nl_query",
+            status=status,
+            ai_provider=settings.AI_PROVIDER,
+            ai_model=getattr(self.ai, "model", None),
+            prompt_version=PROMPT_VERSION,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            input_summary=query_text,
+            output_summary=output_summary,
+        )
     
     def explain_query(self, natural_language_query: str) -> Dict[str, Any]:
         """Explain what SQL would be generated (dry run)"""

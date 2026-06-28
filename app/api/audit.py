@@ -10,7 +10,9 @@ from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.core.enums import UserRole
 from app.schemas.audit import AuditTimeline, AuditChainVerification
+from app.schemas.ai import AIActionLogResponse
 from app.services.audit_service import AuditService
+from app.services.ai_action_log import AIActionLogService
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -145,6 +147,24 @@ def verify_audit_chain(
         return AuditService(db).verify_chain(object_type, object_id, current_user)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/ai-actions", response_model=List[AIActionLogResponse])
+def list_ai_actions(
+    action: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: dict = Depends(require_auditor_role),
+    db: Session = Depends(get_db_session),
+):
+    """The AI-action audit trail: every AI invocation with its model/provider,
+    prompt version, confidence, latency, and status (completed / failed_schema /
+    hitl_requested). Auditor/admin only."""
+    rows, _ = AIActionLogService(db).list_actions(
+        current_user, action=action, status=status_filter, limit=limit, offset=offset
+    )
+    return rows
 
 
 @router.get("/trail/{object_type}/{object_id}")

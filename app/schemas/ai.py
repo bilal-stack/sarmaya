@@ -6,11 +6,32 @@ carry model/provider provenance — and malformed AI output must never be truste
 output and fall back to a conservative default when it doesn't conform.
 """
 import logging
+from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
+
+
+class AIActionLogResponse(BaseModel):
+    """One AI-action audit record (provenance + status + explainability trace)."""
+    id: UUID
+    action: str
+    status: str
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    confidence: Optional[float] = None
+    latency_ms: Optional[int] = None
+    input_summary: Optional[str] = None
+    output_summary: Optional[str] = None
+    object_type: Optional[str] = None
+    object_id: Optional[UUID] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DuplicateDetectionResult(BaseModel):

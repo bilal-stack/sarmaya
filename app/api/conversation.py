@@ -224,6 +224,7 @@ def query_invoices(
             db=db,
             tenant_id=current_user["tenant_id"],
             user_context={
+                "id": current_user["id"],
                 "tenant_id": current_user["tenant_id"],
                 "role": current_user["role"],
                 "email": current_user["email"]
@@ -268,7 +269,8 @@ def detect_duplicate(
         # Use Duplicate Detection Agent
         agent = DuplicateDetectionAgent(
             db=db,
-            tenant_id=current_user["tenant_id"]
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
         )
 
         result = agent.detect(

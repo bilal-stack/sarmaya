@@ -7,21 +7,26 @@ Strategies:
 3. Line item comparison (deep semantic similarity)
 """
 
+import time
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 
 from app.services.ai import get_ai_provider
 from app.agents.tools.sql_tools import SQLTools
 from app.schemas.ai import DuplicateDetectionResult
+from app.services.ai_action_log import log_ai_action, STATUS_COMPLETED, STATUS_FAILED_SCHEMA
 from app.core.config import settings
+
+PROMPT_VERSION = "dup-detect-v1"
 
 
 class DuplicateDetectionAgent:
     """Agent for intelligent duplicate detection"""
 
-    def __init__(self, db: Session, tenant_id: str):
+    def __init__(self, db: Session, tenant_id: str, user_id: Optional[str] = None):
         self.db = db
         self.tenant_id = tenant_id
+        self.user_id = user_id
         self.tools = SQLTools(db, tenant_id)
         self.ai = get_ai_provider()
 
@@ -93,8 +98,9 @@ class DuplicateDetectionAgent:
             })
         
         print(f"🤖 Sending {len(similar)} candidates to AI for analysis...")
-        
+
         # Strategy 3: AI analysis of ALL candidates
+        started = time.monotonic()
         ai_result = self._ai_comprehensive_comparison(
             current_invoice={
                 "vendor_name": vendor_name,
@@ -105,11 +111,27 @@ class DuplicateDetectionAgent:
             },
             candidates=similar
         )
-        
+        latency_ms = int((time.monotonic() - started) * 1000)
+
         print(f"🤖 AI result: {ai_result}")
 
         # AI-produced result: schema-validate and attach model/provider provenance.
-        return self._finalize(ai_result, ai_used=True)
+        finalized = self._finalize(ai_result, ai_used=True)
+        # Log the AI action (Build Book: every AI action logged with provenance).
+        log_ai_action(
+            self.db, self.tenant_id, self.user_id,
+            action="duplicate_detection",
+            status=STATUS_FAILED_SCHEMA if finalized.get("strategy") == "schema_invalid" else STATUS_COMPLETED,
+            ai_provider=settings.AI_PROVIDER,
+            ai_model=getattr(self.ai, "model", None),
+            prompt_version=PROMPT_VERSION,
+            confidence=finalized.get("confidence"),
+            latency_ms=latency_ms,
+            input_summary=f"{vendor_name} | {invoice_number} | {total_amount}",
+            output_summary=finalized.get("reasoning"),
+            object_type="invoice",
+        )
+        return finalized
     
     def _ai_comprehensive_comparison(
         self,

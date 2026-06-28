@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **208 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **212 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
@@ -87,12 +87,16 @@ Tests: **208 passing** (`./.venv/Scripts/python.exe -m pytest`).
   uses `(timestamp, id)`, so two same-microsecond events for one object are a
   known edge — a tenant-wide sequenced ledger is the next step if needed.)
 - **Decision Register** — Build Book process for logging ambiguities/defaults.
-- **AI-gating discipline** — *started*: duplicate-detection output is now
+- **AI-gating discipline** — *largely done*. Duplicate-detection output is
   schema-validated (`app/schemas/ai.py` `DuplicateDetectionResult`) with
-  model/provider provenance, and malformed AI output falls back to a safe
-  non-duplicate "manual review" result (AI never finalizes). Still to do: same
-  gating for the chat / NL→SQL query agent and the OCR extraction result, plus a
-  fuller explainability trace.
+  model/provider provenance; malformed AI output falls back to a safe
+  non-duplicate "manual review" result (AI never finalizes). **Every AI action is
+  now logged** (migration `012_ai_action_logs` + `log_ai_action`): the
+  duplicate-detection and NL→SQL query agents record provider/model, prompt
+  version, confidence, latency, in/out summary, and status (completed /
+  failed_schema / error) — the Build Book Appendix-A `ai.*` event family. Read
+  via `GET /audit/ai-actions` (auditor/admin). Still to do: schema-validate the
+  OCR extraction result, and a richer "signals used" explainability trace.
 - **`print()` → logging** in `app/agents/**` (left intentionally for now —
   console logging wasn't surfacing).
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,
