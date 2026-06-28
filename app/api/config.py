@@ -120,6 +120,26 @@ def get_config_version(
         _raise_for(e)
 
 
+@router.post(
+    "/versions/{config_type}/{config_key}/{version}/restore",
+    response_model=ConfigVersionResponse,
+)
+def restore_config_version(
+    config_type: str,
+    config_key: str,
+    version: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Roll a config object back to a previous version. Re-applies that version's
+    snapshot as the current config and records the rollback as a new version
+    (change_action="restored"). Returns the new version entry."""
+    try:
+        return ConfigVersionService(db).restore_version(config_type, config_key, version, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 # ============================================
 # APPROVAL POLICIES (approval routing matrix)
 # ============================================

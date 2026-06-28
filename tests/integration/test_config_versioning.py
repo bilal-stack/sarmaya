@@ -125,3 +125,55 @@ class TestVersionReadAccess:
         clerk = make_user(UserRole.AP_CLERK)  # lacks policies.manage
         with pytest.raises(PermissionError):
             ConfigVersionService(db).list_versions(TYPE_APPROVAL_POLICY, "x", clerk)
+
+
+class TestRollback:
+    def test_restore_policy_reapplies_old_rule_and_records_version(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        psvc = ApprovalPolicyService(db)
+        policy = psvc.create_policy(
+            ApprovalPolicyCreate(policy_name="Limit", rule=_rule(250_000)), admin
+        )  # v1
+        psvc.update_policy(policy.id, ApprovalPolicyUpdate(rule=_rule(500_000)), admin)  # v2
+
+        restored = ConfigVersionService(db).restore_version(
+            TYPE_APPROVAL_POLICY, str(policy.id), 1, admin
+        )
+
+        # The rollback is recorded as a new version.
+        assert restored.version == 3
+        assert restored.change_action == "restored"
+        # The live policy reflects v1's rule again.
+        live = psvc.get_policy(policy.id, admin)
+        assert live.rule_config["amount_threshold"] == 250_000
+
+    def test_restore_workflow_reapplies_transitions(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        ConfigProvisioningService(db).initialize_defaults(admin)
+        wsvc = WorkflowConfigService(db)
+        wsvc.update_transitions("invoice", "draft", ["validated"], admin)            # v1
+        wsvc.update_transitions("invoice", "draft", ["validated", "cancelled"], admin)  # v2
+
+        ConfigVersionService(db).restore_version(TYPE_WORKFLOW, "invoice", 1, admin)
+
+        states = {s.state_name: s for s in wsvc.list_states("invoice", admin)}
+        assert states["draft"].allowed_transitions == ["validated"]
+
+    def test_restore_autopilot_reapplies_settings(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        asvc = AutopilotService(db)
+        asvc.set_config(AutopilotConfig(enabled=True, max_auto_approve_amount=1000), admin)  # v1
+        asvc.set_config(AutopilotConfig(enabled=True, max_auto_approve_amount=5000), admin)  # v2
+
+        ConfigVersionService(db).restore_version(TYPE_AUTOPILOT, TYPE_AUTOPILOT, 1, admin)
+
+        assert asvc.get_config(admin).max_auto_approve_amount == 1000
+
+    def test_restore_requires_manage_permission(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        policy = ApprovalPolicyService(db).create_policy(
+            ApprovalPolicyCreate(policy_name="P", rule=_rule(1)), admin
+        )
+        clerk = make_user(UserRole.AP_CLERK)
+        with pytest.raises(PermissionError):
+            ConfigVersionService(db).restore_version(TYPE_APPROVAL_POLICY, str(policy.id), 1, clerk)

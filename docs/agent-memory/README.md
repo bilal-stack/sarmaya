@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **192 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **203 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
@@ -76,7 +76,9 @@ Tests: **192 passing** (`./.venv/Scripts/python.exe -m pytest`).
   version per config object on every change (approval policy, autopilot settings,
   workflow transitions — the whole workflow as one versioned document). History
   is read via `GET /config/versions/{config_type}/{config_key}[/{version}]`. Live
-  tables stay the current source of truth; rollback is the natural next step.
+  tables stay the current source of truth. **Rollback done too**: `POST
+  /config/versions/{config_type}/{config_key}/{version}/restore` re-applies a past
+  snapshot as current config and records the rollback as a new `restored` version.
 - ~~**Cryptographic audit immutability**~~ — **done** (migration `010_audit_hash_chain`):
   per-object hash chain on `audit_logs` (`prev_hash`/`entry_hash`, SHA-256 of
   prev + canonical row), written in `log_audit` and verifiable via
