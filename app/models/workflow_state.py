@@ -17,6 +17,10 @@ class WorkflowState(BaseModel):
     is_final = Column(Boolean, default=False)
     
     allowed_transitions = Column(JSON, default=[])
+    # Named guards per target state: {target_state: [guard_name, ...]}. A
+    # transition fires only if all guards for that target pass (see
+    # app/services/workflow_guards.py). Configuration-first, versioned.
+    guards = Column(JSON, default={})
     color = Column(String(20), nullable=True)
     
     # Relationships

@@ -53,7 +53,7 @@ class ConfigProvisioningService:
         if self.workflow_repo.count_states(WORKFLOW_TYPE) > 0:
             return 0
         count = 0
-        for name, display, order, is_initial, is_final, transitions, color in DEFAULT_INVOICE_STATES:
+        for name, display, order, is_initial, is_final, transitions, color, guards in DEFAULT_INVOICE_STATES:
             self.workflow_repo.create(WorkflowState(
                 tenant_id=tenant_id,
                 workflow_type=WORKFLOW_TYPE,
@@ -63,6 +63,7 @@ class ConfigProvisioningService:
                 is_initial=is_initial,
                 is_final=is_final,
                 allowed_transitions=transitions,
+                guards=guards,
                 color=color,
             ))
             count += 1

@@ -62,3 +62,12 @@ Owner:
 - Rationale: Enforces the control where it bites (clerks/managers both hold vendors.manage) while keeping admin operability. Finer config (per-rule toggles, thresholds, the vendor-bank-change rule) is a follow-up.
 - Impact: `app/services/sod.py` enforced in invoice approval + vendor activation; blocked attempts are audited.
 - Owner: bilal (dev)
+
+**DR-006 — Transition guards: engine layer alongside existing service gates**
+- Date: 2026-06-05
+- Context: Build Book wants per-transition guards in versioned config; the invoice service already enforces the same checks imperatively (validate = required fields; approve = vendor active + duplicate resolved), with their own audit records and specific error types.
+- Options: (a) add a config-driven guard engine in `transition_state`, keep the service's explicit gates (dual enforcement, transitional); (b) rip the gates out of the service and delegate entirely to the engine now.
+- Decision: (a) — add the guard engine + seed guards matching current behavior; leave the service gates in place for now.
+- Rationale: Delivers the workflow-first mechanism (guards as versioned config, usable by any workflow) with zero behavior change and no risk to the live invoice flow. Full consolidation onto the engine is a follow-up.
+- Impact: `app/services/workflow_guards.py`, `guards` on `workflow_states` (migration 013); seeded defaults; versioned in the workflow snapshot. Invoice flows are momentarily dual-checked (service gate fires first; engine guard is a config-first safety net).
+- Owner: bilal (dev)

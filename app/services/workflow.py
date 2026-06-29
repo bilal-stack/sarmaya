@@ -4,6 +4,7 @@ from uuid import UUID
 import logging
 
 from app.models.workflow_state import WorkflowState
+from app.services.workflow_guards import evaluate_guards
 from app.core.enums import InvoiceState
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,14 @@ def transition_state(db: Session, obj, target_state: str, user_id: str | UUID) -
             current, target, allowed_transitions,
         )
         raise ValueError(f"Invalid state transition: {current} -> {target}")
+
+    # Configurable guards: the transition fires only if all guards for this
+    # target pass. Guard names are stored per target on the source state.
+    guard_names = (current_workflow.guards or {}).get(target, [])
+    ok, reason = evaluate_guards(db, obj, guard_names)
+    if not ok:
+        logger.warning("Transition %s -> %s blocked by guard: %s", current, target, reason)
+        raise ValueError(reason)
 
     obj.current_state = target
     db.add(obj)

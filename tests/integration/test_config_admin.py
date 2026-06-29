@@ -12,6 +12,7 @@ These run as the privileged role (RLS bypassed); they exercise service/business
 logic, not tenant isolation.
 """
 import uuid
+from datetime import date
 
 import pytest
 
@@ -189,8 +190,14 @@ class TestInitializeDefaults:
         assert result["created_states"] == 7
         assert result["created_policies"] == 2
 
-        # Workflow transitions now read from the DB.
-        inv = Invoice(tenant_id=tenant.id, current_state=InvoiceState.DRAFT.value)
+        # Workflow transitions now read from the DB. The draft->validated
+        # transition also carries a seeded required_fields_present guard, so the
+        # invoice must have its core fields to pass.
+        inv = Invoice(
+            tenant_id=tenant.id, current_state=InvoiceState.DRAFT.value,
+            invoice_number="INV-1", vendor_name="V", invoice_date=date(2026, 1, 1),
+            total_amount=100, vendor_id=uuid.uuid4(), created_by=admin["id"],
+        )
         assert transition_state(db, inv, InvoiceState.VALIDATED.value, admin["id"]) is True
         db.expunge(inv)
         inv2 = Invoice(tenant_id=tenant.id, current_state=InvoiceState.DRAFT.value)

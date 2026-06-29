@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **222 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **231 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
@@ -92,6 +92,14 @@ Tests: **222 passing** (`./.venv/Scripts/python.exe -m pytest`).
   invoice approval (creator ≠ approver) and vendor activation (creator ≠ activator),
   blocked attempts audited; admins exempt as the "explicitly allowed" carve-out.
   Follow-ups: per-rule config/thresholds, and the vendor-bank-change-vs-first-payment rule.
+- **Workflow-engine depth** — *started*: **configurable transition guards** done
+  (`app/services/workflow_guards.py` + `guards` JSON on `workflow_states`,
+  migration 013). `transition_state` blocks a transition unless its configured,
+  named guards pass (required_fields_present / vendor_active / duplicate_resolved);
+  guards are versioned in the workflow snapshot and seeded by provisioning.
+  Remaining: SLAs + escalation, delegation, and consolidating the invoice
+  service's explicit gates onto the guard engine (currently dual-enforced —
+  see Decision Register DR-006).
 - **AI-gating discipline** — *largely done*. Duplicate-detection output is
   schema-validated (`app/schemas/ai.py` `DuplicateDetectionResult`) with
   model/provider provenance; malformed AI output falls back to a safe
@@ -115,4 +123,4 @@ Tests: **222 passing** (`./.venv/Scripts/python.exe -m pytest`).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `011_config_versions`.
+- Migration head: `013_workflow_transition_guards`.
