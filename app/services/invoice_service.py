@@ -14,6 +14,7 @@ from app.core.enums import InvoiceState, VendorStatus
 from app.services.workflow import transition_state
 from app.services.policy import explain_approval_routing
 from app.services.audit import log_audit
+from app.services import sod
 from app.services.notification_service import NotificationService
 from app.core.roles import (
     has_permission,
@@ -602,6 +603,13 @@ class InvoiceService:
         if not has_permission(current_user["role"], PERM_APPROVE_INVOICE):
             raise PermissionError(
                 f"Role '{current_user['role']}' does not have permission to approve invoices"
+            )
+
+        # Segregation of duties: the maker cannot be the checker.
+        if sod.violates_self_invoice_approval(invoice, current_user):
+            self._audit_block(invoice, current_user, "approval_blocked", "sod_self_approval")
+            raise PermissionError(
+                "Segregation of duties: you cannot approve an invoice you created."
             )
 
         # Governance gate: vendor must be verified/active before approval

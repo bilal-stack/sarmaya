@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **212 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **222 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 ## Known follow-ups (not yet done)
 
@@ -86,7 +86,12 @@ Tests: **212 passing** (`./.venv/Scripts/python.exe -m pytest`).
   events within an object. (Scope: per-object, not a tenant-wide ledger; ordering
   uses `(timestamp, id)`, so two same-microsecond events for one object are a
   known edge — a tenant-wide sequenced ledger is the next step if needed.)
-- **Decision Register** — Build Book process for logging ambiguities/defaults.
+- ~~**Decision Register**~~ — **done**: `docs/DECISION_REGISTER.md` (Appendix-C
+  template), backfilled with the key design calls (DR-001..005). Append going forward.
+- ~~**SoD enforcement**~~ — **done** (`app/services/sod.py`): maker-checker on
+  invoice approval (creator ≠ approver) and vendor activation (creator ≠ activator),
+  blocked attempts audited; admins exempt as the "explicitly allowed" carve-out.
+  Follow-ups: per-rule config/thresholds, and the vendor-bank-change-vs-first-payment rule.
 - **AI-gating discipline** — *largely done*. Duplicate-detection output is
   schema-validated (`app/schemas/ai.py` `DuplicateDetectionResult`) with
   model/provider provenance; malformed AI output falls back to a safe

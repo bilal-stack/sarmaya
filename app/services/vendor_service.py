@@ -7,6 +7,7 @@ from app.models.vendor import Vendor
 from app.schemas.vendor import VendorCreate, VendorUpdate
 from app.core.enums import VendorStatus
 from app.services.audit import log_audit
+from app.services import sod
 from app.core.roles import has_permission, PERM_MANAGE_VENDORS, PERM_VIEW_VENDORS
 
 
@@ -142,6 +143,23 @@ class VendorService:
         vendor = self.repository.get_by_id(vendor_id)
         if not vendor:
             raise ValueError("Vendor not found")
+
+        # Segregation of duties: you cannot activate a vendor you created.
+        if new_status == VendorStatus.ACTIVE and sod.violates_self_vendor_activation(vendor, current_user):
+            log_audit(
+                db=self.db,
+                tenant_id=current_user["tenant_id"],
+                user_id=current_user["id"],
+                object_type="vendor",
+                object_id=vendor.id,
+                action="vendor_activation_blocked",
+                comment="Blocked: sod_self_activation",
+                after_value={"reason": "sod_self_activation"},
+            )
+            self.repository.commit()
+            raise PermissionError(
+                "Segregation of duties: you cannot activate a vendor you created."
+            )
 
         old_status = vendor.status
         vendor.status = new_status
