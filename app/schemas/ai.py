@@ -34,6 +34,37 @@ class AIActionLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class InvoiceNextActionSuggestion(BaseModel):
+    """Validated output of the invoice next-action agent.
+
+    The agent SUGGESTS the next step for an invoice (extract-review / validate /
+    submit / resolve-duplicate / verify-vendor / approve / ...); it never
+    executes one. `signals` is the explainability trace — the deterministic
+    facts the suggestion was based on (Build Book: AI must attach what signals
+    were used and why).
+    """
+    action: str
+    confidence: float = 0.0
+    reasoning: str = ""
+    signals: list[str] = []
+    required_role: Optional[str] = None
+    # "rules" when produced deterministically; "ai" when the AI wrote the
+    # suggestion (within the policy-permitted action set).
+    source: str = "rules"
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp_confidence(cls, v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        return max(0.0, min(1.0, v))
+
+
 class DuplicateDetectionResult(BaseModel):
     """Validated result of the duplicate-detection agent."""
     is_duplicate: bool = False

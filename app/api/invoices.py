@@ -13,8 +13,10 @@ from app.schemas.invoice import (
     InvoiceListResponse
 )
 from app.services.invoice_service import InvoiceService
+from app.agents.invoice_agent import InvoiceNextActionAgent
 from app.core.enums import InvoiceState
 from app.core.config import settings
+from app.core.roles import has_permission, PERM_VIEW_INVOICE
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
@@ -242,6 +244,37 @@ async def upload_invoice_with_ocr(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Upload failed due to an internal error."
+        )
+
+
+@router.get("/{invoice_id}/next-action")
+def suggest_next_action(
+    invoice_id: UUID,
+    use_ai: bool = Query(default=True),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Suggest (never execute) the next step for this invoice.
+
+    Policy determines the permitted action (review extraction / fix fields /
+    validate / submit / resolve duplicate / verify vendor / approve / mark paid);
+    the AI only phrases the suggestion within that gate. The response carries the
+    explainability signals, and every run is recorded in the AI action log.
+    """
+    if not has_permission(current_user["role"], PERM_VIEW_INVOICE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view invoices",
+        )
+    try:
+        return InvoiceNextActionAgent(db, current_user).suggest(invoice_id, use_ai=use_ai)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception:
+        logger.exception("Next-action suggestion failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not produce a suggestion. Please try again.",
         )
 
 

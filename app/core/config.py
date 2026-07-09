@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # AI Configuration
     AI_PROVIDER: str = "openai"  # 'openai', 'claude', 'gemini', 'grok'
     AI_ENHANCED_OCR: bool = True  # Use AI to enhance OCR results
+    # HITL trigger (Build Book): extraction below this confidence routes to
+    # human review instead of straight to validation.
+    AI_EXTRACTION_REVIEW_THRESHOLD: int = 70
 
     # Grok Configuration
     GROK_API_KEY: str = ""

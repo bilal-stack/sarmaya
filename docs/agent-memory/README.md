@@ -61,7 +61,16 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **231 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **242 passing** (`./.venv/Scripts/python.exe -m pytest`).
+
+**Invoice next-action agent** (`app/agents/invoice_agent.py`, blueprint Part 7
+"Workflow agent" class): `GET /invoices/{id}/next-action` suggests — never
+executes — the next step (review_extraction / fix_missing_fields / validate /
+submit_for_approval / resolve_duplicate / verify_vendor / approve / mark_paid).
+Deterministic signals fix the policy-permitted action; the AI only phrases the
+suggestion within that gate (schema-validated; strays/malformed output falls
+back to rules with status=failed_schema); HITL-type suggestions log
+hitl_requested; every run lands in ai_action_logs (DR-007).
 
 ## Known follow-ups (not yet done)
 
