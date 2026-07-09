@@ -34,6 +34,109 @@ class AIActionLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def _coerce_money(v):
+    """Coerce a money-ish value (int/float/str with commas or currency text)
+    to float; unparseable values become 0.0 rather than failing the whole
+    result — a zero amount is caught later by the required-fields guard."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        cleaned = "".join(ch for ch in v if ch.isdigit() or ch in ".-")
+        try:
+            return float(cleaned) if cleaned else 0.0
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+class InvoiceExtractionResult(BaseModel):
+    """Validated result of AI-enhanced invoice field extraction.
+
+    Gates the OCR-enhancement output (Build Book: structured JSON only, schema
+    validation always). Scalars are coerced leniently (a comma in an amount
+    should not void a good extraction); structure is strict (line_items must be
+    a list of objects). Structurally malformed output is rejected entirely and
+    the raw OCR result is used instead.
+    """
+    vendor_name: str = ""
+    invoice_number: str = ""
+    invoice_date: Optional[str] = None
+    due_date: Optional[str] = None
+    total_amount: float = 0.0
+    tax_amount: float = 0.0
+    subtotal_amount: Optional[float] = None
+    currency: str = "PKR"
+    line_items: list[dict] = []
+    confidence: int = 0
+    ai_corrections: dict = {}
+
+    @field_validator("vendor_name", "invoice_number", "currency", mode="before")
+    @classmethod
+    def _str_or_empty(cls, v):
+        return str(v).strip() if v is not None else ""
+
+    @field_validator("invoice_date", "due_date", mode="before")
+    @classmethod
+    def _date_str(cls, v):
+        if v in (None, "", "null"):
+            return None
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
+    @field_validator("total_amount", "tax_amount", "subtotal_amount", mode="before")
+    @classmethod
+    def _money(cls, v):
+        return _coerce_money(v)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp_0_100(cls, v):
+        try:
+            v = int(float(v))
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(100, v))
+
+    @field_validator("line_items", mode="before")
+    @classmethod
+    def _line_items_structure(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list) or any(not isinstance(i, dict) for i in v):
+            # Structural violation — fail validation so the whole result is rejected.
+            raise ValueError("line_items must be a list of objects")
+        return [
+            {
+                "description": str(i.get("description", "")).strip(),
+                "quantity": _coerce_money(i.get("quantity")) or 0.0,
+                "unit_price": _coerce_money(i.get("unit_price")) or 0.0,
+                "amount": _coerce_money(i.get("amount")) or 0.0,
+                "product_code": str(i.get("product_code", "") or ""),
+            }
+            for i in v
+        ]
+
+    @field_validator("ai_corrections", mode="before")
+    @classmethod
+    def _corrections_dict(cls, v):
+        return v if isinstance(v, dict) else {}
+
+    @classmethod
+    def try_validate(cls, raw) -> Optional["InvoiceExtractionResult"]:
+        """Validate raw AI output; None when structurally malformed (the caller
+        must then fall back to the un-enhanced OCR result)."""
+        if not isinstance(raw, dict):
+            logger.warning("AI extraction output is not an object: %r", type(raw))
+            return None
+        data = {k: v for k, v in raw.items() if k in cls.model_fields}
+        try:
+            return cls(**data)
+        except ValidationError as e:
+            logger.warning("AI extraction output failed schema validation: %s", e)
+            return None
+
+
 class InvoiceNextActionSuggestion(BaseModel):
     """Validated output of the invoice next-action agent.
 

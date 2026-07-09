@@ -61,7 +61,11 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **242 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **250 passing** (`./.venv/Scripts/python.exe -m pytest`).
+
+**Frontend integration backlog:** the post-MVP endpoints (esp. `GET
+/invoices/{id}/next-action`) have no UI yet — integration guidance lives in
+`ENDPOINTS.md` → "Post-MVP Governance & AI Endpoints".
 
 **Invoice next-action agent** (`app/agents/invoice_agent.py`, blueprint Part 7
 "Workflow agent" class): `GET /invoices/{id}/next-action` suggests — never
@@ -109,16 +113,17 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   Remaining: SLAs + escalation, delegation, and consolidating the invoice
   service's explicit gates onto the guard engine (currently dual-enforced —
   see Decision Register DR-006).
-- **AI-gating discipline** — *largely done*. Duplicate-detection output is
-  schema-validated (`app/schemas/ai.py` `DuplicateDetectionResult`) with
-  model/provider provenance; malformed AI output falls back to a safe
-  non-duplicate "manual review" result (AI never finalizes). **Every AI action is
-  now logged** (migration `012_ai_action_logs` + `log_ai_action`): the
-  duplicate-detection and NL→SQL query agents record provider/model, prompt
-  version, confidence, latency, in/out summary, and status (completed /
-  failed_schema / error) — the Build Book Appendix-A `ai.*` event family. Read
-  via `GET /audit/ai-actions` (auditor/admin). Still to do: schema-validate the
-  OCR extraction result, and a richer "signals used" explainability trace.
+- ~~**AI-gating discipline**~~ — **done** across all AI surfaces. Schema-validated
+  structured output + provenance + fallback-on-malformed for: duplicate detection
+  (`DuplicateDetectionResult`), the next-action agent
+  (`InvoiceNextActionSuggestion`, gate: AI may only phrase the policy-permitted
+  action), and OCR extraction enhancement (`InvoiceExtractionResult`, lenient
+  scalar coercion / strict structure — DR-008; malformed AI output rejected, raw
+  OCR stands). **Every AI action logged** (migration `012_ai_action_logs`):
+  duplicate detection, NL→SQL query, next-action, and invoice extraction all
+  record provider/model, prompt version, confidence, latency, in/out summary,
+  status (completed / failed_schema / hitl_requested / error). Read via
+  `GET /audit/ai-actions`.
 - **`print()` → logging** in `app/agents/**` (left intentionally for now —
   console logging wasn't surfacing).
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,

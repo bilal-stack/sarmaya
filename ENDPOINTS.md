@@ -596,3 +596,82 @@ curl -X GET http://127.0.0.1:8000/api/v1/conversation/conversations \
 ---
 
 **Last Updated:** 2025-11-28
+---
+
+## Post-MVP Governance & AI Endpoints (added 2026-06)
+
+All endpoints below require `Authorization: Bearer $TOKEN` and are tenant-scoped.
+
+### ⚠️ Invoice Next-Action Suggestion — FRONTEND INTEGRATION PENDING
+
+> **Integration note:** this endpoint is designed for the invoice detail view
+> (a "Suggested next step" card). Integrate carefully:
+> - It **suggests only** — the UI must never auto-execute the action; render it
+>   as a recommendation with a button for the *existing* action endpoint
+>   (validate / submit / approve / resolve-duplicate / vendor status).
+> - `action` is a closed enum — handle every value or fall back to hiding the
+>   card: `review_extraction | fix_missing_fields | validate |
+>   submit_for_approval | resolve_duplicate | verify_vendor | approve |
+>   mark_paid | revise | none`.
+> - `signals` is the explainability trace — show it (e.g. collapsible "Why?")
+>   per the Build Book's explainability requirement.
+> - With `use_ai=true` (default) the call invokes the LLM: latency is seconds,
+>   and it costs tokens — call it on demand (button / detail-view open), never
+>   in a list loop. `?use_ai=false` returns instantly (rules only, no AI cost).
+> - `required_role` (on `approve`) and a `sod=creator_cannot_approve` signal
+>   tell the UI to disable the approve button for ineligible users.
+
+```bash
+curl -X GET "http://127.0.0.1:8000/api/v1/invoices/{invoice_id}/next-action?use_ai=true" \
+  -H "Authorization: Bearer $TOKEN"
+# -> { "invoice_id", "action", "confidence", "reasoning", "signals": [...],
+#      "required_role", "source": "rules"|"ai", "ai_provider", "ai_model", "prompt_version" }
+```
+
+### Live Audit Mode & integrity
+```bash
+GET /api/v1/audit/timeline/{object_type}/{object_id}   # per-object timeline w/ plain-English reasons
+GET /api/v1/audit/verify/{object_type}/{object_id}     # tamper-evidence check of the audit hash chain
+GET /api/v1/audit/ai-actions?action=&status_filter=    # AI invocation trail (auditor/admin)
+```
+
+### Decision Inbox
+```bash
+GET /api/v1/inbox          # prioritized worklist: each pending invoice reduced to its top blocker
+```
+
+### Configuration (admin)
+```bash
+POST /api/v1/config/initialize-defaults                # seed default workflow + approval matrix
+GET/POST/PUT/DELETE /api/v1/config/approval-policies   # approval routing matrix CRUD
+GET  /api/v1/config/workflow/{type}/states             # workflow states + transitions + guards
+PUT  /api/v1/config/workflow/{type}/states/{state}/transitions
+GET/PUT /api/v1/config/autopilot                       # Restricted Autopilot settings
+GET  /api/v1/config/versions/{config_type}/{config_key}            # config history (newest first)
+GET  /api/v1/config/versions/{config_type}/{config_key}/{version}  # one snapshot
+POST /api/v1/config/versions/{config_type}/{config_key}/{version}/restore  # rollback
+# config_type: approval_policy (key=policy id) | workflow (key=workflow type) | autopilot (key=autopilot)
+```
+
+### Restricted Autopilot
+```bash
+GET  /api/v1/autopilot/preview          # dry run: what would be auto-approved and why
+POST /api/v1/autopilot/run              # execute within configured bounds
+POST /api/v1/autopilot/{invoice_id}/revert
+```
+
+### Vendors (governance gate)
+```bash
+GET   /api/v1/vendors/review-queue      # vendors blocking invoices, highest impact first
+PATCH /api/v1/vendors/{id}/status       # activate/block (SoD: creator cannot activate own vendor)
+GET   /api/v1/invoices/blocked-on-vendor
+```
+
+### Auth (revocation-aware)
+```bash
+POST /api/v1/auth/logout           # revokes ALL of the user's tokens (token_version bump)
+POST /api/v1/auth/change-password  # revokes other sessions; returns a fresh token for the caller
+POST /api/v1/auth/refresh          # rejected for revoked tokens
+```
+
+**Last Updated:** 2026-06-05

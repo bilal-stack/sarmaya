@@ -909,9 +909,15 @@ class InvoiceService:
         file_hash: str,
         current_user: dict,
     ) -> Dict[str, Any]:
-        # Extract data using OCR
+        # Extract data using OCR (tenant context lets the AI enhancement be
+        # recorded in the AI action log with provenance).
         try:
-            ocr_result = extract_invoice_data_ocr(stored_path)
+            ocr_result = extract_invoice_data_ocr(
+                stored_path,
+                db=self.db,
+                tenant_id=current_user["tenant_id"],
+                user_id=current_user["id"],
+            )
         except Exception as e:
             raise RuntimeError(f"OCR extraction failed: {str(e)}")
 
