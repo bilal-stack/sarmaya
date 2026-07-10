@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Boolean, Enum as SQLEnum
+from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Boolean, func, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
@@ -28,6 +28,9 @@ class Invoice(BaseModel):
     
     # Workflow
     current_state = Column(SQLEnum(InvoiceState), default=InvoiceState.DRAFT)
+    # When the invoice entered its current state — the SLA timer start
+    # (Build Book: "SLA timers start when a task enters a state").
+    state_entered_at = Column(DateTime, server_default=func.now(), nullable=True)
     
     # OCR
     ocr_confidence = Column(Integer, nullable=True)

@@ -637,15 +637,20 @@ GET /api/v1/audit/ai-actions?action=&status_filter=    # AI invocation trail (au
 
 ### Decision Inbox
 ```bash
-GET /api/v1/inbox          # prioritized worklist: each pending invoice reduced to its top blocker
+GET  /api/v1/inbox                       # prioritized worklist; items carry sla_due_at/overdue/escalated,
+                                         # breached items sort first, overdue_count in the envelope
+GET  /api/v1/inbox?overdue_only=true     # the "Overdue" view (SLA-breached items only)
+POST /api/v1/inbox/escalate-overdue      # escalate breached items once per state entry (audited +
+                                         # notifies the escalation role); idempotent — button or cron
 ```
 
 ### Configuration (admin)
 ```bash
 POST /api/v1/config/initialize-defaults                # seed default workflow + approval matrix
 GET/POST/PUT/DELETE /api/v1/config/approval-policies   # approval routing matrix CRUD
-GET  /api/v1/config/workflow/{type}/states             # workflow states + transitions + guards
+GET  /api/v1/config/workflow/{type}/states             # workflow states + transitions + guards + sla
 PUT  /api/v1/config/workflow/{type}/states/{state}/transitions
+PUT  /api/v1/config/workflow/{type}/states/{state}/sla # {"hours": 48, "escalate_to": "cfo"}; versioned
 GET/PUT /api/v1/config/autopilot                       # Restricted Autopilot settings
 GET  /api/v1/config/versions/{config_type}/{config_key}            # config history (newest first)
 GET  /api/v1/config/versions/{config_type}/{config_key}/{version}  # one snapshot

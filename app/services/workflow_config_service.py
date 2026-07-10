@@ -71,6 +71,55 @@ class WorkflowConfigService:
         )
         return state
 
+    def update_sla(
+        self,
+        workflow_type: str,
+        state_name: str,
+        hours,
+        escalate_to,
+        current_user: dict,
+    ) -> WorkflowState:
+        """Set or clear a state's SLA ({"hours": n, "escalate_to": role});
+        versioned with the workflow document and audited."""
+        self._require_manage(current_user)
+
+        state = self.repository.get_state(workflow_type, state_name)
+        if not state:
+            raise ValueError(f"No '{state_name}' state configured for workflow '{workflow_type}'")
+        if escalate_to and not hours:
+            raise ValueError("escalate_to requires hours to be set")
+
+        before = dict(state.sla or {})
+        new_sla = {}
+        if hours:
+            new_sla["hours"] = hours
+        if escalate_to:
+            new_sla["escalate_to"] = escalate_to
+        state.sla = new_sla
+        state = self.repository.update(state)
+
+        record_version(
+            self.db, current_user["tenant_id"], TYPE_WORKFLOW, workflow_type,
+            workflow_snapshot(self.repository.list_states(workflow_type)),
+            "updated", current_user["id"],
+        )
+        self.repository.commit()
+        state = self.repository.refresh(state)
+
+        log_audit(
+            db=self.db,
+            tenant_id=current_user["tenant_id"],
+            user_id=current_user["id"],
+            object_type="workflow_state",
+            object_id=state.id,
+            action="sla_updated",
+            workflow_type=workflow_type,
+            workflow_step=state.state_name,
+            before_value={"sla": before},
+            after_value={"sla": new_sla},
+        )
+        return state
+
     @staticmethod
     def _require_manage(current_user: dict) -> None:
         if not has_permission(current_user["role"], PERM_MANAGE_WORKFLOW):

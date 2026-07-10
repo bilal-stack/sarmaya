@@ -19,18 +19,20 @@ REJECTED = InvoiceState.REJECTED.value
 PAID = InvoiceState.PAID.value
 CANCELLED = InvoiceState.CANCELLED.value
 
-# (state_name, display_name, order, is_initial, is_final, allowed_transitions, color, guards)
+# (state_name, display_name, order, is_initial, is_final, allowed_transitions, color, guards, sla)
 # guards: {target_state: [guard_name, ...]} resolved by app/services/workflow_guards.py
+# sla:    {"hours": n, "escalate_to": role} — timer starts on state entry; empty = no SLA
 DEFAULT_INVOICE_STATES = [
     (DRAFT, "Draft", 1, True, False, [VALIDATED, CANCELLED], "#gray",
-        {VALIDATED: ["required_fields_present"]}),
-    (VALIDATED, "Validated", 2, False, False, [PENDING, CANCELLED], "#blue", {}),
+        {VALIDATED: ["required_fields_present"]}, {}),
+    (VALIDATED, "Validated", 2, False, False, [PENDING, CANCELLED], "#blue", {}, {}),
     (PENDING, "Pending Approval", 3, False, False, [APPROVED, REJECTED], "#yellow",
-        {APPROVED: ["vendor_active", "duplicate_resolved"]}),
-    (APPROVED, "Approved", 4, False, False, [PAID, CANCELLED], "#green", {}),
-    (REJECTED, "Rejected", 5, False, True, [DRAFT], "#red", {}),
-    (PAID, "Paid", 6, False, True, [], "#purple", {}),
-    (CANCELLED, "Cancelled", 7, False, True, [], "#orange", {}),
+        {APPROVED: ["vendor_active", "duplicate_resolved"]},
+        {"hours": 48, "escalate_to": "cfo"}),
+    (APPROVED, "Approved", 4, False, False, [PAID, CANCELLED], "#green", {}, {}),
+    (REJECTED, "Rejected", 5, False, True, [DRAFT], "#red", {}, {}),
+    (PAID, "Paid", 6, False, True, [], "#purple", {}, {}),
+    (CANCELLED, "Cancelled", 7, False, True, [], "#orange", {}, {}),
 ]
 
 # (policy_name, priority, rule_config) — highest priority matching rule wins.

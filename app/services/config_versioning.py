@@ -69,6 +69,7 @@ def workflow_snapshot(states: List[WorkflowState]) -> dict:
                 "is_final": bool(s.is_final),
                 "allowed_transitions": list(s.allowed_transitions or []),
                 "guards": dict(s.guards or {}),
+                "sla": dict(s.sla or {}),
                 "color": s.color,
             }
             for s in sorted(states, key=lambda s: s.state_order or 0)
@@ -240,6 +241,7 @@ class ConfigVersionService:
             if state is not None:
                 state.allowed_transitions = list(snap.get("allowed_transitions") or [])
                 state.guards = dict(snap.get("guards") or {})
+                state.sla = dict(snap.get("sla") or {})
                 self.db.add(state)
         self.db.flush()
         return workflow_snapshot(list(by_name.values()))

@@ -9,7 +9,7 @@ from app.schemas.policy import (
     ApprovalPolicyUpdate,
     ApprovalPolicyResponse,
 )
-from app.schemas.workflow import WorkflowStateResponse, WorkflowTransitionsUpdate
+from app.schemas.workflow import WorkflowStateResponse, WorkflowTransitionsUpdate, WorkflowSlaUpdate
 from app.services.policy_service import ApprovalPolicyService
 from app.services.workflow_config_service import WorkflowConfigService
 from app.services.config_provisioning import ConfigProvisioningService
@@ -226,6 +226,28 @@ def update_workflow_transitions(
     try:
         return WorkflowConfigService(db).update_transitions(
             workflow_type, state_name, payload.allowed_transitions, current_user
+        )
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.put(
+    "/workflow/{workflow_type}/states/{state_name}/sla",
+    response_model=WorkflowStateResponse,
+)
+def update_workflow_sla(
+    workflow_type: str,
+    state_name: str,
+    payload: WorkflowSlaUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Set or clear the SLA for sitting in `state_name` — {"hours": 48,
+    "escalate_to": "cfo"}. The timer starts when an object enters the state;
+    breaches surface as overdue in the Decision Inbox and can be escalated."""
+    try:
+        return WorkflowConfigService(db).update_sla(
+            workflow_type, state_name, payload.hours, payload.escalate_to, current_user
         )
     except (ValueError, PermissionError) as e:
         _raise_for(e)

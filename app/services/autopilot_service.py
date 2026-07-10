@@ -172,6 +172,7 @@ class AutopilotService:
             raise ValueError("This invoice was not auto-approved by Autopilot")
 
         invoice.current_state = InvoiceState.PENDING_APPROVAL.value
+        invoice.state_entered_at = utc_now()  # restart the SLA timer
         invoice.approved_by = None
         invoice.approved_at = None
         self.repository.update(invoice)

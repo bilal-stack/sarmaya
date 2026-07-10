@@ -138,6 +138,10 @@ class AuditService:
             )
         if action in ("approval_blocked", "validation_blocked"):
             return f"Blocked: {log.comment}" if log.comment else "Action blocked by a governance gate."
+        if action == "sla_escalated":
+            return log.comment or "SLA breached; escalated."
+        if action == "sla_updated":
+            return "State SLA reconfigured."
         if action in ("marked_paid", "paid"):
             return "Marked as paid."
         if action == "status_changed":

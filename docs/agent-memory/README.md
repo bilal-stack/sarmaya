@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **250 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **259 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 **Frontend integration backlog:** the post-MVP endpoints (esp. `GET
 /invoices/{id}/next-action`) have no UI yet — integration guidance lives in
@@ -105,14 +105,19 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   invoice approval (creator ≠ approver) and vendor activation (creator ≠ activator),
   blocked attempts audited; admins exempt as the "explicitly allowed" carve-out.
   Follow-ups: per-rule config/thresholds, and the vendor-bank-change-vs-first-payment rule.
-- **Workflow-engine depth** — *started*: **configurable transition guards** done
-  (`app/services/workflow_guards.py` + `guards` JSON on `workflow_states`,
-  migration 013). `transition_state` blocks a transition unless its configured,
-  named guards pass (required_fields_present / vendor_active / duplicate_resolved);
-  guards are versioned in the workflow snapshot and seeded by provisioning.
-  Remaining: SLAs + escalation, delegation, and consolidating the invoice
-  service's explicit gates onto the guard engine (currently dual-enforced —
-  see Decision Register DR-006).
+- **Workflow-engine depth** — guards **and SLAs+escalation done**. Guards:
+  `app/services/workflow_guards.py` + `guards` JSON on `workflow_states`
+  (migration 013), enforced by `transition_state`, versioned, seeded. SLAs
+  (migration 014, DR-009): per-state `sla` config (`{"hours", "escalate_to"}`,
+  editable via `PUT .../states/{state}/sla`, versioned), timer =
+  `invoices.state_entered_at` restarted on every transition, deadlines computed
+  at read time; Decision Inbox items carry `sla_due_at`/`overdue`/`escalated`,
+  breached items sort first (`overdue_only` filter = the "Overdue" view), the
+  escalation role gains visibility live once breached, and
+  `POST /inbox/escalate-overdue` records one audited `sla_escalated` event per
+  state entry + notifies (idempotent; cron-able). Remaining: delegation, and
+  consolidating the invoice service's explicit gates onto the guard engine
+  (DR-006).
 - ~~**AI-gating discipline**~~ — **done** across all AI surfaces. Schema-validated
   structured output + provenance + fallback-on-malformed for: duplicate detection
   (`DuplicateDetectionResult`), the next-action agent
@@ -137,4 +142,4 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `013_workflow_transition_guards`.
+- Migration head: `014_workflow_sla`.

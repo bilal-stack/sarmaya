@@ -71,6 +71,21 @@ class NotificationService:
         except Exception:
             logger.exception("Failed to send rejected notification")
 
+    def notify_sla_escalation(self, invoice: Invoice, escalate_to_role: str, hours: int) -> None:
+        """Tell the escalation role an invoice has breached its SLA."""
+        try:
+            recipients = self._approver_emails(invoice.tenant_id, escalate_to_role)
+            subject = f"SLA breached: invoice {invoice.invoice_number} awaiting action"
+            body = (
+                f"Invoice {invoice.invoice_number} from {invoice.vendor_name} "
+                f"for {invoice.total_amount} has been waiting in "
+                f"{invoice.current_state} for more than {hours} hours.\n\n"
+                f"It has been escalated to {escalate_to_role.upper()}."
+            )
+            self._send(recipients, subject, body)
+        except Exception:
+            logger.exception("Failed to send SLA escalation notification")
+
     # ------------------------------------------------------------------ #
     # Recipient resolution
     # ------------------------------------------------------------------ #

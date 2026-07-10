@@ -21,6 +21,9 @@ class WorkflowState(BaseModel):
     # transition fires only if all guards for that target pass (see
     # app/services/workflow_guards.py). Configuration-first, versioned.
     guards = Column(JSON, default={})
+    # SLA for sitting in this state: {"hours": 48, "escalate_to": "cfo"}
+    # (Build Book state-machine template). Empty dict = no SLA.
+    sla = Column(JSON, default={})
     color = Column(String(20), nullable=True)
     
     # Relationships

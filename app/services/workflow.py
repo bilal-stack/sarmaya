@@ -6,8 +6,17 @@ import logging
 from app.models.workflow_state import WorkflowState
 from app.services.workflow_guards import evaluate_guards
 from app.core.enums import InvoiceState
+from app.utils.datetime_helpers import utc_now
 
 logger = logging.getLogger(__name__)
+
+
+def _enter_state(obj, target: str) -> None:
+    """Apply the state change and restart the SLA timer (Build Book: SLA
+    timers start when a task enters a state)."""
+    obj.current_state = target
+    if hasattr(obj, "state_entered_at"):
+        obj.state_entered_at = utc_now()
 
 
 def transition_state(db: Session, obj, target_state: str, user_id: str | UUID) -> bool:
@@ -48,7 +57,7 @@ def transition_state(db: Session, obj, target_state: str, user_id: str | UUID) -
         logger.warning("Transition %s -> %s blocked by guard: %s", current, target, reason)
         raise ValueError(reason)
 
-    obj.current_state = target
+    _enter_state(obj, target)
     db.add(obj)
     return True
 
@@ -89,8 +98,8 @@ def change_state(invoice, target_state: str, db: Session):
 
     if target not in allowed:
         raise ValueError(f"Invalid state transition: {current} -> {target}")
-    
-    invoice.current_state = target
+
+    _enter_state(invoice, target)
     db.add(invoice)
     return True
 
