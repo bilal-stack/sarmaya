@@ -25,6 +25,7 @@ it out of sync.
 |---|---|---|
 | `00_hook.mp3` | 0:27 | Hook |
 | `01_extraction.mp3` | 0:43 | Upload & AI extraction |
+| `01b_providers.mp3` | 0:25 | No vendor lock-in (see below) |
 | `02_duplicate.mp3` | 0:25 | Duplicate detection |
 | `03_inbox.mp3` | 0:34 | Decision Inbox |
 | `04_escalation.mp3` | 0:38 | SLA escalation |
@@ -32,9 +33,25 @@ it out of sync.
 | `06_governance.mp3` | 0:31 | SoD + vendor gates |
 | `07_audit.mp3` | 0:47 | Live Audit Mode |
 | `08_close.mp3` | 0:22 | Close |
-| **Total** | **5:14** | |
+| **Total** | **5:39** | |
 
 With cuts and breathing room, the finished video lands around **6 minutes**.
+
+### What to show during `01b_providers`
+
+This clip makes an architecture claim (the OCR engine and the LLM are
+swappable), so don't hold on the extraction screen — cut to the code that proves
+it. Any of these works:
+
+- `app/services/ai/base.py` — the `AIProvider` interface every provider implements
+- `app/services/ai/__init__.py` — the `get_ai_provider()` factory that switches on config
+- `app/services/ocr/base.py` — the same pattern for OCR
+- The provider files side by side in the explorer: `openai_provider.py`,
+  `claude_provider.py`, `ocr_space.py`, `document_ai.py`, `aws_textract.py`
+
+> ⚠️ **Do not show `.env` on camera.** It contains your live Anthropic and
+> OCR.space API keys. Show the factory or the interface instead — same point,
+> no leak. If you want to show a config line, type it into a scratch file.
 
 ### Pick a different voice
 ```powershell
@@ -72,6 +89,7 @@ from `_demo_narrate.py` scene by scene. The workflow below is identical either w
 |---|---|---|
 | 0 Hook | 0:27 | 0:35 |
 | 1 Extraction | 0:43 | 0:55 |
+| 1b Providers | 0:25 | 0:35 (code, not the app) |
 | 2 Duplicate | 0:25 | 0:35 |
 | 3 Inbox | 0:34 | 0:45 |
 | 4 Escalation | 0:38 | 0:45 |

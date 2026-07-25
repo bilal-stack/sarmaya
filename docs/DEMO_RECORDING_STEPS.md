@@ -92,6 +92,25 @@ A tick-off shot list. Work top to bottom. Each step is either:
 
 ---
 
+## SCENE 1b — No vendor lock-in  *(~25 sec)*
+
+> Cut away from the app for this one — it's an architecture claim, so show the
+> code that backs it.
+
+- [ ] **`[DO]`** Open VS Code → `app/services/ai/base.py` (the `AIProvider` interface)
+- [ ] **`[DO]`** Scroll slowly, then open `app/services/ai/__init__.py` (the factory)
+- [ ] **`[DO]`** *(optional)* show `app/services/ocr/` with its provider files listed
+- [ ] **`[SAY]`**
+
+> "And none of this is tied to one vendor. The OCR engine and the language model both sit behind a common provider interface, so the system is built to run on the mainstream OCR and AI providers. Swapping one for another is a configuration change, not a rewrite.
+>
+> That matters when a client already has cloud agreements in place, or data residency rules about where their documents can be processed."
+
+- [ ] **`[WAIT]`** 1 sec → cut point
+- [ ] ⚠️ **Never show `.env` on camera** — it holds your live Anthropic and OCR.space keys.
+
+---
+
 ## SCENE 2 — Duplicate detection  *(~45 sec)*
 
 - [ ] **`[DO]`** Upload `demo_assets/invoice_orion_1051.pdf`

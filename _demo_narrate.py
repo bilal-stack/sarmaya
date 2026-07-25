@@ -46,6 +46,12 @@ And that's the important part. The A I's output isn't trusted blindly. It's vali
 We get the vendor, invoice number, date, total, and tax, plus a confidence score that drives what happens next.
 """,
 
+    "01b_providers": """
+And none of this is tied to one vendor. The O C R engine and the language model both sit behind a common provider interface, so the system is built to run on the mainstream O C R and A I providers. Swapping one for another is a configuration change, not a rewrite.
+
+That matters when a client already has cloud agreements in place, or data residency rules about where their documents can be processed.
+""",
+
     "02_duplicate": """
 Now I'll upload a second invoice from the same vendor. Different invoice number, but the amount is within a third of a percent, and it's dated three days later.
 
