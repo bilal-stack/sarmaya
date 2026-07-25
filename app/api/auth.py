@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from typing import cast, Optional
 
@@ -18,7 +18,7 @@ from app.core.roles import DEFAULT_ROLE, is_valid_role
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
 
 def _token_claims(user: User) -> dict:
@@ -90,6 +90,34 @@ def register(
     access_token = create_access_token(_token_claims(user))
 
     return {"access_token": access_token, "token_type": "bearer", "user": user}
+
+
+@router.post("/token", response_model=Token)
+def token_login(
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+    tenant: str = Query("demo", description="Tenant slug"),
+):
+    """OAuth2 password-flow token endpoint (form-encoded, username=email).
+
+    Exists so standard OAuth2 tooling — most importantly the Swagger UI
+    Authorize dialog — can authenticate; /auth/login remains the JSON login the
+    frontend uses. Both mint identical tokens.
+    """
+    tenant_obj = db.query(Tenant).filter(Tenant.slug == tenant).first()
+    if not tenant_obj:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant not found")
+    set_tenant_context(db, str(tenant_obj.id))
+    user = db.query(User).filter(
+        User.tenant_id == tenant_obj.id, User.email == form.username
+    ).first()
+
+    hashed_password = cast(str, user.password) if user is not None else ""
+    if not user or not verify_password(form.password, hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    access_token = create_access_token(_token_claims(user))
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/login", response_model=TokenWithUser)

@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 
-from app.core.enums import UserRole, VendorStatus
+from app.core.enums import UserRole, VendorStatus, InvoiceState
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from app.models.ai_action_log import AIActionLog
@@ -116,6 +116,37 @@ class TestRulesSuggestions:
         user = make_user(UserRole.ADMIN)
         with pytest.raises(ValueError):
             InvoiceNextActionAgent(db, user).suggest(uuid.uuid4(), use_ai=False)
+
+    def test_state_read_as_enum_is_normalised(self, db, tenant, make_user):
+        """Rows loaded from the DB return current_state as an InvoiceState
+        member, whose str() is 'InvoiceState.PENDING_APPROVAL'. Regression: that
+        must still match the rules, not fall through to 'none'."""
+        user = make_user(UserRole.MANAGER)
+        vendor = _vendor(db, tenant.id, user["id"])
+        inv = _invoice(
+            db, tenant.id, user["id"], vendor_id=vendor.id,
+            current_state=InvoiceState.PENDING_APPROVAL,  # enum, as SQLAlchemy returns
+        )
+        s = InvoiceNextActionAgent(db, user).suggest(inv.id, use_ai=False)
+        assert s["action"] == "approve"
+        assert "state=pending_approval" in s["signals"]
+
+    def test_ai_action_log_is_persisted(self, db, tenant, make_user):
+        """The suggestion endpoint is read-only, so the agent must commit its own
+        AI-action log or the trail is silently lost."""
+        user = make_user(UserRole.AP_CLERK)
+        vendor = _vendor(db, tenant.id, user["id"])
+        inv = _invoice(db, tenant.id, user["id"], vendor_id=vendor.id)
+        InvoiceNextActionAgent(db, user).suggest(inv.id, use_ai=False)
+
+        logged = (
+            db.query(AIActionLog)
+            .filter(AIActionLog.action == "invoice_next_action",
+                    AIActionLog.object_id == inv.id)
+            .first()
+        )
+        assert logged is not None
+        assert logged.status in ("completed", "hitl_requested")
 
 
 class _StubAI:

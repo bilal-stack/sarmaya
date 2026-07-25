@@ -253,3 +253,6 @@ os-google.json
 *service-account*.json
 *.pem
 *.key
+
+# Demo assets (generated sample PDFs)
+demo_assets/

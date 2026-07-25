@@ -94,6 +94,9 @@ class InvoiceNextActionAgent:
             object_type="invoice",
             object_id=invoice.id,
         )
+        # Persist the log: this is a read-only endpoint, so nothing downstream
+        # commits for us and the flushed row would otherwise be discarded.
+        self.db.commit()
 
         result = suggestion.model_dump()
         result["invoice_id"] = str(invoice.id)
@@ -103,7 +106,11 @@ class InvoiceNextActionAgent:
 
     def _rules(self, invoice: Invoice) -> Tuple[str, str, List[str], Optional[str]]:
         """The policy-permitted next action, with the signals that led to it."""
-        state = str(invoice.current_state or InvoiceState.DRAFT.value).lower()
+        # current_state is a SQLEnum column: rows loaded from the DB come back as
+        # InvoiceState members (whose str() is "InvoiceState.X"), while in-memory
+        # rows may still hold the raw string. Normalise to the value either way.
+        raw_state = invoice.current_state or InvoiceState.DRAFT.value
+        state = str(getattr(raw_state, "value", raw_state)).lower()
         signals = [f"state={state}"]
 
         if state == InvoiceState.DRAFT.value:
