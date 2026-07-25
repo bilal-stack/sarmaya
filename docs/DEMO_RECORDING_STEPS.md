@@ -37,10 +37,45 @@ A tick-off shot list. Work top to bottom. Each step is either:
 - [ ] **`[DO]`** Upload `demo_assets/invoice_orion_1042.pdf` in the frontend — confirm OCR + Claude respond
 - [ ] **`[DO]`** Re-run `_demo_seed.py` afterwards to clear the rehearsal upload
 
-### A5. OBS
-- [ ] **`[DO]`** Scene has **Display Capture** + **Audio Input Capture** (your headset mic)
-- [ ] **`[DO]`** Say a test line — mic meter peaks in **yellow**, never red
-- [ ] **`[DO]`** Record 10 seconds, play it back, confirm audio + video are both there
+### A5. OBS — silent capture setup
+
+> You are **not** recording audio. The narration is generated separately
+> (`_demo_narrate.py`) and merged in your editor. Any mic or desktop audio here
+> is just noise you'd have to strip out later.
+
+**Settings → Video**
+- [ ] **`[DO]`** Base (Canvas) Resolution: **1920×1080**
+- [ ] **`[DO]`** Output (Scaled) Resolution: **1920×1080**
+- [ ] **`[DO]`** Common FPS Values: **30**
+
+**Settings → Output** (switch Output Mode to **Advanced** → *Recording* tab)
+- [ ] **`[DO]`** Recording Format: **Hybrid MP4** (crash-safe; plain `MP4` corrupts if OBS dies mid-record)
+- [ ] **`[DO]`** Video Encoder: **NVIDIA NVENC H.264** if you have an NVIDIA GPU, otherwise **x264**
+- [ ] **`[DO]`** Rate Control: **CQP**, CQ Level **18** (NVENC) — or x264 CRF **18**. Lower = better quality.
+- [ ] **`[DO]`** Preset: **Quality**
+- [ ] **`[DO]`** Note the **Recording Path** — that's where your file lands
+
+**Settings → Audio**
+- [ ] **`[DO]`** Desktop Audio: **Disabled**
+- [ ] **`[DO]`** Mic/Auxiliary Audio: **Disabled**
+
+**Settings → Hotkeys**
+- [ ] **`[DO]`** Set *Start Recording* and *Stop Recording* to **F9**
+      (so you never film yourself clicking OBS)
+
+**Scene & source**
+- [ ] **`[DO]`** Sources panel → **+** → **Display Capture** → OK → pick your monitor → OK
+- [ ] **`[DO]`** If it shows a mirror-in-a-mirror, that's OBS capturing itself — minimize OBS before recording
+- [ ] **`[DO]`** Right-click the preview → **Transform → Fit to Screen**
+
+**Test**
+- [ ] **`[DO]`** Press **F9**, click around Swagger for 10 seconds, press **F9** again
+- [ ] **`[DO]`** **Docks → Recordings** (or open the Recording Path) and play it back
+- [ ] **`[DO]`** Confirm: text is sharp, motion is smooth, file is ~1080p
+
+> **Multi-monitor tip:** put Chrome on your main monitor and capture only that
+> one. Keep your terminals and the `_demo_ids.py` cheat sheet on the second
+> monitor — they won't be in frame.
 
 ---
 
