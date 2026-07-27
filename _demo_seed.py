@@ -84,6 +84,71 @@ def ensure_invoice(number, vendor, amount, state, created_by, hours_in_state=1, 
     return inv
 
 
+# --- purge previous takes ----------------------------------------------------
+# Uploading a PDF on camera creates a real invoice (numbered from the OCR text,
+# e.g. INV-1042) plus its file row and audit trail. Those survive a re-seed, so
+# the next take's upload hits the exact-duplicate hard block. Delete everything
+# that isn't part of the scripted set, in FK-safe order.
+import os  # noqa: E402
+
+from app.models.file import File  # noqa: E402
+from app.models.audit_log import AuditLog  # noqa: E402
+from app.models.ai_action_log import AIActionLog  # noqa: E402
+
+SCRIPTED_NUMBERS = [f"INV-200{i}" for i in range(1, 8)]
+SCRIPTED_VENDORS = ["Orion Supplies Ltd", "Meridian Tech (Pvt) Ltd", "Nimbus Traders"]
+
+stale = (
+    db.query(Invoice)
+    .filter(Invoice.tenant_id == tenant.id, Invoice.invoice_number.notin_(SCRIPTED_NUMBERS))
+    .all()
+)
+if stale:
+    stale_ids = [i.id for i in stale]
+    file_ids = [i.pdf_file_id for i in stale if i.pdf_file_id]
+
+    # Nothing may point at an invoice we're about to delete.
+    db.query(Invoice).filter(Invoice.potential_duplicate_id.in_(stale_ids)).update(
+        {Invoice.potential_duplicate_id: None}, synchronize_session=False
+    )
+    # audit_logs.file_id is a real FK, so these must go before the files do.
+    db.query(AuditLog).filter(AuditLog.object_id.in_(stale_ids)).delete(synchronize_session=False)
+    if file_ids:
+        db.query(AuditLog).filter(AuditLog.file_id.in_(file_ids)).delete(synchronize_session=False)
+    db.query(AIActionLog).filter(AIActionLog.object_id.in_(stale_ids)).delete(synchronize_session=False)
+    db.query(Invoice).filter(Invoice.id.in_(stale_ids)).delete(synchronize_session=False)
+
+    # Remove the stored PDFs from disk, then their rows.
+    if file_ids:
+        for f in db.query(File).filter(File.id.in_(file_ids)).all():
+            try:
+                if f.file_path and os.path.exists(f.file_path):
+                    os.remove(f.file_path)
+            except OSError:
+                pass
+        db.query(File).filter(File.id.in_(file_ids)).delete(synchronize_session=False)
+
+    db.flush()
+    print(f"purge  - {len(stale)} invoice(s) from previous takes: "
+          f"{', '.join(sorted(i.invoice_number for i in stale)[:6])}"
+          f"{' ...' if len(stale) > 6 else ''}")
+
+# Vendors auto-created by an upload (an OCR'd name that matched nothing) would
+# otherwise pile up in the review queue and clutter the vendor scene.
+orphan_vendors = (
+    db.query(Vendor)
+    .filter(Vendor.tenant_id == tenant.id, Vendor.legal_name.notin_(SCRIPTED_VENDORS))
+    .all()
+)
+for v in orphan_vendors:
+    if db.query(Invoice).filter(Invoice.vendor_id == v.id).count() == 0:
+        db.query(AuditLog).filter(AuditLog.object_id == v.id).delete(synchronize_session=False)
+        db.delete(v)
+if orphan_vendors:
+    db.flush()
+    print(f"purge  - {len(orphan_vendors)} auto-created vendor(s) from previous takes")
+
+
 # --- users -------------------------------------------------------------------
 admin = db.query(User).filter_by(tenant_id=tenant.id, email="admin@demo.com").first()
 manager = ensure_user("manager@demo.com", "Maya Manager", UserRole.MANAGER)
@@ -127,8 +192,6 @@ ensure_invoice("INV-2007", meridian, 12_000, "draft", clerk.id, hours_in_state=2
 # Re-runnable: restore the scripted invoices to pending with fresh timers, and
 # clear prior SLA escalations so the escalation scene shows a real escalation
 # again (the runner is idempotent per state entry).
-from app.models.audit_log import AuditLog  # noqa: E402
-
 scripted = {
     "INV-2001": ("pending_approval", 72),
     "INV-2002": ("pending_approval", 5),
@@ -153,4 +216,4 @@ cleared = (
 print(f"reset: scripted invoices restored, {cleared} prior escalation event(s) cleared")
 
 db.commit()
-print("OK — demo data ready. Logins: admin/manager/cfo/clerk @demo.com, password demo1234")
+print("OK - demo data ready. Logins: admin/manager/cfo/clerk @demo.com, password demo1234")

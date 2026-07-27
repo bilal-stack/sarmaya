@@ -31,7 +31,17 @@ A tick-off shot list. Work top to bottom. Each step is either:
 - [ ] **`[DO]`** In Swagger, click **Authorize** → username `admin@demo.com`, password `demo1234` → **Authorize** → **Close**
 - [ ] **`[DO]`** Zoom both tabs to **125%** (Ctrl + `+`)
 - [ ] **`[DO]`** Hide the bookmarks bar (Ctrl+Shift+B), close all other tabs
-- [ ] **`[DO]`** Turn on Windows **Do Not Disturb**; silence your phone
+- [ ] **`[DO]`** Keep the **URL bar visible** — `localhost:9002` on screen shows a client
+      this is a real running system. Don't use F11 fullscreen.
+
+### A3b. Clean the frame
+- [ ] **`[DO]`** **Auto-hide the taskbar**: Settings → Personalization → Taskbar →
+      Taskbar behaviors → ✅ *Automatically hide the taskbar*
+      *(better than cropping in OBS — keeps a true 1920×1080 frame)*
+- [ ] **`[DO]`** Turn on **Do Not Disturb** (Win+N → toggle). This is the #1 cause of reshoots.
+- [ ] **`[DO]`** **Fully close** Slack / WhatsApp / mail — minimizing still lets them pop notifications
+- [ ] **`[DO]`** Hide desktop icons (right-click desktop → View → uncheck *Show desktop icons*)
+- [ ] **`[DO]`** Silence your phone
 
 ### A4. Rehearse once (not recorded)
 - [ ] **`[DO]`** Upload `demo_assets/invoice_orion_1042.pdf` in the frontend — confirm OCR + Claude respond
