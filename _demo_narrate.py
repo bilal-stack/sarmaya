@@ -101,7 +101,11 @@ The same discipline applies to A I. Every single A I call is logged. Which model
 """,
 
     "08_close": """
-Everything you saw is configuration, not hardcode. Approval thresholds, workflow states, transition guards, S L As. All editable through the A P I, all versioned, and any version can be rolled back.
+One last thing. This is a natural language query agent. You ask a question in plain English, and it turns that into a database query using tool calling, then answers from the real data.
+
+It's scoped to your tenant, enforced both in the tool itself and by row level security in Postgres, so it cannot reach another client's data even if the model tried. And like every other A I call in the system, the question, the model, and the result are written to the A I action log. Convenience for the user, without opening a hole in the governance.
+
+So, everything you saw is configuration, not hardcode. Approval thresholds, workflow states, transition guards, S L As. All editable through the A P I, all versioned, and any version can be rolled back.
 
 The whole thing is multi tenant with Postgres row level security, and it's covered by two hundred and sixty one tests.
 
