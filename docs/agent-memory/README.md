@@ -154,8 +154,11 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   hash — sealed with a SHA-256 `pack_hash`. Regenerating and comparing hashes
   shows whether anything underlying the export changed. `GET` previews without
   recording; `GET /audit/evidence-packs` lists what was generated, when, by whom.
-- **`print()` → logging** in `app/agents/**` (left intentionally for now —
-  console logging wasn't surfacing).
+- ~~**`print()` → logging**~~ — **done**. Root cause was that nothing configured
+  logging, so module loggers had no handler under uvicorn and anything below
+  WARNING vanished. `app/main.py` now calls `basicConfig` (DEBUG when
+  `settings.DEBUG`, else INFO) and quiets third-party noise; all `print()`s in
+  `app/**` are now `logger` calls, and the dead `log_event` placeholder is gone.
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,
   OpenSearch, Qdrant) is **not** wired — current system is a FastAPI + Postgres
   modular monolith, which the Build Book sanctions as "monolith first".

@@ -92,7 +92,3 @@ def log_audit(
     append_to_chain(db, audit)
     db.flush()
 
-
-def log_event(action: str, details: dict):
-    """Legacy placeholder for compatibility"""
-    print("AUDIT:", action, details)

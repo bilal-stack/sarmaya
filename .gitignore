@@ -256,3 +256,7 @@ os-google.json
 
 # Demo assets (generated sample PDFs)
 demo_assets/
+
+# OCR/debug dumps — may contain real invoice contents; never commit
+*_full_dump.txt
+document_ai_full_dump.txt

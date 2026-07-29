@@ -7,6 +7,7 @@ Strategies:
 3. Line item comparison (deep semantic similarity)
 """
 
+import logging
 import time
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
@@ -16,6 +17,8 @@ from app.agents.tools.sql_tools import SQLTools
 from app.schemas.ai import DuplicateDetectionResult
 from app.services.ai_action_log import log_ai_action, STATUS_COMPLETED, STATUS_FAILED_SCHEMA
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "dup-detect-v1"
 
@@ -62,12 +65,12 @@ class DuplicateDetectionAgent:
                 "reasoning": str
             }
         """
-        print(f"🔎 Duplicate check: {vendor_name} | {invoice_number} | {invoice_date} | {total_amount}")
+        logger.debug("Duplicate check: %s | %s | %s | %s", vendor_name, invoice_number, invoice_date, total_amount)
         
         # Strategy 1: Exact invoice number match (with fuzzy vendor)
         exact_match = self.tools.check_exact_duplicate(vendor_name, invoice_number)
         if exact_match:
-            print(f"✅ EXACT MATCH found: {exact_match['id']}")
+            logger.info("Exact duplicate match found: %s", exact_match["id"])
             return self._finalize({
                 "is_duplicate": True,
                 "confidence": 1.0,
@@ -76,7 +79,7 @@ class DuplicateDetectionAgent:
                 "reasoning": f"Exact match: Invoice {invoice_number} already exists for {exact_match['vendor_name']}"
             })
         
-        print("❌ No exact match, trying fuzzy search...")
+        logger.debug("No exact match; trying fuzzy search")
         
         # Strategy 2: Fuzzy match with RELAXED constraints
         similar = self.tools.find_similar_invoices(
@@ -88,7 +91,7 @@ class DuplicateDetectionAgent:
         )
         
         if not similar:
-            print("❌ No similar invoices found")
+            logger.debug("No similar invoices found")
             return self._finalize({
                 "is_duplicate": False,
                 "confidence": 1.0,
@@ -97,7 +100,7 @@ class DuplicateDetectionAgent:
                 "reasoning": "No similar invoices found"
             })
         
-        print(f"🤖 Sending {len(similar)} candidates to AI for analysis...")
+        logger.debug("Sending %d candidates to AI for analysis", len(similar))
 
         # Strategy 3: AI analysis of ALL candidates
         started = time.monotonic()
@@ -113,7 +116,7 @@ class DuplicateDetectionAgent:
         )
         latency_ms = int((time.monotonic() - started) * 1000)
 
-        print(f"🤖 AI result: {ai_result}")
+        logger.debug("AI duplicate result: %s", ai_result)
 
         # AI-produced result: schema-validate and attach model/provider provenance.
         finalized = self._finalize(ai_result, ai_used=True)
@@ -195,7 +198,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
                 context=None
             )
             
-            print(f"🤖 AI raw response: {response}")
+            logger.debug("AI raw response: %s", response)
             
             # ✅ Clean response (remove markdown code blocks)
             response = response.strip()
@@ -208,7 +211,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
             return result
         
         except Exception as e:
-            print(f"AI comparison failed: {str(e)}")  # debug
+            logger.exception("AI duplicate comparison failed")
             return {
                 "is_duplicate": False,
                 "confidence": 0.5,

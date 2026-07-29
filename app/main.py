@@ -7,7 +7,19 @@ import uuid
 from app.utils.datetime_helpers import utc_now
 from app.core.config import settings
 
-# configure logger (uses root logger config; adjust as needed)
+# Configure logging once, at import, so module-level `logger` calls actually
+# surface. Without this the root logger has no handler under uvicorn and
+# anything below WARNING is silently dropped — which is why parts of the code
+# had fallen back to print().
+logging.basicConfig(
+    level=logging.DEBUG if settings.DEBUG else logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Third-party noise stays at WARNING regardless.
+for _noisy in ("httpx", "httpcore", "openai", "anthropic", "urllib3", "PIL"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # Debug toggle (default: production-safe)

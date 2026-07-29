@@ -60,12 +60,14 @@ class DocumentAIProvider(OCRProvider):
             
             result = self.client.process_document(request=request)
             document = result.document
-            #print('document hre ====== :', document)
-
-            with open("document_ai_full_dump.txt", "w", encoding="utf-8") as f:
-                f.write(str(document))
-
-            print("Full response dumped to document_ai_full_dump.txt")
+            # NOTE: never dump the raw document to disk. It contains the full
+            # invoice contents (vendor, tax numbers, amounts) for whichever
+            # tenant is being processed, outside the evidence/audit system and
+            # outside RLS. Debug from the returned object instead.
+            logger.debug(
+                "Document AI returned %d entities, %d chars of text",
+                len(document.entities or []), len(document.text or ""),
+            )
 
             # Parse extracted entities
             parsed_result = self._parse_document_ai_response(document)

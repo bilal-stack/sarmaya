@@ -4,8 +4,11 @@ from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import date, timedelta
+import logging
 import re
 from app.models.invoice import Invoice
+
+logger = logging.getLogger(__name__)
 
 
 class SQLTools:
@@ -122,7 +125,8 @@ class SQLTools:
         # ✅ FUZZY VENDOR MATCHING: Extract core name
         vendor_core = self._extract_vendor_core(vendor_name)
         
-        print(f"🔍 Searching duplicates: vendor_core='{vendor_core}', date={inv_date}, amount={total_amount} (±{amount_tolerance*100}%)")
+        logger.debug("Searching duplicates: vendor_core=%r date=%s amount=%s (+/-%.0f%%)",
+                     vendor_core, inv_date, total_amount, amount_tolerance * 100)
         
         # Query with flexible vendor matching
         similar = self.db.query(Invoice).filter(
@@ -136,7 +140,7 @@ class SQLTools:
             Invoice.total_amount.between(amount_min, amount_max)
         ).limit(10).all()
         
-        print(f"✅ Found {len(similar)} similar invoices")
+        logger.debug("Found %d similar invoices", len(similar))
         
         results = [
             {
@@ -152,7 +156,8 @@ class SQLTools:
         ]
         
         for r in results:
-            print(f"  - {r['vendor_name']} | {r['invoice_number']} | {r['total_amount']} | {r['invoice_date']}")
+            logger.debug("  candidate: %s | %s | %s | %s",
+                         r["vendor_name"], r["invoice_number"], r["total_amount"], r["invoice_date"])
         
         return results
     
@@ -183,7 +188,7 @@ class SQLTools:
         # Return first word (usually the main company name)
         core = filtered_words[0] if filtered_words else name
         
-        print(f"🏷️  Vendor '{vendor_name}' -> core '{core}'")
+        logger.debug("Vendor %r -> core %r", vendor_name, core)
         
         return core
 
