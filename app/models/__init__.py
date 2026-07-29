@@ -11,6 +11,7 @@ from app.models.audit_log import AuditLog
 from app.models.config_version import ConfigVersion
 from app.models.ai_action_log import AIActionLog
 from app.models.policy_eval import PolicyEval
+from app.models.evidence_pack import EvidencePack
 
 __all__ = [
     "Base",
@@ -28,4 +29,5 @@ __all__ = [
     "ConfigVersion",
     "AIActionLog",
     "PolicyEval",
+    "EvidencePack",
 ]

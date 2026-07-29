@@ -635,6 +635,9 @@ GET /api/v1/audit/verify/{object_type}/{object_id}     # tamper-evidence check o
 GET /api/v1/audit/ai-actions?action=&status_filter=    # AI invocation trail (auditor/admin)
 GET /api/v1/audit/policy-evals?object_type=&object_id= # policy evaluation snapshots (rule version + inputs)
 GET /api/v1/audit/chain/{correlation_id}               # whole transaction story across record types
+POST /api/v1/audit/evidence-pack/{correlation_id}      # generate sealed audit bundle (SHA-256 pack_hash)
+GET  /api/v1/audit/evidence-pack/{correlation_id}      # preview the bundle without recording
+GET  /api/v1/audit/evidence-packs?correlation_id=      # packs generated: when, by whom, with what seal
 ```
 
 ### Decision Inbox

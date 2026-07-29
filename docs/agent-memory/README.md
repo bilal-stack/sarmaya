@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **276 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **286 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 **Frontend integration backlog:** the post-MVP endpoints (esp. `GET
 /invoices/{id}/next-action`) have no UI yet — integration guidance lives in
@@ -143,6 +143,13 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   time-ordered feed across every object in the chain — the surface future
   modules (PR/PO/GRN/payment) join without changing the endpoint. Deliberately
   excluded from the audit integrity hash (DR-011).
+- ~~**Evidence Pack Generator**~~ — **done** (migration `017_evidence_packs`):
+  `POST /audit/evidence-pack/{correlation_id}` assembles an audit-ready bundle
+  for a chain — objects, full audit trail + its hash-chain verification, policy
+  evaluation snapshots, AI action log, and every attachment with its content
+  hash — sealed with a SHA-256 `pack_hash`. Regenerating and comparing hashes
+  shows whether anything underlying the export changed. `GET` previews without
+  recording; `GET /audit/evidence-packs` lists what was generated, when, by whom.
 - **`print()` → logging** in `app/agents/**` (left intentionally for now —
   console logging wasn't surfacing).
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,
@@ -156,4 +163,4 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `016_correlation_id`.
+- Migration head: `017_evidence_packs`.

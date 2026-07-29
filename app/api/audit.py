@@ -17,6 +17,8 @@ from app.services.ai_action_log import AIActionLogService
 from app.services.policy_eval import PolicyEvalService
 from app.schemas.correlation import TransactionChain
 from app.services.correlation import CorrelationService
+from app.schemas.evidence import EvidencePackResponse, EvidencePackRecord
+from app.services.evidence_pack import EvidencePackService
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -209,6 +211,52 @@ def get_transaction_chain(
     """
     try:
         return CorrelationService(db).get_chain(correlation_id, current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post("/evidence-pack/{correlation_id}", response_model=EvidencePackResponse)
+def generate_evidence_pack(
+    correlation_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Generate an audit-ready evidence pack for a transaction chain.
+
+    Bundles the objects, the full audit trail with its hash-chain
+    verification, the policy evaluations, the AI action log, and every
+    attachment with its content hash — sealed with a SHA-256 pack_hash.
+    Regenerating later and comparing hashes shows whether anything underlying
+    the export has changed. Auditors and admins only.
+    """
+    try:
+        return EvidencePackService(db).generate(correlation_id, current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/evidence-pack/{correlation_id}", response_model=EvidencePackResponse)
+def preview_evidence_pack(
+    correlation_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Assemble the same bundle without recording a generation."""
+    try:
+        return EvidencePackService(db).build(correlation_id, current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/evidence-packs", response_model=List[EvidencePackRecord])
+def list_evidence_packs(
+    correlation_id: Optional[UUID] = None,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Which packs have been generated, when, by whom, and with what seal."""
+    try:
+        return EvidencePackService(db).list_packs(current_user, correlation_id)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
