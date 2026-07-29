@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **286 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **300 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 **Frontend integration backlog:** the post-MVP endpoints (esp. `GET
 /invoices/{id}/next-action`) have no UI yet — integration guidance lives in
@@ -115,8 +115,12 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   breached items sort first (`overdue_only` filter = the "Overdue" view), the
   escalation role gains visibility live once breached, and
   `POST /inbox/escalate-overdue` records one audited `sla_escalated` event per
-  state entry + notifies (idempotent; cron-able). Remaining: delegation, and
-  consolidating the invoice service's explicit gates onto the guard engine
+  state entry + notifies (idempotent; cron-able). **Delegation done** (migration
+  `018_delegations`): time-bounded, revocable transfer of approval authority
+  (`/delegations`); the delegate borrows the delegator's role for the window,
+  SoD still binds the person acting (cannot approve own work even with borrowed
+  authority), and approvals record both who acted and whose authority was used.
+  Remaining: consolidating the invoice service's explicit gates onto the guard engine
   (DR-006).
 - ~~**AI-gating discipline**~~ — **done** across all AI surfaces. Schema-validated
   structured output + provenance + fallback-on-malformed for: duplicate detection
@@ -163,4 +167,4 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `017_evidence_packs`.
+- Migration head: `018_delegations`.

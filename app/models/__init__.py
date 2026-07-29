@@ -12,6 +12,7 @@ from app.models.config_version import ConfigVersion
 from app.models.ai_action_log import AIActionLog
 from app.models.policy_eval import PolicyEval
 from app.models.evidence_pack import EvidencePack
+from app.models.delegation import Delegation
 
 __all__ = [
     "Base",
@@ -30,4 +31,5 @@ __all__ = [
     "AIActionLog",
     "PolicyEval",
     "EvidencePack",
+    "Delegation",
 ]

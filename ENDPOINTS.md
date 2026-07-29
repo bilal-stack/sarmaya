@@ -663,6 +663,15 @@ POST /api/v1/config/versions/{config_type}/{config_key}/{version}/restore  # rol
 # config_type: approval_policy (key=policy id) | workflow (key=workflow type) | autopilot (key=autopilot)
 ```
 
+### Delegation (temporary approval authority)
+```bash
+GET  /api/v1/delegations?include_inactive=   # delegations you granted or received
+POST /api/v1/delegations                     # {to_user_id, starts_at, ends_at, reason?}
+POST /api/v1/delegations/{id}/revoke         # withdraw early
+# The delegate borrows the delegator's role for the window. SoD still applies to the
+# acting user, and approvals record acted_under_delegation + delegated_authority_of.
+```
+
 ### Restricted Autopilot
 ```bash
 GET  /api/v1/autopilot/preview          # dry run: what would be auto-approved and why

@@ -17,6 +17,7 @@ from app.services.policy_eval import record_approval_routing_eval
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
 from app.services import sod
+from app.services.delegation import resolve_authority, resolve_permission
 from app.services.notification_service import NotificationService
 from app.core.roles import (
     has_permission,
@@ -610,12 +611,16 @@ class InvoiceService:
         # Authorize first — fail fast before the governance gates run (those
         # write/commit audit records, which a non-approver shouldn't be able to
         # trigger).
-        if not has_permission(current_user["role"], PERM_APPROVE_INVOICE):
+        can_approve, perm_delegation = resolve_permission(
+            self.db, current_user, PERM_APPROVE_INVOICE
+        )
+        if not can_approve:
             raise PermissionError(
                 f"Role '{current_user['role']}' does not have permission to approve invoices"
             )
 
-        # Segregation of duties: the maker cannot be the checker.
+        # Segregation of duties binds the person acting, not the role they
+        # borrowed: delegated authority never makes you your own checker.
         if sod.violates_self_invoice_approval(invoice, current_user):
             self._audit_block(invoice, current_user, "approval_blocked", "sod_self_approval")
             raise PermissionError(
@@ -647,10 +652,13 @@ class InvoiceService:
             float(invoice.total_amount or 0), "invoice", invoice.id, current_user["id"],
         )
 
-        if required_role and current_user["role"].lower() != required_role.lower() and current_user["role"] != "admin":
+        authorised, role_delegation = resolve_authority(self.db, current_user, required_role)
+        if not authorised:
             raise PermissionError(
                 f"{required_role.upper()} role required to approve this invoice"
             )
+        # Whose authority actually carried the approval (None when their own).
+        acting_delegation = role_delegation or perm_delegation
         
         # Transition state
         success = transition_state(
@@ -684,6 +692,10 @@ class InvoiceService:
                 "required_role": required_role,
                 "policy_name": routing["policy_name"],
                 "routing_reason": routing["reason"],
+                **({
+                    "acted_under_delegation": str(acting_delegation.id),
+                    "delegated_authority_of": str(acting_delegation.from_user_id),
+                } if acting_delegation else {}),
             },
             workflow_step="approved",
             workflow_type="invoice",
