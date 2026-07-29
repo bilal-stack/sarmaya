@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
-from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot, delegations
+from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot, delegations, users
 import logging
 import uuid
 from app.utils.datetime_helpers import utc_now
@@ -53,6 +53,7 @@ api_v1.include_router(config.router)
 api_v1.include_router(inbox.router)
 api_v1.include_router(autopilot.router)
 api_v1.include_router(delegations.router)
+api_v1.include_router(users.router)
 
 # register versioned router once
 app.include_router(api_v1)
