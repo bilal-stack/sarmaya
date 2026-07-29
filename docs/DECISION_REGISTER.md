@@ -107,3 +107,12 @@ Owner:
 - Rationale: One source of truth for "what version of this rule". A recorded `policy_version` points at an actual restorable snapshot in config history, so an auditor can fetch the exact rule text that made a decision via `GET /config/versions/approval_policy/{id}/{version}`. Option (a) would create a second, parallel counter that could drift from the history and restore nothing.
 - Impact: `app/services/policy_eval.py` looks up `max(config_versions.version)` for the matched policy; snapshots record `null` when no configured rule matched and the hardcoded default applied. Recorded on both submit and approve (an invoice can be evaluated twice, and the second evaluation is the one that authorized the approval).
 - Owner: bilal (dev)
+
+**DR-011 — correlation_id excluded from the audit integrity hash**
+- Date: 2026-06-05
+- Context: Adding `correlation_id` to `audit_logs` raised whether it should join `HASHED_FIELDS` in the per-object integrity chain.
+- Options: (a) include it and rehash every existing row in the migration; (b) leave it out of the hash.
+- Decision: (b).
+- Rationale: It is a linking/index field, not a claim about what happened — the substantive content of each event is already covered. Including it would invalidate every hash written before this migration, and because local/dev databases are built with `create_all` rather than Alembic, the compensating rehash would never run there and `GET /audit/verify` would start reporting false tampering on existing data. Accepted residual risk: re-pointing an event at a different chain is not hash-detectable; the event's own content still is.
+- Impact: `correlation_id` added to invoices, audit_logs, policy_evals and ai_action_logs (migration 016) with a back-fill; `HASHED_FIELDS` unchanged, so all existing chains stay valid.
+- Owner: bilal (dev)

@@ -45,6 +45,10 @@ class AuditLog(BaseModel):
     ai_provider = Column(String(50), nullable=True)    # "openai", "claude", etc.
     ai_confidence = Column(Integer, nullable=True)     # 0-100
     
+    # Chain identity — links this event to the whole transaction story.
+    # Deliberately NOT part of the integrity hash (see DR-011).
+    correlation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
     # Tamper-evidence: each entry is hash-chained to the previous entry for the
     # same object. entry_hash = SHA-256(prev_hash + canonical(this row)); the
     # first event for an object has prev_hash = NULL. Altering, deleting, or

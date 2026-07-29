@@ -39,6 +39,8 @@ class AIActionLog(BaseModel):
     input_summary = Column(String, nullable=True)
     output_summary = Column(String, nullable=True)
 
+    correlation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
     # Optional link to the object the AI acted on.
     object_type = Column(String(50), nullable=True)
     object_id = Column(UUID(as_uuid=True), nullable=True)

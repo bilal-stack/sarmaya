@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.ai_action_log import AIActionLog
+from app.services.correlation import resolve_correlation_id
 from app.core.roles import has_permission, PERM_VIEW_AUDIT
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ def log_ai_action(
             latency_ms=latency_ms,
             input_summary=(input_summary or None) and input_summary[:500],
             output_summary=(output_summary or None) and output_summary[:500],
+            correlation_id=resolve_correlation_id(db, object_type, object_id),
             object_type=object_type,
             object_id=object_id,
         )

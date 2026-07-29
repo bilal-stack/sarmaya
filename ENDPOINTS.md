@@ -633,6 +633,8 @@ curl -X GET "http://127.0.0.1:8000/api/v1/invoices/{invoice_id}/next-action?use_
 GET /api/v1/audit/timeline/{object_type}/{object_id}   # per-object timeline w/ plain-English reasons
 GET /api/v1/audit/verify/{object_type}/{object_id}     # tamper-evidence check of the audit hash chain
 GET /api/v1/audit/ai-actions?action=&status_filter=    # AI invocation trail (auditor/admin)
+GET /api/v1/audit/policy-evals?object_type=&object_id= # policy evaluation snapshots (rule version + inputs)
+GET /api/v1/audit/chain/{correlation_id}               # whole transaction story across record types
 ```
 
 ### Decision Inbox

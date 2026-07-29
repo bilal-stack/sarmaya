@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models.policy_eval import PolicyEval
 from app.models.config_version import ConfigVersion
 from app.services.config_versioning import TYPE_APPROVAL_POLICY
+from app.services.correlation import resolve_correlation_id
 from app.core.roles import has_permission, PERM_VIEW_AUDIT, PERM_MANAGE_POLICIES
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ def record_approval_routing_eval(
             inputs={"amount": float(amount or 0), "matched_rule": routing.get("matched_rule")},
             output={"required_role": routing.get("required_role")},
             reasons=[routing.get("reason")] if routing.get("reason") else [],
+            correlation_id=resolve_correlation_id(db, object_type, object_id),
             object_type=object_type,
             object_id=object_id,
             evaluated_by=evaluated_by,

@@ -14,6 +14,7 @@ from app.core.enums import InvoiceState, VendorStatus
 from app.services.workflow import transition_state
 from app.services.policy import explain_approval_routing
 from app.services.policy_eval import record_approval_routing_eval
+from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
 from app.services import sod
 from app.services.notification_service import NotificationService
@@ -297,6 +298,7 @@ class InvoiceService:
             tax_amount=invoice_data.tax_amount,
             description=invoice_data.description,
             current_state=InvoiceState.DRAFT.value,
+            correlation_id=new_correlation_id(),  # this invoice starts a chain
             created_by=current_user["id"]
         )
         
@@ -1005,6 +1007,7 @@ class InvoiceService:
             subtotal_amount=total_amount - tax_amount if tax_amount else total_amount,
             currency=currency,
             current_state=InvoiceState.DRAFT.value,
+            correlation_id=new_correlation_id(),  # this invoice starts a chain
             ocr_confidence=confidence,
             ocr_extracted_data=ocr_result_sanitized,
             line_items=ocr_result.get("line_items", []),  # ✅ ADD

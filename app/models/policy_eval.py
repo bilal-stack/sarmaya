@@ -39,6 +39,7 @@ class PolicyEval(BaseModel):
     reasons = Column(JSON, default=list)      # human-readable justification
 
     # What the decision was about.
+    correlation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     object_type = Column(String(50), nullable=True)
     object_id = Column(UUID(as_uuid=True), nullable=True)
     evaluated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)

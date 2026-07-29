@@ -15,6 +15,8 @@ from app.schemas.policy import PolicyEvalResponse
 from app.services.audit_service import AuditService
 from app.services.ai_action_log import AIActionLogService
 from app.services.policy_eval import PolicyEvalService
+from app.schemas.correlation import TransactionChain
+from app.services.correlation import CorrelationService
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -188,6 +190,25 @@ def list_policy_evals(
             limit=limit, offset=offset,
         )
         return rows
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/chain/{correlation_id}", response_model=TransactionChain)
+def get_transaction_chain(
+    correlation_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Reconstruct an entire transaction story from its correlation_id.
+
+    Merges every record that shares the chain - audit events, policy
+    evaluations and AI actions - into one time-ordered feed, across every
+    object in the chain. As further modules land (PR, PO, GRN, payment),
+    they join the same chain and appear here without changing this endpoint.
+    """
+    try:
+        return CorrelationService(db).get_chain(correlation_id, current_user)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 

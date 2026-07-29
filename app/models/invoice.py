@@ -26,6 +26,10 @@ class Invoice(BaseModel):
     
     description = Column(String, nullable=True)
     
+    # Chain identity: links every record across modules that belongs to the
+    # same transaction story (Build Book: universal correlation IDs).
+    correlation_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
     # Workflow
     current_state = Column(SQLEnum(InvoiceState), default=InvoiceState.DRAFT)
     # When the invoice entered its current state — the SLA timer start

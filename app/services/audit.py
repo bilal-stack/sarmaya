@@ -6,6 +6,7 @@ from uuid import UUID
 from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.services.audit_integrity import append_to_chain
+from app.services.correlation import resolve_correlation_id
 from app.utils.datetime_helpers import utc_now
 
 
@@ -29,6 +30,7 @@ def log_audit(
     ai_assisted: bool = False,
     ai_provider: Optional[str] = None,
     ai_confidence: Optional[int] = None,
+    correlation_id=None,
 ):
     """
     Enhanced audit logging with full compliance tracking
@@ -43,6 +45,11 @@ def log_audit(
     - ai_provider: Which AI provider ("openai", "claude", etc.)
     - ai_confidence: AI confidence score (0-100)
     """
+    # Chain identity: use the caller's if given, else inherit the subject
+    # object's, so no call site can silently drop an event out of its story.
+    if correlation_id is None:
+        correlation_id = resolve_correlation_id(db, object_type, object_id)
+
     # Get user email and role if user exists
     user = db.query(User).filter(User.id == user_id).first()
     user_email = user.email if user else None
@@ -72,6 +79,7 @@ def log_audit(
         ai_assisted=ai_assisted,
         ai_provider=ai_provider,
         ai_confidence=ai_confidence,
+        correlation_id=correlation_id,
     )
     db.add(audit)
     # Persist first, then reload, so the integrity hash is computed over the

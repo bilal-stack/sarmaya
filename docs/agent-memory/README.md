@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **268 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **276 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 **Frontend integration backlog:** the post-MVP endpoints (esp. `GET
 /invoices/{id}/next-action`) have no UI yet — integration guidance lives in
@@ -135,6 +135,14 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   reasons — recorded on both submit and approve. A decision stays reproducible
   after the policy is edited or rolled back (tested). Read via
   `GET /audit/policy-evals` (auditor or policy admin).
+- ~~**Universal correlation_id**~~ — **done** (migration `016_correlation_id`):
+  every invoice mints a chain id at creation; audit events, policy evaluations
+  and AI actions inherit it automatically (`log_audit` resolves it when not
+  passed, so no call site can drop an event out of its story).
+  `GET /audit/chain/{correlation_id}` merges all three record types into one
+  time-ordered feed across every object in the chain — the surface future
+  modules (PR/PO/GRN/payment) join without changing the endpoint. Deliberately
+  excluded from the audit integrity hash (DR-011).
 - **`print()` → logging** in `app/agents/**` (left intentionally for now —
   console logging wasn't surfacing).
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,
@@ -148,4 +156,4 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `015_policy_evals`.
+- Migration head: `016_correlation_id`.
