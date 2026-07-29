@@ -1,7 +1,7 @@
-from sqlalchemy import Column, String, JSON, ForeignKey, DateTime, func, Boolean, Integer
+from sqlalchemy import Column, String, JSON, ForeignKey, DateTime, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID, INET
 from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
+from app.models.base import BaseModel, UTC_NOW
 
 
 class AuditLog(BaseModel):
@@ -56,8 +56,10 @@ class AuditLog(BaseModel):
     prev_hash = Column(String(64), nullable=True)
     entry_hash = Column(String(64), nullable=True)
 
-    # Timestamp (override to use timestamp instead of created_at)
-    timestamp = Column(DateTime, server_default=func.now(), nullable=False)
+    # Timestamp (override to use timestamp instead of created_at). UTC, like
+    # every other timestamp the application writes — see UTC_NOW in models.base
+    # for why a bare now() is wrong here.
+    timestamp = Column(DateTime, server_default=UTC_NOW, nullable=False)
     
     # Relationships
     tenant = relationship("Tenant", backref="audit_logs")

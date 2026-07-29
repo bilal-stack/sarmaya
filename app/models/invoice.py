@@ -1,7 +1,7 @@
-from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Boolean, func, Enum as SQLEnum
+from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Boolean, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
+from app.models.base import BaseModel, UTC_NOW
 from app.core.enums import InvoiceState, Currency
 
 class Invoice(BaseModel):
@@ -34,7 +34,9 @@ class Invoice(BaseModel):
     current_state = Column(SQLEnum(InvoiceState), default=InvoiceState.DRAFT)
     # When the invoice entered its current state — the SLA timer start
     # (Build Book: "SLA timers start when a task enters a state").
-    state_entered_at = Column(DateTime, server_default=func.now(), nullable=True)
+    # UTC (UTC_NOW, not func.now()) — this value is compared against utc_now()
+    # to price the timer, so a local-time default would skew every deadline.
+    state_entered_at = Column(DateTime, server_default=UTC_NOW, nullable=True)
     
     # OCR
     ocr_confidence = Column(Integer, nullable=True)
