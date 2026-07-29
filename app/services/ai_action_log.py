@@ -22,6 +22,29 @@ STATUS_HITL = "hitl_requested"
 STATUS_ERROR = "error"
 
 
+def _normalize_confidence(value: Optional[float]) -> Optional[float]:
+    """Store confidence as a 0..1 fraction, always.
+
+    Callers disagree about scale — the next-action agent produces 0..1 while
+    the extraction schema clamps to 0..100 — and both were being written to
+    this one column. A reader then has no way to tell 0.95 from 95 apart from
+    guessing, which surfaced as a "9500%" confidence in the audit console.
+
+    Values above 1 are treated as percentages. That is unambiguous here
+    because a fraction can never exceed 1, and it keeps the fix in one place
+    instead of asking every caller to remember the convention.
+    """
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if value > 1:
+        value = value / 100
+    return max(0.0, min(1.0, value))
+
+
 def log_ai_action(
     db: Session,
     tenant_id,
@@ -40,7 +63,9 @@ def log_ai_action(
     object_id=None,
 ) -> Optional[AIActionLog]:
     """Append one AI-action record. Summaries are truncated; raw payloads are
-    never stored. Returns the row, or None if logging failed (swallowed)."""
+    never stored. `confidence` is normalized to a 0..1 fraction regardless of
+    the scale the caller uses. Returns the row, or None if logging failed
+    (swallowed)."""
     try:
         row = AIActionLog(
             tenant_id=tenant_id,
@@ -50,7 +75,7 @@ def log_ai_action(
             ai_provider=ai_provider,
             ai_model=ai_model,
             prompt_version=prompt_version,
-            confidence=confidence,
+            confidence=_normalize_confidence(confidence),
             latency_ms=latency_ms,
             input_summary=(input_summary or None) and input_summary[:500],
             output_summary=(output_summary or None) and output_summary[:500],

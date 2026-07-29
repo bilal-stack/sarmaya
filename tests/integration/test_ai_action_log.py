@@ -61,3 +61,50 @@ class TestReadAccess:
         clerk = make_user(UserRole.AP_CLERK)  # no audit.view
         with pytest.raises(PermissionError):
             AIActionLogService(db).list_actions(clerk)
+
+
+class TestConfidenceScale:
+    """Confidence is stored as a 0..1 fraction whatever scale the caller used.
+
+    Agents disagree: the next-action agent emits 0..1, the extraction schema
+    clamps to 0..100. Both write this column, so without normalization a
+    reader cannot tell 0.95 from 95 — which surfaced in the audit console as a
+    confidence of "9500%".
+    """
+
+    def test_fraction_is_stored_unchanged(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        row = log_ai_action(
+            db, tenant.id, admin["id"], action="invoice_next_action",
+            status=STATUS_COMPLETED, confidence=0.72,
+        )
+        assert row.confidence == pytest.approx(0.72)
+
+    def test_percentage_is_converted_to_a_fraction(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        row = log_ai_action(
+            db, tenant.id, admin["id"], action="invoice_extraction",
+            status=STATUS_COMPLETED, confidence=95,
+        )
+        assert row.confidence == pytest.approx(0.95)
+
+    def test_out_of_range_values_are_clamped(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        high = log_ai_action(
+            db, tenant.id, admin["id"], action="invoice_extraction",
+            status=STATUS_COMPLETED, confidence=250,
+        )
+        low = log_ai_action(
+            db, tenant.id, admin["id"], action="invoice_extraction",
+            status=STATUS_COMPLETED, confidence=-3,
+        )
+        assert high.confidence == 1.0
+        assert low.confidence == 0.0
+
+    def test_none_stays_none(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        row = log_ai_action(
+            db, tenant.id, admin["id"], action="invoice_next_action",
+            status=STATUS_COMPLETED, confidence=None,
+        )
+        assert row.confidence is None
