@@ -653,6 +653,7 @@ POST /api/v1/inbox/escalate-overdue      # escalate breached items once per stat
 ```bash
 POST /api/v1/config/initialize-defaults                # seed default workflow + approval matrix
 GET/POST/PUT/DELETE /api/v1/config/approval-policies   # approval routing matrix CRUD
+POST /api/v1/config/approval-policies/simulate         # what-if a rule change (read-only)
 GET  /api/v1/config/workflow/{type}/states             # workflow states + transitions + guards + sla
 PUT  /api/v1/config/workflow/{type}/states/{state}/transitions
 PUT  /api/v1/config/workflow/{type}/states/{state}/sla # {"hours": 48, "escalate_to": "cfo"}; versioned

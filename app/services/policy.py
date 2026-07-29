@@ -31,6 +31,63 @@ def _operator_matches(operator: str, amount: float, threshold: float) -> bool:
     return False
 
 
+DEFAULT_THRESHOLD = 250_000
+
+
+def evaluate_rules(rules, total_amount: float) -> dict:
+    """Route an amount against an ordered list of rule dicts.
+
+    Pure: no database access, so the live path and the Policy Simulator share
+    one implementation and cannot drift apart. `rules` must already be sorted
+    by descending priority; each is {policy_name, policy_id, rule_config}.
+    Falls back to the hardcoded split when nothing matches.
+    """
+    for entry in rules or []:
+        rule = entry.get("rule_config") or {}
+        threshold = rule.get("amount_threshold", 0)
+        operator = rule.get("operator", "greater_equal")
+        required_role = rule.get("required_role", "manager")
+
+        if _operator_matches(operator, total_amount, threshold):
+            phrase = _OPERATOR_PHRASE.get(operator, operator)
+            return {
+                "required_role": required_role,
+                "policy_name": entry.get("policy_name"),
+                "policy_id": entry.get("policy_id"),
+                "matched_rule": dict(rule),
+                "reason": (
+                    f"Amount {total_amount:,.0f} {phrase} {threshold:,.0f} → "
+                    f"requires {required_role.upper()} approval "
+                    f"(policy '{entry.get('policy_name')}')."
+                ),
+            }
+
+    required_role = "manager" if total_amount <= DEFAULT_THRESHOLD else "cfo"
+    return {
+        "required_role": required_role,
+        "policy_name": None,
+        "policy_id": None,
+        "matched_rule": None,
+        "reason": (
+            f"No approval policy configured; default routing sends "
+            f"{total_amount:,.0f} to {required_role.upper()}."
+        ),
+    }
+
+
+def active_approval_rules(db: Session, tenant_id) -> list:
+    """The tenant's live approval rules, highest priority first."""
+    policies = db.query(Policy).filter(
+        Policy.tenant_id == tenant_id,
+        Policy.policy_type == "approval_limit",
+        Policy.is_active == True
+    ).order_by(Policy.priority.desc()).all()
+    return [
+        {"policy_name": p.policy_name, "policy_id": p.id, "rule_config": p.rule_config or {}}
+        for p in policies
+    ]
+
+
 def evaluate_approval_role(db: Session, tenant_id: str | UUID, total_amount: float) -> Optional[str]:
     """
     Determine required approver role based on amount and the policies table.
@@ -74,49 +131,10 @@ def explain_approval_routing(db: Session, tenant_id: str | UUID, total_amount: f
     surfaced in Live Audit Mode.
 
     Returns {required_role, reason, policy_name, policy_id, matched_rule}.
-    Mirrors evaluate_approval_role so the explanation always matches the
-    decision. policy_id/matched_rule let callers record a PolicyEval snapshot
-    (see app/services/policy_eval.py); they are None when no configured rule
-    matched and the hardcoded default applied.
+    Delegates to `evaluate_rules`, which the Policy Simulator also uses, so an
+    explanation can never disagree with a simulation.
     """
-    policies = db.query(Policy).filter(
-        Policy.tenant_id == tenant_id,
-        Policy.policy_type == "approval_limit",
-        Policy.is_active == True
-    ).order_by(Policy.priority.desc()).all()
-
-    for policy in policies:
-        rule = policy.rule_config or {}
-        threshold = rule.get("amount_threshold", 0)
-        operator = rule.get("operator", "greater_equal")
-        required_role = rule.get("required_role", "manager")
-
-        if _operator_matches(operator, total_amount, threshold):
-            phrase = _OPERATOR_PHRASE.get(operator, operator)
-            return {
-                "required_role": required_role,
-                "policy_name": policy.policy_name,
-                "policy_id": policy.id,
-                "matched_rule": dict(rule),
-                "reason": (
-                    f"Amount {total_amount:,.0f} {phrase} {threshold:,.0f} → "
-                    f"requires {required_role.upper()} approval "
-                    f"(policy '{policy.policy_name}')."
-                ),
-            }
-
-    required_role = "manager" if total_amount <= 250_000 else "cfo"
-    return {
-        "required_role": required_role,
-        "policy_name": None,
-        "policy_id": None,
-        "matched_rule": None,
-        "reason": (
-            f"No approval policy configured; default routing sends "
-            f"{total_amount:,.0f} to {required_role.upper()}."
-        ),
-    }
-
+    return evaluate_rules(active_approval_rules(db, tenant_id), total_amount)
 
 def check_user_can_approve(user_role: str, total_amount: float) -> bool:
     """

@@ -94,3 +94,40 @@ class PolicyEvalResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SimulationRule(BaseModel):
+    """One rule in a proposed approval matrix."""
+    policy_name: str = "Proposed rule"
+    priority: int = 0
+    rule: ApprovalRule
+
+
+class PolicySimulationRequest(BaseModel):
+    """Replay a proposed approval matrix against historical invoices."""
+    proposed_rules: List[SimulationRule]
+    window_days: int = 90
+    # Optional separate what-if: how many invoices a given autopilot limit
+    # would have made eligible for auto-approval.
+    autopilot_limit: Optional[float] = None
+
+
+class SimulationChange(BaseModel):
+    invoice_id: UUID
+    invoice_number: Optional[str] = None
+    amount: float
+    from_role: str
+    to_role: str
+    new_reason: str
+
+
+class PolicySimulationResult(BaseModel):
+    window_days: int
+    invoices_evaluated: int
+    routing_before: Dict[str, Any]
+    routing_after: Dict[str, Any]
+    changed_count: int
+    changed_value: float
+    net_by_role: Dict[str, int]
+    changes: List[SimulationChange]
+    autopilot_eligible: Optional[Dict[str, Any]] = None

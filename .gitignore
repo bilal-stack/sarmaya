@@ -260,3 +260,8 @@ demo_assets/
 # OCR/debug dumps — may contain real invoice contents; never commit
 *_full_dump.txt
 document_ai_full_dump.txt
+
+# Invoice PDFs and uploads — may contain real customer data
+*.pdf
+uploads/
+demo_assets/

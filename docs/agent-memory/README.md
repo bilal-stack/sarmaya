@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **300 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **313 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 **Frontend integration backlog:** the post-MVP endpoints (esp. `GET
 /invoices/{id}/next-action`) have no UI yet — integration guidance lives in
@@ -159,6 +159,15 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   WARNING vanished. `app/main.py` now calls `basicConfig` (DEBUG when
   `settings.DEBUG`, else INFO) and quiets third-party noise; all `print()`s in
   `app/**` are now `logger` calls, and the dead `log_event` placeholder is gone.
+- ~~**Policy Simulator**~~ — **done**: `POST /config/approval-policies/simulate`
+  replays a proposed approval matrix over historical invoices and reports how
+  routing shifts between roles (counts + value), which invoices move, and
+  optionally how many would qualify under a given autopilot limit. Strictly
+  read-only. Live routing and simulation now share one pure `evaluate_rules`
+  (`app/services/policy.py`) so they cannot drift apart — a test asserts a
+  simulation of the current matrix reproduces live routing exactly.
+  Note: a proposal without a catch-all rule falls through to the hardcoded
+  250k default, which shows up in the returned reason text.
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,
   OpenSearch, Qdrant) is **not** wired — current system is a FastAPI + Postgres
   modular monolith, which the Build Book sanctions as "monolith first".

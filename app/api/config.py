@@ -8,9 +8,12 @@ from app.schemas.policy import (
     ApprovalPolicyCreate,
     ApprovalPolicyUpdate,
     ApprovalPolicyResponse,
+    PolicySimulationRequest,
+    PolicySimulationResult,
 )
 from app.schemas.workflow import WorkflowStateResponse, WorkflowTransitionsUpdate, WorkflowSlaUpdate
 from app.services.policy_service import ApprovalPolicyService
+from app.services.policy_simulator import PolicySimulator
 from app.services.workflow_config_service import WorkflowConfigService
 from app.services.config_provisioning import ConfigProvisioningService
 from app.schemas.autopilot import AutopilotConfig
@@ -189,6 +192,36 @@ def delete_approval_policy(
 ):
     try:
         ApprovalPolicyService(db).delete_policy(policy_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post("/approval-policies/simulate", response_model=PolicySimulationResult)
+def simulate_approval_policy(
+    payload: PolicySimulationRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Policy Simulator: what a proposed approval matrix would have done.
+
+    Replays the proposed rules over the tenant's historical invoices and reports
+    how routing shifts between roles, which invoices move and by how much value,
+    and — optionally — how many would qualify under a given autopilot limit.
+
+    Strictly read-only: nothing is written and no live policy is touched, so a
+    threshold change can be checked before anyone commits to it.
+    """
+    try:
+        return PolicySimulator(db).simulate(
+            current_user,
+            proposed_rules=[
+                {"policy_name": r.policy_name, "priority": r.priority,
+                 "rule_config": r.rule.model_dump()}
+                for r in payload.proposed_rules
+            ],
+            window_days=payload.window_days,
+            autopilot_limit=payload.autopilot_limit,
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
