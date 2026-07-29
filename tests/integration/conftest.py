@@ -149,3 +149,30 @@ def as_user(db):
         return user
 
     return _as
+
+
+@pytest.fixture
+def other_tenant_user(db):
+    """A user belonging to a *different* tenant.
+
+    Exists to prove tenant scoping is enforced by the application, not assumed
+    from RLS — these tests run against a create_all database, which has no RLS
+    policies at all.
+    """
+    from app.models.tenant import Tenant
+
+    other = Tenant(id=uuid.uuid4(), name="Other Co", slug=f"other-{uuid.uuid4().hex[:8]}")
+    db.add(other)
+    db.flush()
+
+    u = User(
+        id=uuid.uuid4(),
+        tenant_id=other.id,
+        email=f"outsider-{uuid.uuid4().hex[:6]}@other.com",
+        password="x",
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    db.add(u)
+    db.flush()
+    return {"id": str(u.id), "tenant_id": str(other.id), "email": u.email, "role": "admin"}

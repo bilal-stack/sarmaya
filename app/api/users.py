@@ -32,15 +32,18 @@ def list_users(
 
     Read-only, and gated by users.view — it exposes colleagues' names, emails
     and roles, which is exactly the directory a delegate picker needs and
-    exactly what a general user should not be able to enumerate. Tenant
-    isolation is enforced by RLS.
+    exactly what a general user should not be able to enumerate.
+
+    Scoped to the caller's tenant explicitly rather than relying on RLS: the
+    policies come from migration 003, so they do not exist in a create_all
+    database, and without the filter this endpoint listed every tenant's staff.
     """
     if not has_permission(current_user["role"], PERM_VIEW_USERS):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to view users",
         )
-    query = db.query(User)
+    query = db.query(User).filter(User.tenant_id == current_user["tenant_id"])
     if active_only:
         query = query.filter(User.is_active.is_(True))
     return query.order_by(User.email.asc()).all()
@@ -86,8 +89,14 @@ def set_user_role(
             detail="You cannot change your own role",
         )
 
-    # RLS keeps this to the caller's tenant.
-    user = db.query(User).filter(User.id == user_id).first()
+    # Scoped to the caller's tenant explicitly, not left to RLS. RLS is created
+    # by migration 003 and so is absent from any database built with
+    # create_all — which is every developer and test database here. Relying on
+    # it alone would mean this endpoint, the most privilege-sensitive write in
+    # the system, has no tenant boundary at all in those environments.
+    tenant_users = db.query(User).filter(User.tenant_id == current_user["tenant_id"])
+
+    user = tenant_users.filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -96,8 +105,10 @@ def set_user_role(
         return user
 
     if str(previous_role).lower() == ADMIN:
+        # Counted within the tenant: another tenant's admins are no help to
+        # this one.
         remaining_admins = (
-            db.query(User)
+            tenant_users
             .filter(User.role == ADMIN, User.is_active.is_(True), User.id != user_id)
             .count()
         )

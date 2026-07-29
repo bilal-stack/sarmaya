@@ -166,3 +166,52 @@ class TestPasswordChangeUsesTheBody:
         })
 
         assert response.status_code == 422
+
+
+class TestTenantBoundary:
+    """The users endpoints scope by tenant themselves.
+
+    Tenant isolation here is normally RLS, but RLS is created by migration 003
+    and is therefore absent from any database built with create_all — which is
+    every developer and test database in this project, including the one these
+    tests run against. Without an explicit filter the directory listed other
+    tenants' staff and a role change could be applied across tenants; both were
+    reproduced against a running server before this was added.
+    """
+
+    def test_directory_excludes_other_tenants(self, client, db, make_user, as_user, other_tenant_user):
+        as_user(make_user(UserRole.ADMIN))
+
+        response = client.get("/api/v1/users")
+
+        assert response.status_code == 200
+        emails = [u["email"] for u in response.json()]
+        assert other_tenant_user["email"] not in emails
+
+    def test_role_change_cannot_cross_tenants(self, client, db, make_user, as_user, other_tenant_user):
+        as_user(make_user(UserRole.ADMIN))
+
+        response = client.patch(
+            f"/api/v1/users/{other_tenant_user['id']}/role", json={"role": "user"}
+        )
+
+        assert response.status_code == 404
+        outsider = db.query(User).filter(User.id == other_tenant_user["id"]).first()
+        assert str(getattr(outsider.role, "value", outsider.role)).lower() == "admin"
+
+
+class TestAdminDemotionIsStillPossible:
+    """The counterpart to the last-admin guard: it must not block legitimate
+    demotions. Without a test for this, a guard that always fired would look
+    like a passing suite."""
+
+    def test_an_admin_can_be_demoted_when_another_remains(self, client, db, make_user, as_user):
+        make_user(UserRole.ADMIN)          # the one who will remain
+        target = make_user(UserRole.ADMIN)  # the one being demoted
+        as_user(make_user(UserRole.ADMIN))  # the caller
+
+        response = client.patch(f"/api/v1/users/{target['id']}/role",
+                                json={"role": "manager"})
+
+        assert response.status_code == 200
+        assert _role_of(db, target) == "manager"
