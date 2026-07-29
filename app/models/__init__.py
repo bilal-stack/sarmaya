@@ -10,6 +10,7 @@ from app.models.conversation import Conversation, ConversationMessage
 from app.models.audit_log import AuditLog
 from app.models.config_version import ConfigVersion
 from app.models.ai_action_log import AIActionLog
+from app.models.policy_eval import PolicyEval
 
 __all__ = [
     "Base",
@@ -26,4 +27,5 @@ __all__ = [
     "ConversationMessage",
     "ConfigVersion",
     "AIActionLog",
+    "PolicyEval",
 ]

@@ -13,6 +13,7 @@ from app.schemas.invoice import InvoiceCreate, InvoiceUpdate
 from app.core.enums import InvoiceState, VendorStatus
 from app.services.workflow import transition_state
 from app.services.policy import explain_approval_routing
+from app.services.policy_eval import record_approval_routing_eval
 from app.services.audit import log_audit
 from app.services import sod
 from app.services.notification_service import NotificationService
@@ -546,6 +547,13 @@ class InvoiceService:
         )
         required_role = routing["required_role"]
 
+        # Snapshot the evaluation itself (rule version + inputs + decision), so
+        # the routing stays reproducible after the policy is edited.
+        record_approval_routing_eval(
+            self.db, current_user["tenant_id"], routing,
+            float(invoice.total_amount or 0), "invoice", invoice.id, current_user["id"],
+        )
+
         # Log audit
         log_audit(
             db=self.db,
@@ -631,6 +639,11 @@ class InvoiceService:
             float(invoice.total_amount or 0)
         )
         required_role = routing["required_role"]
+
+        record_approval_routing_eval(
+            self.db, current_user["tenant_id"], routing,
+            float(invoice.total_amount or 0), "invoice", invoice.id, current_user["id"],
+        )
 
         if required_role and current_user["role"].lower() != required_role.lower() and current_user["role"] != "admin":
             raise PermissionError(

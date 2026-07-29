@@ -61,7 +61,7 @@ endpoints (+ gated them); fixed a conversations N+1; made role checks
 case-insensitive; and resolved current-user identity (role/active) live from the
 DB instead of trusting JWT claims.
 
-Tests: **259 passing** (`./.venv/Scripts/python.exe -m pytest`).
+Tests: **268 passing** (`./.venv/Scripts/python.exe -m pytest`).
 
 **Frontend integration backlog:** the post-MVP endpoints (esp. `GET
 /invoices/{id}/next-action`) have no UI yet — integration guidance lives in
@@ -129,6 +129,12 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
   record provider/model, prompt version, confidence, latency, in/out summary,
   status (completed / failed_schema / hitl_requested / error). Read via
   `GET /audit/ai-actions`.
+- ~~**PolicyEval records**~~ — **done** (migration `015_policy_evals`): every
+  approval-routing decision is snapshotted as a `policy_evals` row with the
+  matched rule, its `config_versions` number, the inputs, the decision, and the
+  reasons — recorded on both submit and approve. A decision stays reproducible
+  after the policy is edited or rolled back (tested). Read via
+  `GET /audit/policy-evals` (auditor or policy admin).
 - **`print()` → logging** in `app/agents/**` (left intentionally for now —
   console logging wasn't surfacing).
 - Aspirational Build Book stack (Temporal, OPA/Rego, NATS, Keycloak, S3/MinIO,
@@ -142,4 +148,4 @@ hitl_requested; every run lands in ai_action_logs (DR-007).
 - Tests need a live Postgres; test DB is `os_test`. Some new columns must be
   applied to `os_test` manually since conftest's `create_all` doesn't ALTER
   existing tables.
-- Migration head: `014_workflow_sla`.
+- Migration head: `015_policy_evals`.

@@ -98,3 +98,12 @@ Owner:
 - Rationale: Correctness without infra risk; the read-time model actually beats stored deadlines for configuration-first behavior. A real scheduler (Temporal per Build Book) slots in later by simply invoking the same runner.
 - Impact: `workflow_states.sla` + `invoices.state_entered_at` (migration 014, timer restarted by `transition_state`), inbox overdue surfacing/sort/filter + escalation-role visibility, `SlaService.run_escalations`, `PUT .../states/{state}/sla` (versioned). Escalation preserves the original approver chain (routing snapshot stays; escalation is an additive audit event).
 - Owner: bilal (dev)
+
+**DR-010 — PolicyEval reuses config_versions rather than its own version counter**
+- Date: 2026-06-05
+- Context: The Build Book requires each policy evaluation to store a `policy_version`. Policies have no version column of their own; versions live in the `config_versions` history added for DR-001.
+- Options: (a) add a `version` column to `policies` and bump it on edit; (b) record the policy's current `config_versions` number at evaluation time.
+- Decision: (b).
+- Rationale: One source of truth for "what version of this rule". A recorded `policy_version` points at an actual restorable snapshot in config history, so an auditor can fetch the exact rule text that made a decision via `GET /config/versions/approval_policy/{id}/{version}`. Option (a) would create a second, parallel counter that could drift from the history and restore nothing.
+- Impact: `app/services/policy_eval.py` looks up `max(config_versions.version)` for the matched policy; snapshots record `null` when no configured rule matched and the hardcoded default applied. Recorded on both submit and approve (an invoice can be evaluated twice, and the second evaluation is the one that authorized the approval).
+- Owner: bilal (dev)

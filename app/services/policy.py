@@ -73,8 +73,11 @@ def explain_approval_routing(db: Session, tenant_id: str | UUID, total_amount: f
     """Explain *why* an amount routes to a given approver — the policy reason
     surfaced in Live Audit Mode.
 
-    Returns {required_role, reason, policy_name}. Mirrors evaluate_approval_role
-    so the explanation always matches the decision.
+    Returns {required_role, reason, policy_name, policy_id, matched_rule}.
+    Mirrors evaluate_approval_role so the explanation always matches the
+    decision. policy_id/matched_rule let callers record a PolicyEval snapshot
+    (see app/services/policy_eval.py); they are None when no configured rule
+    matched and the hardcoded default applied.
     """
     policies = db.query(Policy).filter(
         Policy.tenant_id == tenant_id,
@@ -93,6 +96,8 @@ def explain_approval_routing(db: Session, tenant_id: str | UUID, total_amount: f
             return {
                 "required_role": required_role,
                 "policy_name": policy.policy_name,
+                "policy_id": policy.id,
+                "matched_rule": dict(rule),
                 "reason": (
                     f"Amount {total_amount:,.0f} {phrase} {threshold:,.0f} → "
                     f"requires {required_role.upper()} approval "
@@ -104,6 +109,8 @@ def explain_approval_routing(db: Session, tenant_id: str | UUID, total_amount: f
     return {
         "required_role": required_role,
         "policy_name": None,
+        "policy_id": None,
+        "matched_rule": None,
         "reason": (
             f"No approval policy configured; default routing sends "
             f"{total_amount:,.0f} to {required_role.upper()}."

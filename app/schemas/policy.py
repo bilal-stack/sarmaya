@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, field_validator
-from typing import Optional, Literal, Dict, Any
+from typing import Optional, Literal, Dict, Any, List
 from datetime import datetime
 from uuid import UUID
 
@@ -73,5 +73,24 @@ class ApprovalPolicyResponse(BaseModel):
     priority: int
     created_at: datetime
     updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicyEvalResponse(BaseModel):
+    """One recorded policy evaluation: which rule version decided what, on what
+    inputs, and why."""
+    id: UUID
+    policy_key: str
+    policy_id: Optional[UUID] = None
+    policy_name: Optional[str] = None
+    policy_version: Optional[int] = None
+    inputs: Dict[str, Any]
+    output: Dict[str, Any]
+    reasons: List[str] = []
+    object_type: Optional[str] = None
+    object_id: Optional[UUID] = None
+    evaluated_by: Optional[UUID] = None
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

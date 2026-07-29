@@ -11,8 +11,10 @@ from app.models.user import User
 from app.core.enums import UserRole
 from app.schemas.audit import AuditTimeline, AuditChainVerification
 from app.schemas.ai import AIActionLogResponse
+from app.schemas.policy import PolicyEvalResponse
 from app.services.audit_service import AuditService
 from app.services.ai_action_log import AIActionLogService
+from app.services.policy_eval import PolicyEvalService
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -165,6 +167,29 @@ def list_ai_actions(
         current_user, action=action, status=status_filter, limit=limit, offset=offset
     )
     return rows
+
+
+@router.get("/policy-evals", response_model=List[PolicyEvalResponse])
+def list_policy_evals(
+    object_type: Optional[str] = None,
+    object_id: Optional[UUID] = None,
+    limit: int = Query(default=100, le=500),
+    offset: int = Query(default=0, ge=0),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Policy evaluation snapshots: which rule version made each routing
+    decision, on what inputs, with what reasons. Reproduces a decision even
+    after the policy has been edited or rolled back. Auditors and policy
+    administrators only."""
+    try:
+        rows, _ = PolicyEvalService(db).list_evals(
+            current_user, object_type=object_type, object_id=object_id,
+            limit=limit, offset=offset,
+        )
+        return rows
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 
 @router.get("/trail/{object_type}/{object_id}")
