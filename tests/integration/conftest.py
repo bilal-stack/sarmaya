@@ -105,3 +105,47 @@ def make_user(db, tenant):
             "role": role.value,
         }
     return _make
+
+
+@pytest.fixture
+def client(db):
+    """FastAPI TestClient bound to the test session.
+
+    The rest of this suite exercises the service layer directly, which cannot
+    see how an endpoint is *wired* — whether a value arrives in the body or the
+    query string, or which dependency guards it. That blind spot is what let a
+    self-service role change (`PUT /auth/me?role=admin`) sit in the API, so
+    anything about the HTTP contract itself belongs here.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.core.database import get_db
+    from app.api.deps import get_db_session
+
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_db_session] = lambda: db
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def as_user(db):
+    """Authenticate the TestClient as a given user.
+
+    Overrides both current-user dependencies: app.api.auth returns the User
+    row, app.api.deps returns the dict the service layer takes.
+    """
+    from app.main import app
+    from app.api.auth import get_current_user as auth_current_user
+    from app.api.deps import get_current_user as deps_current_user
+
+    def _as(user: dict):
+        row = db.query(User).filter(User.id == user["id"]).first()
+        app.dependency_overrides[auth_current_user] = lambda: row
+        app.dependency_overrides[deps_current_user] = lambda: user
+        return user
+
+    return _as

@@ -10,7 +10,7 @@ from app.core.security import (
     create_access_token,
     decode_access_token,
 )
-from app.schemas.auth import LoginIn, Token, TokenWithUser
+from app.schemas.auth import LoginIn, Token, TokenWithUser, PasswordChange, ProfileUpdate
 from app.schemas.user import UserCreate, UserOut
 from app.models.user import User
 from app.models.tenant import Tenant
@@ -159,19 +159,23 @@ def logout(
 
 @router.put("/me", response_model=UserOut)
 def update_me(
-    full_name: Optional[str] = None,
-    role: Optional[str] = None,
+    payload: ProfileUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # Update profile fields; role changes allowed only if valid (authorization checks can be added later)
-    if full_name is not None:
-        current_user.full_name = full_name.strip() or None
-    if role is not None:
-        role_val = role.strip().lower()
-        if not is_valid_role(role_val):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
-        current_user.role = role_val
+    """Edit your own profile.
+
+    Role is intentionally not editable here. This endpoint previously accepted
+    a `role` as a bare argument — which FastAPI binds to the query string — so
+    any authenticated user could grant themselves any role with
+    `PUT /auth/me?role=admin`. Role is the input to every authorization
+    decision in the system (segregation of duties, the approval matrix,
+    delegation, autopilot bounds), so a self-service role change defeats all of
+    them at once. Changing a role now requires users.manage via
+    `PATCH /users/{user_id}/role`.
+    """
+    if payload.full_name is not None:
+        current_user.full_name = payload.full_name.strip() or None
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
@@ -180,11 +184,20 @@ def update_me(
 
 @router.post("/change-password", response_model=Token)
 def change_password(
-    current_password: str,
-    new_password: str,
+    payload: PasswordChange,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    """Change your own password.
+
+    Credentials arrive in the request body, never as query parameters — the
+    previous signature used bare `str` arguments, which FastAPI binds to the
+    query string, putting both passwords in the URL and therefore in access
+    logs and browser history.
+    """
+    current_password = payload.current_password
+    new_password = payload.new_password
+
     # Verify current password
     hashed_password = cast(str, current_user.password)
     if not verify_password(current_password, hashed_password):
