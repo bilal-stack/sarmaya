@@ -48,6 +48,11 @@ class InvoiceResponse(InvoiceBase):
     rejection_reason: Optional[str] = None
     potential_duplicate_id: Optional[UUID] = None
     duplicate_acknowledged: bool = False
+    # The transaction chain this invoice belongs to. Exposed so the audit
+    # console can be reached from the invoice itself — without it, evidence
+    # packs and chain lookups are only addressable by reading the database.
+    # Null for invoices created before correlation IDs were introduced.
+    correlation_id: Optional[UUID] = None
     created_by: UUID
     created_at: datetime
     updated_at: datetime
