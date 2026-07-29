@@ -55,18 +55,23 @@ api_v1.include_router(autopilot.router)
 api_v1.include_router(delegations.router)
 api_v1.include_router(users.router)
 
-# register versioned router once
+
+# Health check. Must be declared before the router is included: FastAPI copies
+# a router's routes at include time, so anything registered afterwards is
+# silently dropped — which is why this endpoint used to 404.
+@api_v1.get("/ping")
+async def ping():
+    return {"pong": True}
+
+
+# register versioned router once, after every route is attached
 app.include_router(api_v1)
+
 
 # root redirect to /api/v1
 @app.get("/")
 async def root():
     return RedirectResponse(url="/api/v1")
-
-# ping endpoint under api v1
-@api_v1.get("/ping")
-async def ping():
-    return {"pong": True}
 
 
 # -----------------------
