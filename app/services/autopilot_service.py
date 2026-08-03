@@ -73,7 +73,9 @@ class AutopilotService:
             self.db, current_user["tenant_id"], TYPE_AUTOPILOT, TYPE_AUTOPILOT,
             rule, change_action, current_user["id"],
         )
-        self.policy_repo.commit()
+        # Flush, do not commit: changing what autopilot may approve without
+        # a human must not be recordable separately from who changed it.
+        self.db.flush()
 
         log_audit(
             db=self.db,
@@ -85,6 +87,7 @@ class AutopilotService:
             before_value=before,
             after_value=rule,
         )
+        self.policy_repo.commit()
         return AutopilotConfig(**rule)
 
     # --- preview / run ------------------------------------------------------
@@ -176,7 +179,9 @@ class AutopilotService:
         invoice.approved_by = None
         invoice.approved_at = None
         self.repository.update(invoice)
-        self.repository.commit()
+        # Flush, do not commit: reversing an automated approval is itself a
+        # governance action and must land with its record.
+        self.db.flush()
 
         log_audit(
             db=self.db,
@@ -189,6 +194,7 @@ class AutopilotService:
             workflow_type="invoice",
             comment="Autopilot approval reverted to pending for manual review.",
         )
+        self.repository.commit()
         return invoice
 
     # --- internals ----------------------------------------------------------

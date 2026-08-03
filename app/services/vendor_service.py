@@ -79,7 +79,9 @@ class VendorService:
             **data.model_dump(),
         )
         vendor = self.repository.create(vendor)
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the record it describes.
+        self.db.flush()
         vendor = self.repository.refresh(vendor)
 
         log_audit(
@@ -91,6 +93,7 @@ class VendorService:
             action="created",
             after_value={"legal_name": vendor.legal_name, "status": vendor.status.value},
         )
+        self.repository.commit()
         return vendor
 
     def update_vendor(
@@ -120,7 +123,7 @@ class VendorService:
             setattr(vendor, field, value)
 
         vendor = self.repository.update(vendor)
-        self.repository.commit()
+        self.db.flush()
         vendor = self.repository.refresh(vendor)
 
         log_audit(
@@ -133,6 +136,7 @@ class VendorService:
             before_value=before,
             after_value={"legal_name": vendor.legal_name},
         )
+        self.repository.commit()
         return vendor
 
     def set_status(
@@ -164,7 +168,10 @@ class VendorService:
         old_status = vendor.status
         vendor.status = new_status
         vendor = self.repository.update(vendor)
-        self.repository.commit()
+        # Flush, do not commit: verifying a vendor is what unblocks payment
+        # against it, so the change and the record of who made it must land
+        # together.
+        self.db.flush()
         vendor = self.repository.refresh(vendor)
 
         log_audit(
@@ -177,6 +184,7 @@ class VendorService:
             before_value={"status": old_status.value if hasattr(old_status, "value") else old_status},
             after_value={"status": new_status.value},
         )
+        self.repository.commit()
         return vendor
 
     def delete_vendor(self, vendor_id: UUID, current_user: dict) -> None:
@@ -194,7 +202,7 @@ class VendorService:
             )
 
         self.repository.delete(vendor)
-        self.repository.commit()
+        self.db.flush()
 
         log_audit(
             db=self.db,
@@ -205,6 +213,7 @@ class VendorService:
             action="deleted",
             before_value={"legal_name": vendor.legal_name},
         )
+        self.repository.commit()
 
     # --- permission helpers -------------------------------------------------
 

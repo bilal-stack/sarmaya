@@ -46,6 +46,9 @@ class ConfigProvisioningService:
                     "created_policies": created_policies,
                 },
             )
+            # The seeders commit their own rows; without this the entry saying
+            # who provisioned the tenant is flushed and then discarded.
+            self.db.commit()
 
         return {"created_states": created_states, "created_policies": created_policies}
 

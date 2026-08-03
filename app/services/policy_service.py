@@ -52,7 +52,9 @@ class ApprovalPolicyService:
             self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy.id,
             policy_snapshot(policy), "created", current_user["id"],
         )
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the change it describes.
+        self.db.flush()
         policy = self.repository.refresh(policy)
 
         log_audit(
@@ -64,6 +66,7 @@ class ApprovalPolicyService:
             action="created",
             after_value={"policy_name": policy.policy_name, "rule_config": policy.rule_config},
         )
+        self.repository.commit()
         return policy
 
     def update_policy(
@@ -97,7 +100,9 @@ class ApprovalPolicyService:
             self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy.id,
             policy_snapshot(policy), "updated", current_user["id"],
         )
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the change it describes.
+        self.db.flush()
         policy = self.repository.refresh(policy)
 
         log_audit(
@@ -110,6 +115,7 @@ class ApprovalPolicyService:
             before_value=before,
             after_value={"rule_config": policy.rule_config, "priority": policy.priority, "is_active": policy.is_active},
         )
+        self.repository.commit()
         return policy
 
     def delete_policy(self, policy_id: UUID, current_user: dict) -> None:
@@ -124,7 +130,9 @@ class ApprovalPolicyService:
             self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy_id,
             final_snapshot, "deleted", current_user["id"],
         )
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the deletion it describes.
+        self.db.flush()
 
         log_audit(
             db=self.db,
@@ -135,6 +143,7 @@ class ApprovalPolicyService:
             action="deleted",
             before_value={"policy_name": policy.policy_name},
         )
+        self.repository.commit()
 
     def _load(self, policy_id: UUID) -> Policy:
         policy = self.repository.get_by_id(policy_id)

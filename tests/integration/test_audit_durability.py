@@ -25,7 +25,7 @@ that writes an audit entry must commit after doing so. That is exactly the
 property that was violated, and it fails loudly if it is reintroduced.
 """
 import ast
-import inspect
+import pathlib
 import uuid
 from collections import defaultdict
 
@@ -35,13 +35,12 @@ from app.core.enums import UserRole, InvoiceState, VendorStatus
 from app.models.audit_log import AuditLog
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
-from app.services import invoice_service
 from app.services.invoice_service import InvoiceService
 
 pytestmark = pytest.mark.integration
 
 #: Helpers whose audit write is committed by the caller that invokes them.
-CALLER_COMMITS = {"_resolve_vendor"}
+CALLER_COMMITS = {"app/services/invoice_service.py::_resolve_vendor"}
 
 
 @pytest.fixture
@@ -68,25 +67,39 @@ def ready_invoice(db, tenant, make_user):
 
 
 def _commit_and_audit_sequence():
-    """For each InvoiceService method, the ordered commit/audit events it
-    performs, read from the source."""
-    tree = ast.parse(inspect.getsource(invoice_service))
+    """For every function in app/ that writes an audit entry, the ordered
+    commit/audit events it performs, read from the source.
+
+    Swept across the whole package rather than one service: the same ordering
+    was wrong in six of them, so pinning only the invoice service would leave
+    the identical bug free to sit in vendor, policy, workflow, autopilot and
+    provisioning code.
+    """
     sequences = defaultdict(list)
 
-    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
-        if cls.name != "InvoiceService":
+    for path in sorted(pathlib.Path("app").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        if "log_audit" not in source:
             continue
-        for method in (n for n in cls.body if isinstance(n, ast.FunctionDef)):
-            for node in ast.walk(method):
+        for fn in (
+            n for n in ast.walk(ast.parse(source))
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ):
+            key = f"{path.as_posix()}::{fn.name}"
+            for node in ast.walk(fn):
                 if not isinstance(node, ast.Call):
                     continue
                 func = node.func
                 if isinstance(func, ast.Name) and func.id == "log_audit":
-                    sequences[method.name].append((node.lineno, "AUDIT"))
+                    sequences[key].append((node.lineno, "AUDIT"))
                 elif isinstance(func, ast.Attribute) and func.attr == "commit":
-                    sequences[method.name].append((node.lineno, "COMMIT"))
+                    sequences[key].append((node.lineno, "COMMIT"))
 
-    return {m: [kind for _, kind in sorted(events)] for m, events in sequences.items()}
+    return {
+        k: [kind for _, kind in sorted(events)]
+        for k, events in sequences.items()
+        if any(kind == "AUDIT" for _, kind in events)
+    }
 
 
 class TestAuditEntriesAreCommitted:
@@ -109,13 +122,17 @@ class TestAuditEntriesAreCommitted:
     def test_the_workflow_methods_are_actually_covered(self):
         """Guards the assertion above from passing because the source parse
         silently stopped finding anything."""
-        sequences = _commit_and_audit_sequence()
+        found = _commit_and_audit_sequence()
         expected = {
-            "create_manual_invoice", "update_invoice", "validate_invoice",
-            "submit_for_approval", "approve_invoice", "reject_invoice",
-            "mark_as_paid",
+            "app/services/invoice_service.py::validate_invoice",
+            "app/services/invoice_service.py::submit_for_approval",
+            "app/services/invoice_service.py::approve_invoice",
+            "app/services/invoice_service.py::mark_as_paid",
+            "app/services/vendor_service.py::set_status",
+            "app/services/policy_service.py::update_policy",
+            "app/services/autopilot_service.py::set_config",
         }
-        missing = expected - sequences.keys()
+        missing = expected - found.keys()
         assert not missing, f"no audit/commit calls found in: {missing}"
 
 

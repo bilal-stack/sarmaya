@@ -54,7 +54,9 @@ class WorkflowConfigService:
             workflow_snapshot(self.repository.list_states(workflow_type)),
             "updated", current_user["id"],
         )
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the change it describes.
+        self.db.flush()
         state = self.repository.refresh(state)
 
         log_audit(
@@ -69,6 +71,7 @@ class WorkflowConfigService:
             before_value={"allowed_transitions": before},
             after_value={"allowed_transitions": allowed_transitions},
         )
+        self.repository.commit()
         return state
 
     def update_sla(
@@ -103,7 +106,9 @@ class WorkflowConfigService:
             workflow_snapshot(self.repository.list_states(workflow_type)),
             "updated", current_user["id"],
         )
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the change it describes.
+        self.db.flush()
         state = self.repository.refresh(state)
 
         log_audit(
@@ -118,6 +123,7 @@ class WorkflowConfigService:
             before_value={"sla": before},
             after_value={"sla": new_sla},
         )
+        self.repository.commit()
         return state
 
     @staticmethod
