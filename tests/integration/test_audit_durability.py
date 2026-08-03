@@ -171,3 +171,56 @@ class TestAuditEntriesAreWritten:
         assert db.query(PolicyEval).filter(
             PolicyEval.object_id == invoice_id
         ).count() >= 1, "approval routing was decided but never snapshotted"
+
+
+class TestUploadPathCommitsItsTrail:
+    """The upload path was restructured along with the rest, and it is the only
+    one that also links a file record, so it gets its own coverage.
+
+    OCR is stubbed: the point is the transaction, not the extraction, and the
+    real call would hit a paid external provider.
+    """
+
+    def test_upload_commits_invoice_file_link_and_audit_together(
+        self, db, tenant, make_user, monkeypatch
+    ):
+        from app.models.file import File as FileModel
+        from app.services import invoice_service as svc
+
+        monkeypatch.setattr(svc, "extract_invoice_data_ocr", lambda *a, **k: {
+            "vendor_name": "Upload Path Vendor",
+            "invoice_number": f"UP-{uuid.uuid4().hex[:6]}",
+            "invoice_date": "2026-07-15",
+            "total_amount": 4200.0,
+            "tax_amount": 200.0,
+            "confidence": 88,
+            "currency": "PKR",
+            "line_items": [],
+            "ai_enhanced": False,
+        })
+
+        actor = make_user(UserRole.AP_CLERK)
+        file_record = FileModel(
+            id=uuid.uuid4(), tenant_id=tenant.id,
+            original_filename="upload.pdf", stored_filename="upload-stored.pdf",
+            file_path="/tmp/upload.pdf", file_size=1024,
+            mime_type="application/pdf", uploaded_by=actor["id"],
+        )
+        db.add(file_record)
+        db.flush()
+
+        result = InvoiceService(db)._extract_and_create_invoice(
+            file_record, "/tmp/upload.pdf", "deadbeef" * 8, actor
+        )
+
+        invoice_id = uuid.UUID(result["invoice_id"])
+        invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+
+        assert invoice is not None
+        # The file link is written between the two flushes; it must survive.
+        assert invoice.pdf_file_id == file_record.id
+        actions = [
+            a.action for a in
+            db.query(AuditLog).filter(AuditLog.object_id == invoice_id).all()
+        ]
+        assert "uploaded" in actions, "the upload left no audit entry"

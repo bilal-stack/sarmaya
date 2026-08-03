@@ -6,6 +6,9 @@ from app.repositories.policy_repository import PolicyRepository
 from app.models.workflow_state import WorkflowState
 from app.models.policy import Policy
 from app.services.audit import log_audit
+from app.services.config_versioning import (
+    record_version, policy_snapshot, TYPE_APPROVAL_POLICY,
+)
 from app.services.config_defaults import DEFAULT_INVOICE_STATES, DEFAULT_APPROVAL_POLICIES
 from app.core.roles import has_permission, PERM_MANAGE_POLICIES, PERM_MANAGE_WORKFLOW
 
@@ -31,7 +34,7 @@ class ConfigProvisioningService:
         tenant_id = current_user["tenant_id"]
 
         created_states = self._seed_states(tenant_id)
-        created_policies = self._seed_policies(tenant_id)
+        created_policies = self._seed_policies(tenant_id, current_user["id"])
 
         if created_states or created_policies:
             log_audit(
@@ -74,12 +77,12 @@ class ConfigProvisioningService:
         self.workflow_repo.commit()
         return count
 
-    def _seed_policies(self, tenant_id) -> int:
+    def _seed_policies(self, tenant_id, changed_by) -> int:
         if self.policy_repo.list_by_type(POLICY_TYPE):
             return 0
         count = 0
         for name, priority, rule in DEFAULT_APPROVAL_POLICIES:
-            self.policy_repo.create(Policy(
+            policy = self.policy_repo.create(Policy(
                 tenant_id=tenant_id,
                 policy_type=POLICY_TYPE,
                 policy_name=name,
@@ -89,6 +92,17 @@ class ConfigProvisioningService:
                 is_active=True,
                 priority=priority,
             ))
+            # Version the seeded rule the same way an edited one is versioned.
+            # Every policy evaluation records the policy_version that decided it
+            # (DR-010), and that number only means something if it points at a
+            # restorable snapshot. Without this the defaults had no history, so
+            # every routing decision made by them recorded a null version and
+            # could not be reproduced once the rule was edited.
+            self.db.flush()
+            record_version(
+                self.db, tenant_id, TYPE_APPROVAL_POLICY, policy.id,
+                policy_snapshot(policy), "created", changed_by,
+            )
             count += 1
         self.policy_repo.commit()
         return count

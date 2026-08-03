@@ -165,3 +165,37 @@ class TestReadAccess:
         clerk = make_user(UserRole.AP_CLERK)
         with pytest.raises(PermissionError):
             PolicyEvalService(db).list_evals(clerk)
+
+
+class TestSeededPoliciesAreVersioned:
+    """A recorded policy_version must point at a restorable snapshot.
+
+    Provisioning seeded the default approval rules without recording a config
+    version, so `_current_policy_version` returned None for them and every
+    routing decision made by a default rule stored a null version — the exact
+    reproducibility DR-010 exists to provide, absent for the rules most tenants
+    never change.
+    """
+
+    def test_provisioning_versions_each_seeded_policy(self, db, tenant, make_user):
+        from app.services.config_provisioning import ConfigProvisioningService
+        from app.services.config_versioning import ConfigVersion, TYPE_APPROVAL_POLICY
+        from app.models.policy import Policy
+
+        admin = make_user(UserRole.ADMIN)
+        ConfigProvisioningService(db).initialize_defaults(admin)
+
+        policies = db.query(Policy).filter(
+            Policy.policy_type == "approval_limit"
+        ).all()
+        assert policies, "provisioning created no approval policies"
+
+        for policy in policies:
+            versions = db.query(ConfigVersion).filter(
+                ConfigVersion.config_type == TYPE_APPROVAL_POLICY,
+                ConfigVersion.config_key == str(policy.id),
+            ).count()
+            assert versions >= 1, (
+                f"seeded policy '{policy.policy_name}' has no version history, "
+                "so any decision it makes records a null policy_version"
+            )
