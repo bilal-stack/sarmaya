@@ -304,9 +304,11 @@ class InvoiceService:
         )
         
         invoice = self.repository.create(invoice)
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the row it describes.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         # Log audit
         log_audit(
             db=self.db,
@@ -320,7 +322,8 @@ class InvoiceService:
                 "amount": str(invoice.total_amount)
             }
         )
-        
+
+        self.repository.commit()
         return invoice
     
     def update_invoice(
@@ -362,9 +365,11 @@ class InvoiceService:
             setattr(invoice, field, value)
         
         invoice = self.repository.update(invoice)
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the change it describes.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         # Log audit
         log_audit(
             db=self.db,
@@ -380,7 +385,8 @@ class InvoiceService:
                 "invoice_number": invoice.invoice_number
             }
         )
-        
+
+        self.repository.commit()
         return invoice
     
     def delete_invoice(self, invoice_id: UUID, current_user: dict) -> None:
@@ -461,7 +467,10 @@ class InvoiceService:
         if not success:
             raise ValueError("State transition failed")
 
-        self.repository.commit()
+        # Flush, do not commit: the audit entry below belongs to the same
+        # transaction as the transition it describes, so an invoice can never
+        # change state without leaving a trail.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
 
         log_audit(
@@ -475,6 +484,7 @@ class InvoiceService:
             workflow_type="invoice",
         )
 
+        self.repository.commit()
         return invoice
 
     @staticmethod
@@ -537,9 +547,11 @@ class InvoiceService:
         if not success:
             raise ValueError(f"State transition failed")
         
-        self.repository.commit()
+        # Flush, do not commit: the routing snapshot and audit entry below
+        # belong to the same transaction as the transition they describe.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         # Determine required approver and snapshot the routing decision as it
         # stood now, so the audit trail records the policy actually applied (not
         # whatever the policy is recomputed to later).
@@ -574,6 +586,9 @@ class InvoiceService:
             }
         )
 
+        self.repository.commit()
+
+        # Notify only once the transition and its trail are durable.
         self.notification_service.notify_submitted_for_approval(invoice, required_role)
 
         return invoice, required_role
@@ -675,9 +690,11 @@ class InvoiceService:
         invoice.approved_at = utc_now()
         
         self.repository.update(invoice)
-        self.repository.commit()
+        # Flush, do not commit: an approval and its audit entry must land
+        # together — this is the record that money may move against.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         # Log audit
         log_audit(
             db=self.db,
@@ -702,6 +719,9 @@ class InvoiceService:
             file_id=invoice.pdf_file_id
         )
 
+        self.repository.commit()
+
+        # Notify only once the approval and its trail are durable.
         self.notification_service.notify_approved(invoice)
 
         return invoice
@@ -752,9 +772,11 @@ class InvoiceService:
         invoice.rejection_reason = reason.strip()
         
         self.repository.update(invoice)
-        self.repository.commit()
+        # Flush, do not commit: the rejection and its stated reason belong to
+        # the same transaction.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         # Log audit
         log_audit(
             db=self.db,
@@ -768,6 +790,9 @@ class InvoiceService:
             comment=reason
         )
 
+        self.repository.commit()
+
+        # Notify only once the rejection and its trail are durable.
         self.notification_service.notify_rejected(invoice, reason)
 
         return invoice
@@ -797,9 +822,11 @@ class InvoiceService:
         if not success:
             raise ValueError("State transition failed")
         
-        self.repository.commit()
+        # Flush, do not commit: marking an invoice paid is the last financial
+        # step, so it must not be recordable without its audit entry.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         log_audit(
             db=self.db,
             tenant_id=current_user["tenant_id"],
@@ -808,7 +835,8 @@ class InvoiceService:
             object_id=invoice.id,
             action="marked_paid"
         )
-        
+
+        self.repository.commit()
         return invoice
     
     def get_stats(self) -> Dict[str, Any]:
@@ -1031,13 +1059,15 @@ class InvoiceService:
         )
         
         invoice = self.repository.create(invoice)
-        self.repository.commit()
+        # Flush, do not commit: the file link and the upload audit entry below
+        # belong to the same transaction as the invoice they describe.
+        self.db.flush()
         invoice = self.repository.refresh(invoice)
-        
+
         # Link file to invoice
         self.file_service.link_file_to_object(file_record, invoice.id)
-        self.file_service.commit()
-        
+        self.db.flush()
+
         # Log audit
         log_audit(
             db=self.db,
@@ -1061,7 +1091,11 @@ class InvoiceService:
             ai_provider=settings.AI_PROVIDER if ocr_result.get("ai_enhanced") else settings.OCR_PROVIDER,
             ai_confidence=confidence
         )
-        
+
+        # Commit last, so the invoice, its file link and the upload audit entry
+        # (which carries the document hash) all land together.
+        self.repository.commit()
+
         # Return success response
         return {
             "success": True,
