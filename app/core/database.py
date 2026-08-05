@@ -136,62 +136,19 @@ def _scope_query_to_tenant(execute_state):
 
 
 # ============================================
-# TENANT CONNECTION FACTORY (Hybrid-Ready)
+# TENANT ISOLATION STRATEGY
 # ============================================
-
-class TenantConnectionFactory:
-    """
-    Smart connection factory for multi-tenant isolation
-    MVP: Uses RLS only
-    Future: Can switch to schema or database per tenant
-    """
-    
-    def __init__(self):
-        self.default_engine = engine
-        self.schema_engines = {}  # For future schema-per-tenant
-        self.db_engines = {}      # For future db-per-tenant
-    
-    def get_session(
-        self, 
-        tenant_id: str, 
-        isolation_level: str = "rls"
-    ) -> Session:
-        """
-        Get database session with proper tenant isolation
-        
-        Args:
-            tenant_id: UUID of tenant
-            isolation_level: 'rls', 'schema', or 'database'
-        
-        Returns:
-            SQLAlchemy Session with proper isolation
-        """
-        
-        if isolation_level == "rls":
-            # Use RLS (MVP approach)
-            session = SessionLocal()
-            try:
-                set_tenant_context(session, tenant_id)
-                return session
-            except Exception as e:
-                session.close()
-                logger.error(f"Failed to set RLS context: {e}")
-                raise
-        
-        elif isolation_level == "schema":
-            # Future: Schema-per-tenant
-            raise NotImplementedError("Schema isolation not yet implemented")
-        
-        elif isolation_level == "database":
-            # Future: Database-per-tenant
-            raise NotImplementedError("Database isolation not yet implemented")
-        
-        else:
-            raise ValueError(f"Invalid isolation_level: {isolation_level}")
-
-
-# Global factory instance
-connection_factory = TenantConnectionFactory()
+#
+# One strategy is implemented: shared tables, isolated by RLS (migration 003)
+# and by the application-level scoping above. `tenants.isolation_level` records
+# the intended strategy per tenant and every tenant is 'rls'.
+#
+# A TenantConnectionFactory previously stood here offering 'schema' and
+# 'database' alongside it, both raising NotImplementedError. Nothing ever
+# called it, and its 'rls' branch merely did what get_db_session already does.
+# It was removed rather than completed: returning a session pointed at a schema
+# or database that no one provisions or migrates would be worse than not
+# offering the option. See DR-014 for what implementing either would require.
 
 
 # ============================================
@@ -208,22 +165,6 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-def get_db_with_rls(tenant_id: str) -> Generator[Session, None, None]:
-    """
-    Database session with RLS context set
-    Use for: All tenant-scoped operations
-    
-    Args:
-        tenant_id: UUID string of tenant
-    """
-    session = connection_factory.get_session(tenant_id, isolation_level="rls")
-    try:
-        yield session
-    finally:
-        # RLS context is automatically reset when session closes
-        session.close()
 
 
 # ============================================
