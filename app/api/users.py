@@ -105,6 +105,15 @@ def set_user_role(
         return user
 
     if str(previous_role).lower() == ADMIN:
+        # Unreachable as the roles currently stand, and kept deliberately.
+        # Only `admin` holds users.manage and the self-change above is already
+        # refused, so the caller is always another admin and is always counted
+        # here — the branch cannot fire today. It goes live the moment any
+        # other role is granted users.manage (the Build Book adds HR and
+        # procurement administration), and whoever grants it is unlikely to
+        # also think about tenant lockout. Six lines against an unrecoverable
+        # state is worth keeping; see DR-015.
+        #
         # Counted within the tenant: another tenant's admins are no help to
         # this one.
         remaining_admins = (
