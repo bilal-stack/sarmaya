@@ -1,5 +1,5 @@
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, with_loader_criteria
 from typing import Generator
 import logging
 
@@ -58,6 +58,81 @@ def _bind_tenant_on_begin(session, transaction, connection):
     tenant_id = session.info.get("tenant_id")
     if tenant_id:
         _apply_tenant(connection, tenant_id)
+
+
+# ============================================
+# APPLICATION-LEVEL TENANT SCOPING
+# ============================================
+#
+# RLS is the primary tenant boundary, but it is created by migration 003 and so
+# does not exist in a database built with create_all — which is every developer
+# and test database in this project. That gap is not theoretical: the users
+# endpoints were confirmed against a running dev server to list another
+# tenant's staff and to apply a role change across tenants.
+#
+# Rather than add a tenant_id filter to each of the ~39 queries that touch a
+# tenant-owned table — where the next query written silently misses it — the
+# same restriction is applied once here, to every ORM SELECT issued on a
+# session that has a tenant bound. New models and new queries are covered
+# without anyone remembering to.
+#
+# This does not replace RLS. It is the second lock: RLS still protects against
+# raw SQL and anything bypassing the ORM, and this protects every environment
+# where RLS is absent.
+
+
+def _tenant_scoped_mappers():
+    """Mapped classes carrying a tenant_id column, resolved once on first use.
+
+    Discovered from the registry rather than listed, so a new tenant-owned
+    model is scoped the moment it is defined.
+    """
+    global _TENANT_MAPPERS
+    if _TENANT_MAPPERS is None:
+        _TENANT_MAPPERS = tuple(
+            mapper.class_
+            for mapper in mapper_registry.mappers
+            if "tenant_id" in mapper.columns
+        )
+    return _TENANT_MAPPERS
+
+
+_TENANT_MAPPERS = None
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _scope_query_to_tenant(execute_state):
+    """Restrict every ORM SELECT to the session's bound tenant.
+
+    Skipped when no tenant is bound (unauthenticated startup work, migrations,
+    provisioning scripts and the test fixtures that deliberately build several
+    tenants), and for column/relationship refreshes, which reload rows that
+    were already filtered when first fetched.
+    """
+    if (
+        not execute_state.is_select
+        or execute_state.is_column_load
+        or execute_state.is_relationship_load
+    ):
+        return
+
+    tenant_id = execute_state.session.info.get("tenant_id")
+    if not tenant_id:
+        return
+
+    for model in _tenant_scoped_mappers():
+        execute_state.statement = execute_state.statement.options(
+            with_loader_criteria(
+                model,
+                # Deliberately the eager expression form, not a lambda.
+                # with_loader_criteria caches lambdas by code location, so a
+                # closed-over tenant_id risks the first request's tenant being
+                # baked into every later one — which would leak across tenants
+                # far more severely than the gap this closes.
+                model.tenant_id == tenant_id,
+                include_aliases=True,
+            )
+        )
 
 
 # ============================================
