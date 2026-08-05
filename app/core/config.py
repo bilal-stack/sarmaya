@@ -68,7 +68,8 @@ class Settings(BaseSettings):
 
     # Google Gemini Configuration
     GOOGLE_AI_API_KEY: str = ""
-    
+    GEMINI_MODEL: str = "gemini-2.5-flash"  # override in .env (e.g. gemini-2.5-pro)
+
     # File Storage
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 10

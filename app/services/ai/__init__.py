@@ -16,8 +16,8 @@ def get_ai_provider() -> AIProvider:
         from app.services.ai.claude_provider import ClaudeProvider
         return ClaudeProvider()
     elif provider == "gemini":
-        # Future: Google Gemini
-        raise NotImplementedError("Gemini provider not yet implemented")
+        from app.services.ai.gemini_provider import GeminiProvider
+        return GeminiProvider()
     else:
         raise ValueError(f"Unknown AI provider: {provider}")
 

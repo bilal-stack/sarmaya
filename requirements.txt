@@ -21,6 +21,7 @@ google-cloud-vision>=3.8,<4
 google-cloud-documentai>=3.1,<4  # Document AI
 openai>=1.50
 anthropic>=0.40  # Claude provider
+google-genai>=1.0  # Gemini provider
 
 # Utilities / Settings
 python-dotenv>=1.0
