@@ -6,6 +6,10 @@ from app.core.enums import InvoiceState, Currency
 
 class Invoice(BaseModel):
     __tablename__ = "invoices"
+
+    #: Which configured state machine governs this record. Read by the
+    #: workflow engine instead of assuming invoices, and by SLA scanning.
+    WORKFLOW_TYPE = "invoice"
     
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     

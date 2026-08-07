@@ -40,7 +40,15 @@ from app.services.invoice_service import InvoiceService
 pytestmark = pytest.mark.integration
 
 #: Helpers whose audit write is committed by the caller that invokes them.
-CALLER_COMMITS = {"app/services/invoice_service.py::_resolve_vendor"}
+#: Each entry is a deliberate exemption, not a way to silence the check —
+#: verify the caller really does commit before adding one.
+CALLER_COMMITS = {
+    # Committed by whichever invoice_service method resolved the vendor.
+    "app/services/invoice_service.py::_resolve_vendor",
+    # run_escalations sweeps every workflow and commits once for the whole
+    # run, so the per-workflow helper deliberately does not.
+    "app/services/sla_service.py::_escalate_workflow",
+}
 
 
 @pytest.fixture
