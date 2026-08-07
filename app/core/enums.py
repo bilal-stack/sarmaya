@@ -24,6 +24,23 @@ class InvoiceState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class PurchaseOrderState(str, Enum):
+    """Purchase order workflow states.
+
+    A PO commits the company to spend, so it is approved before it is issued to
+    the vendor: draft -> pending_approval -> approved -> issued. Receipt is
+    tracked on the lines rather than as a state, because a delivery can be
+    partial; `closed` is the terminal state once nothing further is expected.
+    """
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    ISSUED = "issued"
+    REJECTED = "rejected"
+    CLOSED = "closed"
+    CANCELLED = "cancelled"
+
+
 class VendorStatus(str, Enum):
     """Vendor statuses"""
     ACTIVE = "active"

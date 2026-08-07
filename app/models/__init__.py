@@ -13,6 +13,7 @@ from app.models.ai_action_log import AIActionLog
 from app.models.policy_eval import PolicyEval
 from app.models.evidence_pack import EvidencePack
 from app.models.delegation import Delegation
+from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 
 __all__ = [
     "Base",
@@ -32,4 +33,6 @@ __all__ = [
     "PolicyEval",
     "EvidencePack",
     "Delegation",
+    "PurchaseOrder",
+    "PurchaseOrderLine",
 ]
