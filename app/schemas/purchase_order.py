@@ -75,6 +75,19 @@ class PurchaseOrderLineResponse(BaseModel):
 
 
 class PurchaseOrderResponse(BaseModel):
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _currency_default(cls, v):
+        """Tolerate a null currency.
+
+        The column is nullable and carries only a Python-side default, so any
+        row written outside the ORM — a migration, an import, a seed script —
+        has no currency, and a required enum here turns that single row into a
+        500 on the read path. The domain default stands in instead; a missing
+        currency is a data defect, not a reason the record cannot be read.
+        """
+        return v if v is not None else Currency.PKR
+
     id: UUID
     tenant_id: UUID
     po_number: str

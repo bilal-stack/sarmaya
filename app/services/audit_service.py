@@ -11,13 +11,21 @@ from app.core.roles import (
     PERM_VIEW_INVOICE,
     PERM_VIEW_VENDORS,
     PERM_VIEW_AUDIT,
+    PERM_VIEW_PO,
 )
 
 # object_type -> permission required to view its timeline. Live Audit Mode is
 # transparent to whoever can already see the object; anything else needs audit.view.
+# Which permission lets you read an object's timeline. The endpoint's promise
+# is that history is visible to whoever can view the object, so an object type
+# missing from this map falls back to the much narrower audit.view — which is
+# how purchase orders ended up hidden from the clerks who raise them.
 _VIEW_PERMISSION = {
     "invoice": PERM_VIEW_INVOICE,
     "vendor": PERM_VIEW_VENDORS,
+    "purchase_order": PERM_VIEW_PO,
+    # A receipt's history is part of the order's story.
+    "goods_receipt": PERM_VIEW_PO,
 }
 
 
@@ -137,7 +145,18 @@ class AuditService:
                 if log.comment else "Flagged duplicate overridden."
             )
         if action in ("approval_blocked", "validation_blocked"):
-            return f"Blocked: {log.comment}" if log.comment else "Action blocked by a governance gate."
+            if not log.comment:
+                return "Action blocked by a governance gate."
+            # The services already store "Blocked: <reason>", so prefixing again
+            # produced "Blocked: Blocked: three_way_match_failed" on the
+            # timeline. Corrected here rather than in what is written, because
+            # the stored comment is part of the hash-chained record.
+            reason = log.comment
+            if reason.lower().startswith("blocked:"):
+                reason = reason.split(":", 1)[1].strip()
+            # Reasons are stored as tokens (three_way_match_failed); the trail
+            # is read by people, not only by machines.
+            return f"Blocked: {reason.replace('_', ' ')}"
         if action == "sla_escalated":
             return log.comment or "SLA breached; escalated."
         if action == "sla_updated":

@@ -295,3 +295,46 @@ class TestTheOrderJoinsTheSameChainAsTheInvoice:
         assert pack["counts"]["audit_events"] >= 2
         assert pack["all_chains_verified"] is True
         assert pack["content"]["objects"][0]["object_type"] == "purchase_order"
+
+
+class TestTheTimelineIsVisibleToWhoeverCanViewTheOrder:
+    """The audit timeline promises history is visible to whoever can view the
+    object, not only to auditors.
+
+    Its permission map defaults anything unlisted to the far narrower
+    audit.view, so purchase orders were hidden from the very clerks who raise
+    them — a 403 on the order's own page. Found by opening that page, not by
+    any test.
+    """
+
+    def test_a_clerk_can_read_an_orders_timeline(self, db, provisioned, vendor, make_user):
+        from app.services.audit_service import AuditService
+
+        clerk = make_user(UserRole.AP_CLERK)
+        order = PurchaseOrderService(db).create_order(_order_payload(vendor), clerk)
+
+        timeline = AuditService(db).get_timeline("purchase_order", order.id, clerk)
+        assert timeline["total_events"] >= 1
+
+    def test_a_role_without_view_still_cannot(self, db, provisioned, vendor, make_user):
+        from app.services.audit_service import AuditService
+
+        order = PurchaseOrderService(db).create_order(
+            _order_payload(vendor), make_user(UserRole.AP_CLERK)
+        )
+        with pytest.raises(PermissionError):
+            AuditService(db).get_timeline(
+                "purchase_order", order.id, make_user(UserRole.USER)
+            )
+
+    def test_every_chain_owning_module_is_mapped(self):
+        """A module absent from the map silently falls back to audit.view, which
+        is how this broke. New chain owners must be listed."""
+        from app.services.audit_service import _VIEW_PERMISSION
+        from app.services.correlation import chain_owners
+
+        missing = set(chain_owners()) - set(_VIEW_PERMISSION)
+        assert not missing, (
+            f"these modules have no timeline permission mapped, so only "
+            f"auditors can read their history: {missing}"
+        )

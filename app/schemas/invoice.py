@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, field_validator, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import date, datetime
 from decimal import Decimal
@@ -35,6 +35,19 @@ class InvoiceUpdate(BaseModel):
 
 
 class InvoiceResponse(InvoiceBase):
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _currency_default(cls, v):
+        """Tolerate a null currency.
+
+        The column is nullable and carries only a Python-side default, so any
+        row written outside the ORM — a migration, an import, a seed script —
+        has no currency, and a required enum here turns that single row into a
+        500 on the read path. The domain default stands in instead; a missing
+        currency is a data defect, not a reason the record cannot be read.
+        """
+        return v if v is not None else Currency.PKR
+
     id: UUID
     tenant_id: UUID
     vendor_id: Optional[UUID] = None

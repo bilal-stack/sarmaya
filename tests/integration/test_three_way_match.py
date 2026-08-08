@@ -339,3 +339,70 @@ class TestTheWholeStoryInOnePlace:
         assert {o["object_type"] for o in chain["objects"]} == {
             "purchase_order", "goods_receipt",
         }
+
+
+class TestAReadPathSurvivesNullableColumns:
+    """A nullable column must not be able to 500 a read endpoint.
+
+    invoices.currency and purchase_orders.currency are nullable and carry only
+    a Python-side default, so any row written outside the ORM has none — and
+    the response schemas required a non-null enum. One such row returned a 500
+    for the whole invoice, which is how the detail page came up empty.
+    """
+
+    def test_an_invoice_with_no_currency_still_serialises(self, db, setup):
+        from app.schemas.invoice import InvoiceResponse
+
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=setup["tenant"].id,
+            vendor_id=setup["vendor"].id, vendor_name="Match Vendor",
+            invoice_number="INV-NOCUR", invoice_date=date(2026, 8, 1),
+            total_amount=100, current_state=InvoiceState.PENDING_APPROVAL,
+            currency=None, created_by=setup["clerk"]["id"],
+        )
+        db.add(invoice)
+        db.flush()
+
+        rendered = InvoiceResponse.model_validate(invoice)
+        assert rendered.currency is not None
+
+    def test_an_order_with_no_currency_still_serialises(self, db, setup):
+        from app.models.purchase_order import PurchaseOrder
+        from app.schemas.purchase_order import PurchaseOrderResponse
+        from app.core.enums import PurchaseOrderState
+
+        order = PurchaseOrder(
+            id=uuid.uuid4(), tenant_id=setup["tenant"].id,
+            po_number="PO-NOCUR", vendor_id=setup["vendor"].id,
+            vendor_name="Match Vendor", order_date=date(2026, 8, 1),
+            total_amount=100, current_state=PurchaseOrderState.DRAFT,
+            currency=None, created_by=setup["clerk"]["id"],
+        )
+        db.add(order)
+        db.flush()
+
+        rendered = PurchaseOrderResponse.model_validate(order)
+        assert rendered.currency is not None
+
+
+class TestTheBlockedReasonReadsCleanly:
+    """The trail is read by people. The services store "Blocked: <reason>" and
+    the renderer prefixed it again, producing "Blocked: Blocked:
+    three_way_match_failed" on screen. Corrected in the renderer because the
+    stored comment is part of the hash-chained record."""
+
+    def test_the_prefix_is_not_doubled(self, db, setup):
+        from app.services.audit_service import AuditService
+
+        order = _issued_order(db, setup, quantity=10, unit_price=Decimal("100"))
+        invoice = _invoice(db, setup, order, "1000")
+        with pytest.raises(ValueError):
+            InvoiceService(db).approve_invoice(invoice.id, setup["manager"])
+
+        timeline = AuditService(db).get_timeline("invoice", invoice.id, setup["manager"])
+        blocked = [e for e in timeline["events"] if "Blocked" in (e.get("summary") or "")]
+
+        assert blocked, "the refusal is missing from the timeline"
+        summary = blocked[-1]["summary"]
+        assert "Blocked: Blocked" not in summary
+        assert "_" not in summary, f"raw token shown to a reader: {summary}"
