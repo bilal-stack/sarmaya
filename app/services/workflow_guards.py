@@ -30,9 +30,15 @@ def _required_fields_present(db, obj):
 
 
 def _vendor_active(db, obj):
+    """Shared by invoices and purchase orders, so the wording names neither.
+
+    On a PO this gates `issued`: once an order reaches the vendor, goods can
+    arrive and a liability exists. Catching an unverified vendor at invoice
+    approval is already too late to have prevented that.
+    """
     vendor_id = getattr(obj, "vendor_id", None)
     if not vendor_id:
-        return False, "Invoice is not linked to a vendor master record"
+        return False, "Not linked to a vendor master record"
     vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
     if not vendor:
         return False, "Linked vendor no longer exists"
@@ -48,8 +54,21 @@ def _duplicate_resolved(db, obj):
     return True, ""
 
 
+def _po_has_lines(db, obj):
+    """A purchase order with no lines commits to nothing and cannot be matched
+    against a receipt or an invoice later, so it must not reach approval."""
+    lines = getattr(obj, "lines", None) or []
+    if not lines:
+        return False, "Purchase order has no lines"
+    total = getattr(obj, "total_amount", None)
+    if total is None or total <= 0:
+        return False, "Purchase order total must be greater than zero"
+    return True, ""
+
+
 GUARD_REGISTRY = {
     "required_fields_present": _required_fields_present,
+    "po_has_lines": _po_has_lines,
     "vendor_active": _vendor_active,
     "duplicate_resolved": _duplicate_resolved,
 }

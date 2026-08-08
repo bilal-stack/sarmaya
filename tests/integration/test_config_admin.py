@@ -24,6 +24,7 @@ from app.services.workflow import transition_state
 from app.services.policy_service import ApprovalPolicyService
 from app.services.workflow_config_service import WorkflowConfigService
 from app.services.config_provisioning import ConfigProvisioningService
+from app.services.config_defaults import DEFAULT_WORKFLOWS
 from app.schemas.policy import ApprovalPolicyCreate, ApprovalPolicyUpdate, ApprovalRule
 
 pytestmark = pytest.mark.integration
@@ -187,8 +188,15 @@ class TestInitializeDefaults:
         assert ApprovalPolicyService(db).list_policies(admin) == []
 
         result = ConfigProvisioningService(db).initialize_defaults(admin)
-        assert result["created_states"] == 7
+        # Every default workflow is seeded, not just the invoice one, so this
+        # counts what the defaults actually declare rather than a number that
+        # goes stale each time a module is added.
+        expected_states = sum(len(states) for states in DEFAULT_WORKFLOWS.values())
+        assert result["created_states"] == expected_states
         assert result["created_policies"] == 2
+        assert len(WorkflowConfigService(db).list_states("purchase_order", admin)) == len(
+            DEFAULT_WORKFLOWS["purchase_order"]
+        )
 
         # Workflow transitions now read from the DB. The draft->validated
         # transition also carries a seeded required_fields_present guard, so the
@@ -212,14 +220,17 @@ class TestInitializeDefaults:
         admin = make_user(UserRole.ADMIN)
         svc = ConfigProvisioningService(db)
 
+        expected_states = sum(len(states) for states in DEFAULT_WORKFLOWS.values())
         first = svc.initialize_defaults(admin)
-        assert first["created_states"] == 7 and first["created_policies"] == 2
+        assert first["created_states"] == expected_states and first["created_policies"] == 2
 
         second = svc.initialize_defaults(admin)
         assert second == {"created_states": 0, "created_policies": 0}
 
         # Still exactly one set of states/policies.
-        assert len(WorkflowConfigService(db).list_states("invoice", admin)) == 7
+        assert len(WorkflowConfigService(db).list_states("invoice", admin)) == len(
+            DEFAULT_WORKFLOWS["invoice"]
+        )
         assert len(ApprovalPolicyService(db).list_policies(admin)) == 2
 
     def test_non_admin_forbidden(self, db, make_user):

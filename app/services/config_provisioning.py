@@ -9,7 +9,7 @@ from app.services.audit import log_audit
 from app.services.config_versioning import (
     record_version, policy_snapshot, TYPE_APPROVAL_POLICY,
 )
-from app.services.config_defaults import DEFAULT_INVOICE_STATES, DEFAULT_APPROVAL_POLICIES
+from app.services.config_defaults import DEFAULT_WORKFLOWS, DEFAULT_APPROVAL_POLICIES
 from app.core.roles import has_permission, PERM_MANAGE_POLICIES, PERM_MANAGE_WORKFLOW
 
 POLICY_TYPE = "approval_limit"
@@ -56,13 +56,26 @@ class ConfigProvisioningService:
         return {"created_states": created_states, "created_policies": created_policies}
 
     def _seed_states(self, tenant_id) -> int:
-        if self.workflow_repo.count_states(WORKFLOW_TYPE) > 0:
+        """Seed each workflow independently.
+
+        Checked per workflow_type rather than once overall, so a tenant
+        provisioned before a workflow existed picks it up on the next run
+        instead of being permanently stuck without it. Existing states are
+        never touched — a tenant that has edited its own workflow keeps it.
+        """
+        return sum(
+            self._seed_workflow(tenant_id, workflow_type, states)
+            for workflow_type, states in DEFAULT_WORKFLOWS.items()
+        )
+
+    def _seed_workflow(self, tenant_id, workflow_type: str, states) -> int:
+        if self.workflow_repo.count_states(workflow_type) > 0:
             return 0
         count = 0
-        for name, display, order, is_initial, is_final, transitions, color, guards, sla in DEFAULT_INVOICE_STATES:
+        for name, display, order, is_initial, is_final, transitions, color, guards, sla in states:
             self.workflow_repo.create(WorkflowState(
                 tenant_id=tenant_id,
-                workflow_type=WORKFLOW_TYPE,
+                workflow_type=workflow_type,
                 state_name=name,
                 display_name=display,
                 state_order=order,

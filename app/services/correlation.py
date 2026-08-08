@@ -23,8 +23,23 @@ from app.core.roles import has_permission, PERM_VIEW_AUDIT, PERM_VIEW_INVOICE
 
 logger = logging.getLogger(__name__)
 
-# object_type -> the model that owns the chain id for that object.
-_CHAIN_OWNERS = {"invoice": Invoice}
+def chain_owners() -> Dict[str, type]:
+    """object_type -> the model that owns the chain id for that object.
+
+    Discovered from the models that declare a WORKFLOW_TYPE and carry a
+    correlation_id, rather than listed. This was a hardcoded {"invoice":
+    Invoice}: when purchase orders arrived, their audit entries silently
+    resolved to no chain at all, so a PO's evidence pack came back empty while
+    reporting success — the "further modules join the same chain" promise
+    quietly untrue.
+    """
+    from app.services.workflow import workflow_models
+
+    return {
+        workflow_type: model
+        for workflow_type, model in workflow_models().items()
+        if hasattr(model, "correlation_id")
+    }
 
 
 def new_correlation_id() -> uuid.UUID:
@@ -35,7 +50,7 @@ def new_correlation_id() -> uuid.UUID:
 def resolve_correlation_id(db: Session, object_type: Optional[str], object_id) -> Optional[uuid.UUID]:
     """The chain id for an object, or None if it has none / isn't a chain root.
     Best-effort: never raise into the caller's write path."""
-    model = _CHAIN_OWNERS.get((object_type or "").lower())
+    model = chain_owners().get((object_type or "").lower())
     if model is None or object_id is None:
         return None
     try:
@@ -57,12 +72,24 @@ class CorrelationService:
         if not (has_permission(role, PERM_VIEW_AUDIT) or has_permission(role, PERM_VIEW_INVOICE)):
             raise PermissionError("You do not have permission to view transaction chains")
 
-        invoices = (
-            self.db.query(Invoice)
-            .filter(Invoice.correlation_id == correlation_id)
-            .order_by(Invoice.created_at.asc())
-            .all()
-        )
+        # Every chain-owning module, not just invoices, so an order and the
+        # invoice that settles it appear in the same story.
+        objects: List[Dict] = []
+        for object_type, model in chain_owners().items():
+            for row in (
+                self.db.query(model)
+                .filter(model.correlation_id == correlation_id)
+                .order_by(model.created_at.asc())
+                .all()
+            ):
+                objects.append({
+                    "object_type": object_type,
+                    "object_id": row.id,
+                    "reference": getattr(row, "invoice_number", None)
+                    or getattr(row, "po_number", None)
+                    or str(row.id),
+                    "state": getattr(row.current_state, "value", row.current_state),
+                })
         audit = (
             self.db.query(AuditLog)
             .filter(AuditLog.correlation_id == correlation_id)
@@ -120,15 +147,7 @@ class CorrelationService:
 
         return {
             "correlation_id": correlation_id,
-            "objects": [
-                {
-                    "object_type": "invoice",
-                    "object_id": inv.id,
-                    "reference": inv.invoice_number,
-                    "state": getattr(inv.current_state, "value", inv.current_state),
-                }
-                for inv in invoices
-            ],
+            "objects": objects,
             "counts": {
                 "audit_events": len(audit),
                 "policy_evaluations": len(evals),

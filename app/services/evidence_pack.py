@@ -23,7 +23,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models.invoice import Invoice
+from app.services.correlation import chain_owners
 from app.models.file import File
 from app.models.audit_log import AuditLog
 from app.models.policy_eval import PolicyEval
@@ -53,12 +53,20 @@ class EvidencePackService:
         """Assemble the bundle for a chain without persisting it."""
         self._require_audit(current_user)
 
-        invoices = (
-            self.db.query(Invoice)
-            .filter(Invoice.correlation_id == correlation_id)
-            .order_by(Invoice.created_at.asc())
-            .all()
-        )
+        # Every chain-owning module, so a pack covers the order, the receipts
+        # and the invoice rather than only the invoice. Assembled as
+        # (object_type, record) pairs because the integrity check and the
+        # rendered summary both need to know which module each row came from.
+        records = [
+            (object_type, row)
+            for object_type, model in chain_owners().items()
+            for row in (
+                self.db.query(model)
+                .filter(model.correlation_id == correlation_id)
+                .order_by(model.created_at.asc())
+                .all()
+            )
+        ]
         audit = (
             self.db.query(AuditLog)
             .filter(AuditLog.correlation_id == correlation_id)
@@ -79,7 +87,7 @@ class EvidencePackService:
         )
 
         # Attachments referenced by anything in the chain, with content hashes.
-        object_ids = [inv.id for inv in invoices]
+        object_ids = [row.id for _, row in records]
         attachments = []
         if object_ids:
             for f in self.db.query(File).filter(File.object_id.in_(object_ids)).all():
@@ -97,30 +105,37 @@ class EvidencePackService:
         # bundle carries its own tamper-evidence rather than a bare assertion.
         integrity = [
             {
-                "object_type": "invoice",
-                "object_id": str(inv.id),
+                "object_type": object_type,
+                "object_id": str(row.id),
                 **{
-                    k: v for k, v in verify_object_chain(self.db, "invoice", inv.id).items()
+                    k: v for k, v in
+                    verify_object_chain(self.db, object_type, row.id).items()
                     if k in ("total_events", "verified", "broken_at_index", "detail")
                 },
             }
-            for inv in invoices
+            for object_type, row in records
         ]
 
         content = {
             "correlation_id": str(correlation_id),
             "objects": [
                 {
-                    "object_type": "invoice",
-                    "object_id": str(inv.id),
-                    "reference": inv.invoice_number,
-                    "vendor_name": inv.vendor_name,
-                    "total_amount": float(inv.total_amount or 0),
-                    "currency": getattr(inv.currency, "value", inv.currency),
-                    "state": getattr(inv.current_state, "value", inv.current_state),
-                    "invoice_date": str(inv.invoice_date) if inv.invoice_date else None,
+                    "object_type": object_type,
+                    "object_id": str(row.id),
+                    "reference": getattr(row, "invoice_number", None)
+                    or getattr(row, "po_number", None)
+                    or str(row.id),
+                    "vendor_name": row.vendor_name,
+                    "total_amount": float(row.total_amount or 0),
+                    "currency": getattr(row.currency, "value", row.currency),
+                    "state": getattr(row.current_state, "value", row.current_state),
+                    "date": str(
+                        getattr(row, "invoice_date", None)
+                        or getattr(row, "order_date", None)
+                        or ""
+                    ) or None,
                 }
-                for inv in invoices
+                for object_type, row in records
             ],
             "audit_trail": [
                 {

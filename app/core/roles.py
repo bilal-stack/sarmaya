@@ -21,6 +21,15 @@ PERM_APPROVE_INVOICE = "invoices.approve"
 PERM_REJECT_INVOICE = "invoices.reject"
 PERM_MARK_PAID_INVOICE = "invoices.mark_paid"
 
+# Purchase orders. Separate from invoice permissions on purpose: buying and
+# paying are different authorities, and letting one imply the other would
+# undo segregation of duties across the two modules.
+PERM_CREATE_PO = "purchase_orders.create"
+PERM_VIEW_PO = "purchase_orders.view"
+PERM_UPDATE_PO = "purchase_orders.update"
+PERM_APPROVE_PO = "purchase_orders.approve"
+PERM_RECEIVE_GOODS = "purchase_orders.receive"
+
 PERM_MANAGE_VENDORS = "vendors.manage"
 PERM_VIEW_VENDORS = "vendors.view"
 
@@ -43,6 +52,12 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
         PERM_MARK_PAID_INVOICE,
+        # Purchase orders - ALL
+        PERM_CREATE_PO,
+        PERM_VIEW_PO,
+        PERM_UPDATE_PO,
+        PERM_APPROVE_PO,
+        PERM_RECEIVE_GOODS,
         # Vendors - ALL
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
@@ -60,6 +75,11 @@ ROLE_PERMISSIONS = {
         PERM_CREATE_INVOICE,
         PERM_VIEW_INVOICE,
         PERM_UPDATE_INVOICE,
+        # Raises orders and records what arrives, but never approves the spend.
+        PERM_CREATE_PO,
+        PERM_VIEW_PO,
+        PERM_UPDATE_PO,
+        PERM_RECEIVE_GOODS,
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
     ],
@@ -67,6 +87,8 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_INVOICE,
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
+        PERM_VIEW_PO,
+        PERM_APPROVE_PO,
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
     ],
@@ -75,6 +97,8 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
         PERM_MARK_PAID_INVOICE,
+        PERM_VIEW_PO,
+        PERM_APPROVE_PO,
         PERM_VIEW_VENDORS,
         PERM_VIEW_AUDIT,
     ],
@@ -82,9 +106,12 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_INVOICE,
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
+        PERM_VIEW_PO,
+        PERM_APPROVE_PO,
     ],
     AUDITOR: [
         PERM_VIEW_INVOICE,
+        PERM_VIEW_PO,
         PERM_VIEW_VENDORS,
         PERM_VIEW_USERS,
         PERM_VIEW_AUDIT,

@@ -9,7 +9,7 @@ rows without a code deploy).
 These mirror migration 008's demo-tenant seed; the migration is a historical
 snapshot, this module is what runtime provisioning uses.
 """
-from app.core.enums import InvoiceState
+from app.core.enums import InvoiceState, PurchaseOrderState
 
 DRAFT = InvoiceState.DRAFT.value
 VALIDATED = InvoiceState.VALIDATED.value
@@ -34,6 +34,41 @@ DEFAULT_INVOICE_STATES = [
     (PAID, "Paid", 6, False, True, [], "#purple", {}, {}),
     (CANCELLED, "Cancelled", 7, False, True, [], "#orange", {}, {}),
 ]
+
+PO_DRAFT = PurchaseOrderState.DRAFT.value
+PO_PENDING = PurchaseOrderState.PENDING_APPROVAL.value
+PO_APPROVED = PurchaseOrderState.APPROVED.value
+PO_ISSUED = PurchaseOrderState.ISSUED.value
+PO_REJECTED = PurchaseOrderState.REJECTED.value
+PO_CLOSED = PurchaseOrderState.CLOSED.value
+PO_CANCELLED = PurchaseOrderState.CANCELLED.value
+
+# The purchase order workflow, same tuple shape as the invoice one.
+#
+# A PO commits the company to spend, so approval comes before it is issued to
+# the vendor. `issued` is the point of no return — once the vendor has it, goods
+# may arrive — which is why the guard on that transition checks the vendor is
+# verified: the invoice-side check comes too late to prevent an order being
+# placed with an unverified party.
+DEFAULT_PURCHASE_ORDER_STATES = [
+    (PO_DRAFT, "Draft", 1, True, False, [PO_PENDING, PO_CANCELLED], "#gray",
+        {PO_PENDING: ["po_has_lines"]}, {}),
+    (PO_PENDING, "Pending Approval", 2, False, False, [PO_APPROVED, PO_REJECTED], "#yellow",
+        {}, {"hours": 24, "escalate_to": "cfo"}),
+    (PO_APPROVED, "Approved", 3, False, False, [PO_ISSUED, PO_CANCELLED], "#green",
+        {PO_ISSUED: ["vendor_active"]}, {}),
+    (PO_ISSUED, "Issued", 4, False, False, [PO_CLOSED, PO_CANCELLED], "#blue", {}, {}),
+    (PO_REJECTED, "Rejected", 5, False, True, [PO_DRAFT], "#red", {}, {}),
+    (PO_CLOSED, "Closed", 6, False, True, [], "#purple", {}, {}),
+    (PO_CANCELLED, "Cancelled", 7, False, True, [], "#orange", {}, {}),
+]
+
+#: {workflow_type: states} — provisioning seeds each independently, so a tenant
+#: created before a workflow existed gains it on the next run.
+DEFAULT_WORKFLOWS = {
+    "invoice": DEFAULT_INVOICE_STATES,
+    "purchase_order": DEFAULT_PURCHASE_ORDER_STATES,
+}
 
 # (policy_name, priority, rule_config) — highest priority matching rule wins.
 DEFAULT_APPROVAL_POLICIES = [
