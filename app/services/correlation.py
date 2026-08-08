@@ -26,19 +26,25 @@ logger = logging.getLogger(__name__)
 def chain_owners() -> Dict[str, type]:
     """object_type -> the model that owns the chain id for that object.
 
-    Discovered from the models that declare a WORKFLOW_TYPE and carry a
+    Discovered from the models that declare an OBJECT_TYPE and carry a
     correlation_id, rather than listed. This was a hardcoded {"invoice":
     Invoice}: when purchase orders arrived, their audit entries silently
     resolved to no chain at all, so a PO's evidence pack came back empty while
     reporting success — the "further modules join the same chain" promise
     quietly untrue.
+
+    Keyed on OBJECT_TYPE rather than WORKFLOW_TYPE because belonging to a
+    chain and having a state machine are different things: a goods receipt is
+    part of the story but is a statement of fact, not a decision, so it is
+    never routed.
     """
-    from app.services.workflow import workflow_models
+    from app.models.base import mapper_registry
 
     return {
-        workflow_type: model
-        for workflow_type, model in workflow_models().items()
-        if hasattr(model, "correlation_id")
+        mapper.class_.OBJECT_TYPE: mapper.class_
+        for mapper in mapper_registry.mappers
+        if getattr(mapper.class_, "OBJECT_TYPE", None)
+        and "correlation_id" in mapper.columns
     }
 
 
@@ -87,8 +93,14 @@ class CorrelationService:
                     "object_id": row.id,
                     "reference": getattr(row, "invoice_number", None)
                     or getattr(row, "po_number", None)
+                    or getattr(row, "grn_number", None)
                     or str(row.id),
-                    "state": getattr(row.current_state, "value", row.current_state),
+                    # A goods receipt has no state — it records that something
+                    # arrived rather than moving through a workflow.
+                    "state": getattr(
+                        getattr(row, "current_state", None), "value",
+                        getattr(row, "current_state", None),
+                    ),
                 })
         audit = (
             self.db.query(AuditLog)

@@ -10,6 +10,9 @@ class Invoice(BaseModel):
     #: Which configured state machine governs this record. Read by the
     #: workflow engine instead of assuming invoices, and by SLA scanning.
     WORKFLOW_TYPE = "invoice"
+
+    #: How this module names itself in the audit trail and correlation chain.
+    OBJECT_TYPE = "invoice"
     
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     

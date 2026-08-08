@@ -165,3 +165,41 @@ def check_user_can_reject(user_role: str) -> bool:
 def check_user_can_view(user_role: str) -> bool:
     """Check if user role can view invoices"""
     return has_permission(user_role, "invoices.view")
+
+
+# ============================================
+# THREE-WAY MATCH TOLERANCE
+# ============================================
+
+MATCH_POLICY_TYPE = "three_way_match"
+MATCH_POLICY_NAME = "three_way_match"
+
+#: Deliveries are short by a box and invoices differ by rounding. A match that
+#: fails on every trivial discrepancy gets switched off, and a control that is
+#: switched off protects nothing — so the defaults are permissive enough to
+#: survive contact with real suppliers, and editable per tenant.
+DEFAULT_MATCH_TOLERANCE = {
+    "amount_percent": 2.0,
+    "quantity_percent": 5.0,
+}
+
+
+def get_match_tolerance(db: Session, tenant_id: str | UUID) -> dict:
+    """The tenant's three-way match tolerance, falling back to the defaults.
+
+    Configuration rather than constants, so a tenant can tighten or loosen it
+    without a deploy — and every change is versioned like any other policy.
+    """
+    from app.models.policy import Policy
+
+    policy = (
+        db.query(Policy)
+        .filter(
+            Policy.policy_type == MATCH_POLICY_TYPE,
+            Policy.policy_name == MATCH_POLICY_NAME,
+            Policy.is_active.is_(True),
+        )
+        .first()
+    )
+    configured = (policy.rule_config or {}) if policy else {}
+    return {**DEFAULT_MATCH_TOLERANCE, **configured}

@@ -175,6 +175,38 @@ class InvoiceService:
         )
         self.repository.commit()
 
+    def _assert_three_way_match(self, invoice: Invoice, current_user: dict) -> None:
+        """Block approval when an invoice disagrees with its order or delivery.
+
+        Only applies where a purchase order is linked — an invoice with no PO
+        has nothing to match against and is governed by the other gates. This
+        is the control that stops payment for goods never ordered or never
+        received, so a failure is audited with the specific discrepancies
+        rather than a bare refusal.
+
+        Deliberately gates approval, not recording: AP can keep entering
+        invoices while a discrepancy is chased.
+        """
+        if not invoice.purchase_order_id:
+            return
+
+        from app.services.three_way_match import ThreeWayMatchService, MISMATCHED
+
+        result = ThreeWayMatchService(self.db).match_invoice(
+            invoice, current_user["tenant_id"]
+        )
+        if result["result"] != MISMATCHED:
+            return
+
+        self._audit_block(
+            invoice, current_user, "approval_blocked", "three_way_match_failed",
+        )
+        details = "; ".join(d["detail"] for d in result["discrepancies"])
+        raise ValueError(
+            f"Cannot approve: this invoice does not match its purchase order "
+            f"({result.get('po_number')}). {details}"
+        )
+
     def _assert_duplicate_resolved(self, invoice: Invoice) -> None:
         """Soft duplicate gate: block approval while the invoice carries an
         unacknowledged potential-duplicate flag. Cleared via resolve_duplicate,
@@ -650,6 +682,10 @@ class InvoiceService:
         # Governance gate: a flagged potential duplicate must be reviewed and
         # overridden (with a logged reason) before approval.
         self._assert_duplicate_resolved(invoice)
+
+        # Governance gate: an invoice raised against a purchase order must
+        # agree with what was ordered and what arrived.
+        self._assert_three_way_match(invoice, current_user)
 
         # Configuration-first approval routing: the required approver role is
         # derived from the tenant's approval_limit policies, so the amount limit

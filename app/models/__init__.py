@@ -14,6 +14,7 @@ from app.models.policy_eval import PolicyEval
 from app.models.evidence_pack import EvidencePack
 from app.models.delegation import Delegation
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+from app.models.goods_receipt import GoodsReceipt, GoodsReceiptLine
 
 __all__ = [
     "Base",
@@ -35,4 +36,6 @@ __all__ = [
     "Delegation",
     "PurchaseOrder",
     "PurchaseOrderLine",
+    "GoodsReceipt",
+    "GoodsReceiptLine",
 ]

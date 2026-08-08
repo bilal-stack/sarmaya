@@ -119,19 +119,33 @@ class EvidencePackService:
         content = {
             "correlation_id": str(correlation_id),
             "objects": [
+                # Fields are read defensively because the chain spans modules
+                # with genuinely different shapes: a goods receipt has no
+                # vendor, no total and no state — it is a statement that
+                # something arrived, not a financial document. Assuming the
+                # invoice shape here made the whole pack 500 once receipts
+                # joined the chain.
                 {
                     "object_type": object_type,
                     "object_id": str(row.id),
                     "reference": getattr(row, "invoice_number", None)
                     or getattr(row, "po_number", None)
+                    or getattr(row, "grn_number", None)
                     or str(row.id),
-                    "vendor_name": row.vendor_name,
-                    "total_amount": float(row.total_amount or 0),
-                    "currency": getattr(row.currency, "value", row.currency),
-                    "state": getattr(row.current_state, "value", row.current_state),
+                    "vendor_name": getattr(row, "vendor_name", None),
+                    "total_amount": float(getattr(row, "total_amount", None) or 0),
+                    "currency": getattr(
+                        getattr(row, "currency", None), "value",
+                        getattr(row, "currency", None),
+                    ),
+                    "state": getattr(
+                        getattr(row, "current_state", None), "value",
+                        getattr(row, "current_state", None),
+                    ),
                     "date": str(
                         getattr(row, "invoice_date", None)
                         or getattr(row, "order_date", None)
+                        or getattr(row, "received_date", None)
                         or ""
                     ) or None,
                 }

@@ -29,6 +29,9 @@ class PurchaseOrder(BaseModel):
     #: Which configured state machine governs this record.
     WORKFLOW_TYPE = "purchase_order"
 
+    #: How this module names itself in the audit trail and correlation chain.
+    OBJECT_TYPE = "purchase_order"
+
     tenant_id = Column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False, index=True,

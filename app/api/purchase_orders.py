@@ -7,8 +7,10 @@ from app.api.deps import get_current_user, get_db_session
 from app.schemas.purchase_order import (
     PurchaseOrderCreate, PurchaseOrderUpdate, PurchaseOrderResponse,
     PurchaseOrderListResponse, RejectRequest,
+    GoodsReceiptCreate, GoodsReceiptResponse,
 )
 from app.services.purchase_order_service import PurchaseOrderService
+from app.services.goods_receipt_service import GoodsReceiptService
 
 router = APIRouter(prefix="/purchase-orders", tags=["Purchase Orders"])
 
@@ -150,5 +152,46 @@ def close_purchase_order(
 ):
     try:
         return PurchaseOrderService(db).close_order(po_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+# ============================================
+# GOODS RECEIPTS
+# ============================================
+
+@router.get("/{po_id}/receipts", response_model=List[GoodsReceiptResponse])
+def list_goods_receipts(
+    po_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What has arrived against this order."""
+    try:
+        return GoodsReceiptService(db).list_for_order(po_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post(
+    "/{po_id}/receipts",
+    response_model=GoodsReceiptResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def record_goods_receipt(
+    po_id: UUID,
+    payload: GoodsReceiptCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Record a delivery against an issued order.
+
+    Requires purchase_orders.receive, which the clerk who raises orders holds
+    and the people who approve them do not — whoever confirms goods arrived
+    should not also have authorised the spend, or the delivery leg of the
+    three-way match verifies nothing.
+    """
+    try:
+        return GoodsReceiptService(db).record_receipt(po_id, payload, current_user)
     except (ValueError, PermissionError) as e:
         _raise_for(e)

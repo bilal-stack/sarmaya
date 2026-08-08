@@ -467,3 +467,31 @@ def mark_invoice_paid(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(e)
         )
+
+
+@router.get("/{invoice_id}/match")
+def get_three_way_match(
+    invoice_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Compare this invoice against its purchase order and what was received.
+
+    Read-only and advisory: it explains what approval would say before anyone
+    tries, so a discrepancy can be chased rather than discovered as a refusal.
+    The gate itself lives in the approval path.
+    """
+    from app.services.three_way_match import ThreeWayMatchService
+
+    service = InvoiceService(db)
+    invoice = service.get_invoice(invoice_id)
+    if not invoice:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found"
+        )
+    if not has_permission(current_user["role"], PERM_VIEW_INVOICE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view invoices",
+        )
+    return ThreeWayMatchService(db).match_invoice(invoice, current_user["tenant_id"])

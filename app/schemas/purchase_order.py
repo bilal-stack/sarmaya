@@ -109,3 +109,56 @@ class PurchaseOrderListResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GoodsReceiptLineCreate(BaseModel):
+    """What arrived against one order line. Negative records a return, so a
+    correction is appended rather than editing away the original claim."""
+    purchase_order_line_id: UUID
+    quantity_received: Decimal
+
+
+class GoodsReceiptCreate(BaseModel):
+    received_date: Optional[date] = None
+    delivery_note: Optional[str] = None
+    notes: Optional[str] = None
+    lines: List[GoodsReceiptLineCreate] = []
+
+
+class GoodsReceiptLineResponse(BaseModel):
+    id: UUID
+    line_number: int
+    purchase_order_line_id: UUID
+    quantity_received: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GoodsReceiptResponse(BaseModel):
+    id: UUID
+    purchase_order_id: UUID
+    grn_number: str
+    received_date: date
+    delivery_note: Optional[str] = None
+    notes: Optional[str] = None
+    correlation_id: Optional[UUID] = None
+    received_by: UUID
+    created_at: datetime
+    lines: List[GoodsReceiptLineResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MatchDiscrepancy(BaseModel):
+    kind: str
+    detail: str
+
+
+class ThreeWayMatchResult(BaseModel):
+    """Advisory here; enforced by the invoice approval gate."""
+    result: str
+    reason: str
+    purchase_order_id: Optional[str] = None
+    po_number: Optional[str] = None
+    discrepancies: List[dict] = []
+    tolerance: Optional[dict] = None
