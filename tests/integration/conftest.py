@@ -125,11 +125,31 @@ def client(db):
     from fastapi.testclient import TestClient
 
     from app.main import app
-    from app.core.database import get_db
-    from app.api.deps import get_db_session
+    from app.core.database import get_db, set_tenant_context
+    from app.api.deps import get_current_user, get_db_session
+
+    def _scoped_session():
+        """Stand in for get_db_session, tenant binding included.
+
+        The override used to hand back a bare session. That silently disabled
+        the tenant scoping every request depends on (DR-013), so any API test
+        asking "can this caller see another tenant's rows?" was answering with
+        the mechanism switched off — it would have passed just as happily
+        against a server with no isolation at all. Found while writing the
+        cross-tenant tests: they failed here and passed against a real
+        deployment, which is the wrong way round.
+
+        The tenant is read from whatever `as_user` authenticated, mirroring the
+        real dependency rather than a fixed value.
+        """
+        resolver = app.dependency_overrides.get(get_current_user)
+        current_user = resolver() if resolver else None
+        if current_user and current_user.get("tenant_id"):
+            set_tenant_context(db, str(current_user["tenant_id"]))
+        return db
 
     app.dependency_overrides[get_db] = lambda: db
-    app.dependency_overrides[get_db_session] = lambda: db
+    app.dependency_overrides[get_db_session] = _scoped_session
     try:
         yield TestClient(app)
     finally:

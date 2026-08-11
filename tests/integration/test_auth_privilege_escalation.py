@@ -196,7 +196,16 @@ class TestTenantBoundary:
         )
 
         assert response.status_code == 404
+
+        # Read the outsider back with *their* tenant bound. The request left the
+        # caller's tenant bound to this session, and the scoping that just
+        # refused the change would equally hide the row from this check —
+        # leaving the assertion unable to tell "unchanged" from "invisible".
+        from app.core.database import set_tenant_context
+
+        set_tenant_context(db, other_tenant_user["tenant_id"])
         outsider = db.query(User).filter(User.id == other_tenant_user["id"]).first()
+        assert outsider is not None
         assert str(getattr(outsider.role, "value", outsider.role)).lower() == "admin"
 
 

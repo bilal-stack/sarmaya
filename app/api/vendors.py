@@ -21,7 +21,15 @@ router = APIRouter(prefix="/vendors", tags=["Vendors"])
 def _raise_for(exc: Exception) -> None:
     if isinstance(exc, PermissionError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    message = str(exc)
+    # A vendor the caller cannot see was answered with 400, where every other
+    # module here answers 404. Same information either way — a vendor belonging
+    # to another tenant is indistinguishable from one that does not exist — but
+    # a client cannot tell "you sent nonsense" from "it is not there", and the
+    # inconsistency invites someone to read meaning into the difference.
+    if "not found" in message.lower():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
 @router.get("/", response_model=List[VendorListResponse])

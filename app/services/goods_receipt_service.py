@@ -33,6 +33,18 @@ class GoodsReceiptService:
 
     def list_for_order(self, po_id: UUID, current_user: dict) -> List[GoodsReceipt]:
         self._require(current_user, PERM_VIEW_PO, "view goods receipts")
+
+        # Check the order is visible before listing anything against it.
+        # Without this the query still returned nothing for another tenant's
+        # order — but only because the receipts themselves are tenant-scoped,
+        # which makes the isolation incidental rather than stated. A cross-
+        # tenant probe found this returning 200 [] where every sibling endpoint
+        # returns 404, and an endpoint that never looks at its parent is one
+        # refactor away from being a real leak.
+        order = self.db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+        if not order:
+            raise ValueError("Purchase order not found")
+
         return (
             self.db.query(GoodsReceipt)
             .filter(GoodsReceipt.purchase_order_id == po_id)

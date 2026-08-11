@@ -118,33 +118,45 @@ class PaymentService:
 
         total = Decimal("0")
         first_invoice = None
-        for index, invoice_id in enumerate(invoice_ids, start=1):
-            invoice = self._payable_invoice(invoice_id, payment.id)
-            vendor = (
-                self.db.query(Vendor).filter(Vendor.id == invoice.vendor_id).first()
-                if invoice.vendor_id else None
-            )
-            first_invoice = first_invoice or invoice
-            amount = Decimal(invoice.total_amount or 0)
-            total += amount
+        try:
+            for index, invoice_id in enumerate(invoice_ids, start=1):
+                invoice = self._payable_invoice(invoice_id, payment.id)
+                vendor = (
+                    self.db.query(Vendor).filter(Vendor.id == invoice.vendor_id).first()
+                    if invoice.vendor_id else None
+                )
+                first_invoice = first_invoice or invoice
+                amount = Decimal(invoice.total_amount or 0)
+                total += amount
 
-            # Bank details are copied, not referenced: they can change after
-            # release, and the file that went to the bank must remain
-            # reconstructable from what was true when it was built.
-            self.db.add(PaymentLine(
-                tenant_id=current_user["tenant_id"],
-                payment_id=payment.id,
-                invoice_id=invoice.id,
-                line_number=index,
-                amount=amount,
-                vendor_id=invoice.vendor_id,
-                vendor_name=invoice.vendor_name,
-                bank_account_name=getattr(vendor, "bank_account_name", None),
-                bank_account_number=getattr(vendor, "bank_account_number", None),
-                bank_name=getattr(vendor, "bank_name", None),
-                iban=getattr(vendor, "iban", None),
-                swift_code=getattr(vendor, "swift_code", None),
-            ))
+                # Bank details are copied, not referenced: they can change after
+                # release, and the file that went to the bank must remain
+                # reconstructable from what was true when it was built.
+                self.db.add(PaymentLine(
+                    tenant_id=current_user["tenant_id"],
+                    payment_id=payment.id,
+                    invoice_id=invoice.id,
+                    line_number=index,
+                    amount=amount,
+                    vendor_id=invoice.vendor_id,
+                    vendor_name=invoice.vendor_name,
+                    bank_account_name=getattr(vendor, "bank_account_name", None),
+                    bank_account_number=getattr(vendor, "bank_account_number", None),
+                    bank_name=getattr(vendor, "bank_name", None),
+                    iban=getattr(vendor, "iban", None),
+                    swift_code=getattr(vendor, "swift_code", None),
+                ))
+        except Exception:
+            # The header is flushed before the invoices are checked, because the
+            # duplicate-payment rule needs this run's id to exclude itself. A
+            # refusal partway through therefore leaves a headerless run behind
+            # unless it is undone here. Today the request-scoped session closes
+            # without committing, so nothing persists — but that is the session
+            # lifecycle saving us, not this function, and a mixed run naming one
+            # payable invoice and one that is not is exactly the shape that
+            # reaches this path.
+            self.db.rollback()
+            raise
 
         payment.total_amount = total
         # Taken from the invoices being settled when the caller does not say.
