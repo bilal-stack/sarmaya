@@ -157,3 +157,21 @@ Owner:
 - Rationale: This is not the same case as DR-014. That removed a subsystem advertising capability it did not have — misleading in itself. This is correct code enforcing a real invariant that simply has no path to it yet, at a cost of six lines. The condition that makes it live is a single line elsewhere: granting users.manage to another role, which the Build Book's HR and procurement administration will plausibly do. Whoever grants it will be thinking about who may manage users, not about leaving a tenant with nobody who can administer it — which is unrecoverable through the API, since the only actor who could restore an admin is an admin. Deleting it optimises for a tidy coverage report over an irreversible failure.
 - Impact: Guard retained in `app/api/users.py` with a comment recording that it is unreachable by construction today, the precise reason, and the change that would make it live. `tests/integration/test_auth_privilege_escalation.py::test_last_admin_cannot_be_demoted` monkeypatches `has_permission` to exercise it, and says so in its docstring. The accompanying test that an admin *can* be demoted while another remains is the one that runs against real permissions.
 - Owner: bilal (dev)
+
+**DR-016 — a payment run carries its own chain rather than inheriting one**
+- Date: 2026-08-11
+- Context: Every other module joins a correlation chain by inheriting it from the record upstream — a goods receipt takes the purchase order's, an invoice keeps its own from upload. A payment run does not fit: it may settle several invoices belonging to several different chains, so there is no single chain to inherit.
+- Options: (a) restrict a run to invoices sharing one chain; (b) give the run the chain of its first invoice; (c) give the run its own chain and write an audit entry onto each settled invoice's chain naming the payment.
+- Decision: (c).
+- Rationale: (a) breaks the actual business practice — an AP run pays many vendors at once, and forcing one run per chain makes the feature useless. (b) is a quiet lie: the run would appear inside one invoice's evidence pack and be invisible from the others, so an auditor pulling the second invoice's story would see it approved and never see it paid. (c) means the run appears in every story it touches without pretending to belong to one: its own chain covers prepare/release/export, and each invoice's chain gains a `marked_paid` entry naming the run.
+- Impact: `Payment.correlation_id` is minted fresh in `prepare_payment`; `release_payment` writes a `marked_paid` audit entry against each settled invoice carrying that invoice's own chain. Payment is registered as a chain owner via OBJECT_TYPE, so its evidence pack and timeline work like any other module's.
+- Owner: bilal (dev)
+
+**DR-017 — no admin exemption on payment release**
+- Date: 2026-08-11
+- Context: The existing segregation-of-duties rules exempt admins (DR-005), so a single-admin demo tenant still functions — an admin may approve an invoice they created. Payment release needed the same decision.
+- Options: (a) exempt admins for consistency with DR-005; (b) enforce maker-checker on release with no exemption.
+- Decision: (b).
+- Rationale: The DR-005 carve-out exists so a one-person tenant is operable, and its cost is bounded — a wrongly approved invoice is still subject to every downstream control, including this one. Release has no downstream control; it is the last gate before an instruction reaches a bank, and releasing your own run is precisely the action the module exists to prevent. Consistency is not worth an exemption on the only step that cannot be caught later. The cost is real and accepted: a genuinely single-user tenant cannot release a payment, which is the correct answer rather than a limitation.
+- Impact: `sod.violates_self_release` deliberately has no `_is_admin` check, unlike its siblings. Verified against a running server: an admin who prepared a run was refused its release with 403, and a second user released it.
+- Owner: bilal (dev)

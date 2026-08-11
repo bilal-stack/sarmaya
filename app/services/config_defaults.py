@@ -9,7 +9,7 @@ rows without a code deploy).
 These mirror migration 008's demo-tenant seed; the migration is a historical
 snapshot, this module is what runtime provisioning uses.
 """
-from app.core.enums import InvoiceState, PurchaseOrderState
+from app.core.enums import InvoiceState, PurchaseOrderState, PaymentState
 
 DRAFT = InvoiceState.DRAFT.value
 VALIDATED = InvoiceState.VALIDATED.value
@@ -63,11 +63,36 @@ DEFAULT_PURCHASE_ORDER_STATES = [
     (PO_CANCELLED, "Cancelled", 7, False, True, [], "#orange", {}, {}),
 ]
 
+PAY_DRAFT = PaymentState.DRAFT.value
+PAY_PENDING = PaymentState.PENDING_RELEASE.value
+PAY_RELEASED = PaymentState.RELEASED.value
+PAY_REJECTED = PaymentState.REJECTED.value
+PAY_CANCELLED = PaymentState.CANCELLED.value
+
+# The payment workflow. Short on purpose: a run is prepared, then released by
+# someone else, and release is terminal — the instruction has been authorised
+# and the invoices are settled, so there is nothing to edit afterwards.
+#
+# The guard on release is the one that matters: it re-checks that every line is
+# still an approved, unpaid invoice against an active vendor. A run can sit
+# pending for days, and the world can change under it.
+DEFAULT_PAYMENT_STATES = [
+    (PAY_DRAFT, "Draft", 1, True, False, [PAY_PENDING, PAY_CANCELLED], "#gray",
+        {PAY_PENDING: ["payment_has_lines"]}, {}),
+    (PAY_PENDING, "Pending Release", 2, False, False, [PAY_RELEASED, PAY_REJECTED], "#yellow",
+        {PAY_RELEASED: ["payment_lines_still_payable"]},
+        {"hours": 24, "escalate_to": "cfo"}),
+    (PAY_RELEASED, "Released", 3, False, True, [], "#green", {}, {}),
+    (PAY_REJECTED, "Rejected", 4, False, True, [PAY_DRAFT], "#red", {}, {}),
+    (PAY_CANCELLED, "Cancelled", 5, False, True, [], "#orange", {}, {}),
+]
+
 #: {workflow_type: states} — provisioning seeds each independently, so a tenant
 #: created before a workflow existed gains it on the next run.
 DEFAULT_WORKFLOWS = {
     "invoice": DEFAULT_INVOICE_STATES,
     "purchase_order": DEFAULT_PURCHASE_ORDER_STATES,
+    "payment": DEFAULT_PAYMENT_STATES,
 }
 
 # (policy_name, priority, rule_config) — highest priority matching rule wins.

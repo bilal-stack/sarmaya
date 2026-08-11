@@ -30,6 +30,13 @@ PERM_UPDATE_PO = "purchase_orders.update"
 PERM_APPROVE_PO = "purchase_orders.approve"
 PERM_RECEIVE_GOODS = "purchase_orders.receive"
 
+# Payments. Preparing and releasing are separate permissions because a single
+# person holding both defeats maker-checker — the control that matters most at
+# the step where money actually leaves.
+PERM_VIEW_PAYMENT = "payments.view"
+PERM_PREPARE_PAYMENT = "payments.prepare"
+PERM_RELEASE_PAYMENT = "payments.release"
+
 PERM_MANAGE_VENDORS = "vendors.manage"
 PERM_VIEW_VENDORS = "vendors.view"
 
@@ -58,6 +65,10 @@ ROLE_PERMISSIONS = {
         PERM_UPDATE_PO,
         PERM_APPROVE_PO,
         PERM_RECEIVE_GOODS,
+        # Payments - ALL (self-release is still refused by SoD)
+        PERM_VIEW_PAYMENT,
+        PERM_PREPARE_PAYMENT,
+        PERM_RELEASE_PAYMENT,
         # Vendors - ALL
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
@@ -80,6 +91,8 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_PO,
         PERM_UPDATE_PO,
         PERM_RECEIVE_GOODS,
+        PERM_VIEW_PAYMENT,
+        PERM_PREPARE_PAYMENT,
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
     ],
@@ -99,6 +112,8 @@ ROLE_PERMISSIONS = {
         PERM_MARK_PAID_INVOICE,
         PERM_VIEW_PO,
         PERM_APPROVE_PO,
+        PERM_VIEW_PAYMENT,
+        PERM_RELEASE_PAYMENT,
         PERM_VIEW_VENDORS,
         PERM_VIEW_AUDIT,
     ],
@@ -112,6 +127,7 @@ ROLE_PERMISSIONS = {
     AUDITOR: [
         PERM_VIEW_INVOICE,
         PERM_VIEW_PO,
+        PERM_VIEW_PAYMENT,
         PERM_VIEW_VENDORS,
         PERM_VIEW_USERS,
         PERM_VIEW_AUDIT,

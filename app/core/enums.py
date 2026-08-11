@@ -41,6 +41,21 @@ class PurchaseOrderState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class PaymentState(str, Enum):
+    """Payment run states.
+
+    Maker-checker is the whole point: a run is prepared by one person and
+    released by another. `released` is the irreversible step — it is the moment
+    the instruction is considered authorised and the settled invoices become
+    paid, so nothing after it edits the run.
+    """
+    DRAFT = "draft"
+    PENDING_RELEASE = "pending_release"
+    RELEASED = "released"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
 class VendorStatus(str, Enum):
     """Vendor statuses"""
     ACTIVE = "active"

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
-from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot, delegations, users, purchase_orders
+from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot, delegations, users, purchase_orders, payments
 import logging
 import uuid
 from app.utils.datetime_helpers import utc_now
@@ -55,6 +55,7 @@ api_v1.include_router(autopilot.router)
 api_v1.include_router(delegations.router)
 api_v1.include_router(users.router)
 api_v1.include_router(purchase_orders.router)
+api_v1.include_router(payments.router)
 
 
 # Health check. Must be declared before the router is included: FastAPI copies

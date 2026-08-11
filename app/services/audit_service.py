@@ -12,6 +12,7 @@ from app.core.roles import (
     PERM_VIEW_VENDORS,
     PERM_VIEW_AUDIT,
     PERM_VIEW_PO,
+    PERM_VIEW_PAYMENT,
 )
 
 # object_type -> permission required to view its timeline. Live Audit Mode is
@@ -26,6 +27,7 @@ _VIEW_PERMISSION = {
     "purchase_order": PERM_VIEW_PO,
     # A receipt's history is part of the order's story.
     "goods_receipt": PERM_VIEW_PO,
+    "payment": PERM_VIEW_PAYMENT,
 }
 
 

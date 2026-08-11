@@ -43,3 +43,14 @@ def violates_self_vendor_activation(vendor, current_user: dict) -> bool:
     if _is_admin(current_user):
         return False
     return _same_person(getattr(vendor, "created_by", None), current_user.get("id"))
+
+
+def violates_self_release(prepared_by, current_user: dict) -> bool:
+    """Maker-checker on a payment run.
+
+    Deliberately has no admin exemption, unlike the approval rules above.
+    Those carve-outs exist so a one-person demo tenant still functions; this
+    one guards the moment money leaves, and an admin releasing their own run is
+    precisely the action the control exists to prevent.
+    """
+    return _same_person(prepared_by, current_user.get("id"))
