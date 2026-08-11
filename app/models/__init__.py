@@ -16,6 +16,7 @@ from app.models.delegation import Delegation
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from app.models.goods_receipt import GoodsReceipt, GoodsReceiptLine
 from app.models.payment import Payment, PaymentLine
+from app.models.bank_statement import BankStatement, BankStatementLine
 
 __all__ = [
     "Base",
@@ -41,4 +42,6 @@ __all__ = [
     "GoodsReceiptLine",
     "Payment",
     "PaymentLine",
+    "BankStatement",
+    "BankStatementLine",
 ]

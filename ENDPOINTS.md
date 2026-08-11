@@ -694,4 +694,81 @@ POST /api/v1/auth/change-password  # revokes other sessions; returns a fresh tok
 POST /api/v1/auth/refresh          # rejected for revoked tokens
 ```
 
-**Last Updated:** 2026-06-05
+## Procure-to-Pay (added 2026-08)
+
+The full chain: order → receive → match → approve → pay → reconcile. Each step
+is a separate authority, so no single person can carry a spend from request to
+settlement.
+
+### Purchase orders (`/purchase-orders`)
+```bash
+GET    /api/v1/purchase-orders?state=       # list
+POST   /api/v1/purchase-orders              # raise a draft (purchase_orders.create)
+GET    /api/v1/purchase-orders/{id}
+PUT    /api/v1/purchase-orders/{id}         # draft only
+POST   /api/v1/purchase-orders/{id}/submit  # hand to an approver
+POST   /api/v1/purchase-orders/{id}/approve # purchase_orders.approve; SoD: creator cannot approve own
+POST   /api/v1/purchase-orders/{id}/reject  # {"reason": "..."}
+POST   /api/v1/purchase-orders/{id}/issue   # send to the vendor; only then can goods be received
+POST   /api/v1/purchase-orders/{id}/close
+```
+
+### Goods receipts (the delivery leg)
+```bash
+GET  /api/v1/purchase-orders/{id}/receipts
+POST /api/v1/purchase-orders/{id}/receipts  # purchase_orders.receive — deliberately NOT held by
+                                            # the roles that approve orders, or the three-way
+                                            # match verifies nothing
+```
+
+### Three-way matching
+```bash
+GET /api/v1/invoices/{invoice_id}/match     # PO vs receipts vs invoice, per line
+# line status: matched | within_tolerance | mismatched | unmatched
+# A mismatch blocks approval via the three_way_match_failed transition guard.
+```
+
+### Payments (`/payments`)
+```bash
+GET  /api/v1/payments?state=            # list (payments.view)
+GET  /api/v1/payments/payable           # approved invoices not already on an open or released run
+POST /api/v1/payments                   # prepare a run: {invoice_ids[], payment_date?, currency?}
+                                        # amounts come from the invoices — a run cannot pay a
+                                        # different figure from the one approved
+GET  /api/v1/payments/{id}
+POST /api/v1/payments/{id}/submit       # hand to whoever releases
+POST /api/v1/payments/{id}/release      # payments.release; SoD refuses the preparer WITH NO ADMIN
+                                        # EXEMPTION (DR-017). Re-checks every line first.
+POST /api/v1/payments/{id}/reject       # {"reason": "..."}
+GET  /api/v1/payments/{id}/bank-file    # CSV instruction for a RELEASED run only; SHA-256 in the
+                                        # X-Content-SHA256 header and recorded on first export
+# The system never moves money. A treasury user uploads the file to their own bank.
+```
+
+### Bank reconciliation (`/bank-statements`)
+```bash
+GET  /api/v1/bank-statements                    # imported statements (bank_statements.view)
+POST /api/v1/bank-statements                    # {content, source_format?, filename?}
+POST /api/v1/bank-statements/upload             # multipart file; format detected from content
+                                                # (camt053 | mt940 | csv) — banks name files anything
+GET  /api/v1/bank-statements/{id}               # statement with its lines
+GET  /api/v1/bank-statements/reconciliation     # BOTH directions, in one answer:
+                                                #   instructed_not_cleared — released runs the bank
+                                                #     never confirmed (vendor unpaid, nobody knows)
+                                                #   cleared_not_instructed — debits no instruction
+                                                #     explains; an empty `candidates` list on one of
+                                                #     these is the strongest fraud signal here
+GET  /api/v1/bank-statements/lines/{id}/suggestions   # ranked payments + the reasons for each
+POST /api/v1/bank-statements/lines/{id}/match         # {payment_id} — a HUMAN confirms; nothing
+                                                      # matches automatically. SoD refuses the person
+                                                      # who released the run. The suggestion shown at
+                                                      # the time is stored in the audit entry.
+POST /api/v1/bank-statements/lines/{id}/unmatch       # {reason} — a wrong match is a finding
+```
+
+> **Frontend note:** a suggestion must never be rendered as a completed match.
+> Show `score`, `confidence` and `reasons` next to a confirm button — an
+> automatic match that is wrong marks a payment cleared that did not clear, and
+> hides the unexplained debit beside it by consuming it.
+
+**Last Updated:** 2026-08-11

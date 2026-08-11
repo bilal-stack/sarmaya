@@ -37,6 +37,13 @@ PERM_VIEW_PAYMENT = "payments.view"
 PERM_PREPARE_PAYMENT = "payments.prepare"
 PERM_RELEASE_PAYMENT = "payments.release"
 
+# Bank statements. Reconciliation is a control over payments, not a part of
+# them: whoever confirms that money cleared correctly is checking the people
+# who sent it, so the permission is separate from prepare and release.
+PERM_VIEW_BANK_STATEMENT = "bank_statements.view"
+PERM_IMPORT_BANK_STATEMENT = "bank_statements.import"
+PERM_RECONCILE_PAYMENT = "bank_statements.reconcile"
+
 PERM_MANAGE_VENDORS = "vendors.manage"
 PERM_VIEW_VENDORS = "vendors.view"
 
@@ -69,6 +76,10 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_PAYMENT,
         PERM_PREPARE_PAYMENT,
         PERM_RELEASE_PAYMENT,
+        # Bank statements - ALL (self-reconciliation is still refused by SoD)
+        PERM_VIEW_BANK_STATEMENT,
+        PERM_IMPORT_BANK_STATEMENT,
+        PERM_RECONCILE_PAYMENT,
         # Vendors - ALL
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
@@ -93,6 +104,12 @@ ROLE_PERMISSIONS = {
         PERM_RECEIVE_GOODS,
         PERM_VIEW_PAYMENT,
         PERM_PREPARE_PAYMENT,
+        # Gets the file from the bank and matches it. Confirming a run they
+        # prepared is allowed — that work was already checked at release — but
+        # SoD still refuses anyone reconciling a run they released themselves.
+        PERM_VIEW_BANK_STATEMENT,
+        PERM_IMPORT_BANK_STATEMENT,
+        PERM_RECONCILE_PAYMENT,
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
     ],
@@ -114,6 +131,9 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_PO,
         PERM_VIEW_PAYMENT,
         PERM_RELEASE_PAYMENT,
+        # Sees the reconciliation but does not confirm matches: the CFO
+        # releases runs, and SoD would refuse those anyway.
+        PERM_VIEW_BANK_STATEMENT,
         PERM_VIEW_VENDORS,
         PERM_VIEW_AUDIT,
     ],
@@ -128,6 +148,7 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_INVOICE,
         PERM_VIEW_PO,
         PERM_VIEW_PAYMENT,
+        PERM_VIEW_BANK_STATEMENT,
         PERM_VIEW_VENDORS,
         PERM_VIEW_USERS,
         PERM_VIEW_AUDIT,

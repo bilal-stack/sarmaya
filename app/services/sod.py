@@ -54,3 +54,16 @@ def violates_self_release(prepared_by, current_user: dict) -> bool:
     precisely the action the control exists to prevent.
     """
     return _same_person(prepared_by, current_user.get("id"))
+
+
+def violates_self_reconciliation(released_by, current_user: dict) -> bool:
+    """True if the person who released a payment is confirming it cleared.
+
+    Reconciliation is the check on the release, not a continuation of it. One
+    person holding both controls the instruction and the evidence that the
+    instruction was correct — which is how a misdirected payment stays hidden.
+
+    No admin exemption, for the same reason as the release rule: this guards
+    the verification of money that has already left.
+    """
+    return _same_person(released_by, current_user.get("id"))
