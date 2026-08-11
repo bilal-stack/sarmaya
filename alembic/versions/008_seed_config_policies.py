@@ -63,6 +63,18 @@ APPROVAL_POLICIES = [
 def upgrade() -> None:
     conn = op.get_bind()
 
+    # This migration only ever configures the demo tenant, and 002 now seeds
+    # that tenant only when explicitly asked (its accounts share a password
+    # published in source, so they must not exist on a server). Without this
+    # check the policy INSERTs below would fail on a foreign key against a
+    # tenant that was deliberately never created.
+    demo_exists = conn.execute(
+        text("SELECT 1 FROM tenants WHERE id = :tid"), {'tid': DEMO_TENANT_ID}
+    ).first()
+    if not demo_exists:
+        print("  [008] No demo tenant; skipping demo workflow and policy config.")
+        return
+
     # 1. Normalise state names to lowercase and populate allowed_transitions
     #    for the demo tenant's invoice workflow.
     conn.execute(text(

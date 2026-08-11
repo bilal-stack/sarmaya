@@ -1,13 +1,28 @@
-"""seed demo data
+"""seed demo data — opt-in only
 
 Revision ID: 002_seed_demo_data
 Revises: 9ee83d7f931f
 Create Date: 2024-01-15 10:00:00.000000
 
+This migration creates five active accounts, one of them an administrator, all
+sharing a password written in this file. Running it unconditionally means
+`alembic upgrade head` on a server hands anyone who can reach the login page a
+working admin account — which is what it did until this gate was added, found by
+running the migrations against an empty database for the first time.
+
+So it now does nothing unless SEED_DEMO_DATA is set. A deployment gets an empty
+database and bootstraps its first tenant and administrator with
+`python -m scripts.bootstrap_tenant`, which takes its credentials from the
+environment rather than from source control.
+
+Gated rather than deleted: the seed is genuinely useful for local work, and no
+database has ever applied this migration (every developer and test database in
+this project is built with create_all), so nothing depends on it having run.
 """
 from alembic import op
 from sqlalchemy import text
 from datetime import datetime
+import os
 import uuid
 from passlib.context import CryptContext
 
@@ -20,11 +35,28 @@ depends_on = None
 # Password hashing context
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
+#: Deliberately opt-in, and deliberately not read from app settings: this must
+#: be an explicit act by whoever runs the migration, not something a stray value
+#: in a .env file can switch on.
+SEED_FLAG = "SEED_DEMO_DATA"
+
+
+def _seeding_requested() -> bool:
+    return os.getenv(SEED_FLAG, "").strip().lower() in ("1", "true", "yes", "on")
+
 
 def upgrade() -> None:
-    """Seed demo tenant, users, and workflow states."""
+    """Seed demo tenant, users, and workflow states — only when asked."""
+    if not _seeding_requested():
+        print(
+            f"  [002] Skipping demo seed data. These accounts share a password "
+            f"published in source, so they must never exist on a server. "
+            f"Set {SEED_FLAG}=true to seed a local database."
+        )
+        return
+
     conn = op.get_bind()
-    
+
     # 1. Insert demo tenant
     demo_tenant_id = '00000000-0000-0000-0000-000000000001'
     conn.execute(text("""

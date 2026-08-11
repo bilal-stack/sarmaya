@@ -214,8 +214,69 @@ Check `app/api/` for implementation details.
   ```
 
 Notes
-- Current chain: b105d820d4a4 -> 002_seed_demo -> 002_seed_demo_data -> 003_enable_rls
-- Run upgrade head after adding new migrations (e.g., audit enhancements).
+- Head is `024_delegations_rls`. Run `alembic upgrade head` after adding migrations.
+- **Every developer and test database here is built with `create_all`, not
+  migrations.** They diverge, and only running the migrations proves them —
+  see the deployment section below for how to check.
+
+---
+
+## Deploying to a server
+
+A production database starts **empty on purpose**. Migration 002 seeds a demo
+tenant whose five accounts, one of them an administrator, share a password
+written in this repository; running it on a server would hand an admin account
+to anyone who can reach the login page. It is therefore skipped unless
+`SEED_DEMO_DATA` is set.
+
+```bash
+alembic upgrade head
+```
+
+Then create the first tenant and administrator. `/auth/register` cannot do this
+— it requires a tenant to already exist and only ever grants the default clerk
+role — so credentials come from the environment, never from source:
+
+```bash
+BOOTSTRAP_TENANT_NAME="Acme Holdings" BOOTSTRAP_ADMIN_EMAIL="ops@acme.com" BOOTSTRAP_ADMIN_PASSWORD="..." python -m scripts.bootstrap_tenant
+```
+
+It refuses to run against a database that already has users, and refuses a
+password under 12 characters. Sign in and change the password immediately; every
+later account is created through the application, where permission checks and
+the audit trail apply.
+
+For a local database with the demo data:
+
+```bash
+SEED_DEMO_DATA=true alembic upgrade head
+```
+
+### Proving the migrations before you deploy
+
+The suite normally runs against a `create_all` database, which cannot catch a
+migration that produces a different schema. Point it at a migrated one:
+
+```bash
+createdb os_deploycheck && ADMIN_DATABASE_URL=postgresql://.../os_deploycheck alembic upgrade head
+```
+
+```bash
+TEST_DATABASE_URL=postgresql://.../os_deploycheck pytest -q
+```
+
+Known and accepted differences between the migrated schema and the models, none
+of which affect behaviour (the suite passes identically against both):
+
+- Some `VARCHAR` columns are wider than the model needs (`String(50)` in a
+  migration against an enum that renders as `VARCHAR(15)`).
+- `workflow_states.guards` and `.sla` are `NOT NULL` with a server default in
+  the database and nullable in the model — the database is the stricter of the
+  two.
+- The migrations create composite indexes (`ix_audit_logs_object_chain` and
+  similar) where the models declare single-column ones. A performance
+  difference, not a correctness one; the composite indexes lead with
+  `tenant_id`, which is what every scoped query filters on.
 
 ---
 
