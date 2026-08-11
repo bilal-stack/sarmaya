@@ -69,7 +69,15 @@ class ConfigProvisioningService:
         )
 
     def _seed_workflow(self, tenant_id, workflow_type: str, states) -> int:
-        if self.workflow_repo.count_states(workflow_type) > 0:
+        # Named explicitly rather than left to the session's bound tenant. This
+        # is a provisioning path, and provisioning runs in places where nothing
+        # is bound — a setup script, an onboarding job, a migration. On such a
+        # session the check saw the *previous* tenant's states, concluded the
+        # workflow was already configured, and seeded nothing: the second tenant
+        # came up with no states and no approval matrix, every routing decision
+        # silently falling back to the hardcoded defaults. Found while
+        # provisioning two tenants in one script.
+        if self._existing_states(tenant_id, workflow_type) > 0:
             return 0
         count = 0
         for name, display, order, is_initial, is_final, transitions, color, guards, sla in states:
@@ -91,7 +99,8 @@ class ConfigProvisioningService:
         return count
 
     def _seed_policies(self, tenant_id, changed_by) -> int:
-        if self.policy_repo.list_by_type(POLICY_TYPE):
+        # Tenant named explicitly, for the same reason as _seed_workflow above.
+        if self._existing_policies(tenant_id) > 0:
             return 0
         count = 0
         for name, priority, rule in DEFAULT_APPROVAL_POLICIES:
@@ -125,3 +134,28 @@ class ConfigProvisioningService:
         role = current_user["role"]
         if not (has_permission(role, PERM_MANAGE_POLICIES) and has_permission(role, PERM_MANAGE_WORKFLOW)):
             raise PermissionError("You do not have permission to initialize tenant configuration")
+
+    # --- explicit tenant checks -------------------------------------------
+
+    def _existing_states(self, tenant_id, workflow_type: str) -> int:
+        """States this tenant already has for a workflow.
+
+        Deliberately not the repository's `count_states`, which names no tenant
+        and so answers for whichever tenant the session happens to be bound to
+        — or, on an unbound session, for all of them at once.
+        """
+        return (
+            self.db.query(WorkflowState)
+            .filter(
+                WorkflowState.tenant_id == tenant_id,
+                WorkflowState.workflow_type == workflow_type,
+            )
+            .count()
+        )
+
+    def _existing_policies(self, tenant_id) -> int:
+        return (
+            self.db.query(Policy)
+            .filter(Policy.tenant_id == tenant_id, Policy.policy_type == POLICY_TYPE)
+            .count()
+        )

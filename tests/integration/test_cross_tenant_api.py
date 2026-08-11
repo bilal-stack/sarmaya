@@ -306,3 +306,112 @@ class TestTheTokensTenantIsNotTrustedAlone:
         )
         assert response.status_code == 200, response.text
         assert outsider["marker"] not in response.text
+
+
+class TestProvisioningNamesItsTenant:
+    """Seeding a second tenant must not think the first tenant's config is its
+    own.
+
+    The "already configured?" checks named no tenant and relied on the session's
+    bound tenant. Provisioning runs where nothing is bound — a setup script, an
+    onboarding job — and there the check saw the previous tenant's rows and
+    seeded nothing. The second tenant came up with no workflow states and no
+    approval matrix, every routing decision silently falling back to the
+    hardcoded defaults. Found provisioning two tenants in one script.
+    """
+
+    def test_a_second_tenant_gets_its_own_config(self, db, make_user):
+        from app.models.policy import Policy
+        from app.models.workflow_state import WorkflowState
+        from app.services.config_provisioning import ConfigProvisioningService
+
+        first = make_user(UserRole.ADMIN)
+        ConfigProvisioningService(db).initialize_defaults(first)
+
+        second_tenant = Tenant(
+            id=uuid.uuid4(), name="Second Corp",
+            slug=f"second-{uuid.uuid4().hex[:8]}", isolation_level="rls",
+        )
+        db.add(second_tenant)
+        db.flush()
+        second_admin = User(
+            id=uuid.uuid4(), tenant_id=second_tenant.id,
+            email=f"admin-{uuid.uuid4().hex[:6]}@second.test", password="x",
+            role=UserRole.ADMIN, is_active=True,
+        )
+        db.add(second_admin)
+        db.flush()
+
+        created = ConfigProvisioningService(db).initialize_defaults({
+            "id": str(second_admin.id), "tenant_id": str(second_tenant.id),
+            "email": second_admin.email, "role": UserRole.ADMIN.value,
+        })
+
+        assert created["created_states"] > 0, (
+            "the second tenant was left with no workflow states"
+        )
+        assert created["created_policies"] > 0, (
+            "the second tenant was left with no approval matrix"
+        )
+        assert db.query(WorkflowState).filter(
+            WorkflowState.tenant_id == second_tenant.id
+        ).count() > 0
+        assert db.query(Policy).filter(
+            Policy.tenant_id == second_tenant.id
+        ).count() > 0
+
+    def test_reprovisioning_the_same_tenant_still_does_nothing(self, db, make_user):
+        """The idempotence the tenant check must not break."""
+        from app.services.config_provisioning import ConfigProvisioningService
+
+        admin = make_user(UserRole.ADMIN)
+        ConfigProvisioningService(db).initialize_defaults(admin)
+        again = ConfigProvisioningService(db).initialize_defaults(admin)
+
+        assert again == {"created_states": 0, "created_policies": 0}
+
+
+class TestEvidencePacksAreNotSealedOverNothing:
+    """A pack generated for another tenant's correlation id contained zero
+    objects — no leak, since the caller cannot see those records — but it was
+    still hashed, recorded and stamped `all_chains_verified: true`.
+
+    A sealed evidence pack exists to be pointed at later. One certifying an
+    absence is worse than an error.
+    """
+
+    def test_generating_over_an_invisible_chain_is_refused(
+        self, client, insider, outsider
+    ):
+        from app.models.payment import Payment
+
+        their_chain = uuid.uuid4()
+        response = client.post(f"/api/v1/audit/evidence-pack/{their_chain}")
+        assert response.status_code >= 400, response.text
+        assert "nothing to evidence" in response.text.lower()
+
+    def test_no_pack_row_is_recorded(self, client, db, insider, outsider):
+        from app.models.evidence_pack import EvidencePack
+
+        before = db.query(EvidencePack).count()
+        client.post(f"/api/v1/audit/evidence-pack/{uuid.uuid4()}")
+        assert db.query(EvidencePack).count() == before
+
+    def test_a_real_chain_still_seals(self, client, db, insider):
+        """The control: a correlation id with records behind it works."""
+        from app.models.invoice import Invoice
+
+        correlation_id = uuid.uuid4()
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=insider["tenant_id"],
+            vendor_name="Own Vendor", invoice_number="EVID-INV-001",
+            invoice_date=date(2026, 8, 1), total_amount=Decimal("100"),
+            current_state=InvoiceState.APPROVED, created_by=insider["id"],
+            correlation_id=correlation_id,
+        )
+        db.add(invoice)
+        db.flush()
+
+        response = client.post(f"/api/v1/audit/evidence-pack/{correlation_id}")
+        assert response.status_code == 200, response.text
+        assert response.json()["counts"]["objects"] >= 1

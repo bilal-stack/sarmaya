@@ -233,6 +233,11 @@ def generate_evidence_pack(
         return EvidencePackService(db).generate(correlation_id, current_user)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        # A correlation id with nothing behind it — another tenant's, or one
+        # that never existed. Refusing to seal an empty pack is a 404, not a
+        # crash; the service raises rather than returning a certified nothing.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.get("/evidence-pack/{correlation_id}", response_model=EvidencePackResponse)

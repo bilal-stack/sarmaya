@@ -213,6 +213,22 @@ class EvidencePackService:
     def generate(self, correlation_id: UUID, current_user: dict) -> Dict:
         """Assemble the bundle and record that it was produced."""
         pack = self.build(correlation_id, current_user)
+
+        # An empty pack must not be sealed. A correlation id belonging to
+        # another tenant — or to nothing at all — produced a hash-stamped,
+        # permanently recorded document covering zero objects and asserting
+        # `all_chains_verified: true`, which is true only in the sense that
+        # nothing was checked. Nothing leaks: the pack is empty precisely
+        # because the caller cannot see those records. But a sealed evidence
+        # pack is meant to be pointed at later, and one that certifies an
+        # absence is worse than an error message. Found by generating a pack
+        # for another tenant's correlation id during a cross-tenant probe.
+        if not pack["counts"]["objects"]:
+            raise ValueError(
+                "No records found for this correlation id, so there is nothing "
+                "to evidence. Sealing an empty pack would certify an absence."
+            )
+
         row = EvidencePack(
             tenant_id=current_user["tenant_id"],
             correlation_id=correlation_id,
