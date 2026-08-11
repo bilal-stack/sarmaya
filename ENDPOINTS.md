@@ -71,11 +71,17 @@ Base prefix: `/api/v1`
 Prefix: `/api/v1/auth`
 
 - POST `/api/v1/auth/register`  
-  - Purpose: Create a new user for a tenant.  
+  - Purpose: Self-service signup into an existing tenant.  
+  - **Disabled unless `ALLOW_SELF_REGISTRATION` is set** — otherwise 403. Even at
+    the default clerk role a stranger can create vendors, raise invoices, prepare
+    payment runs and import bank statements. Administrators create accounts with
+    `POST /api/v1/users` instead.  
   - Query param: `tenant` (optional, defaults to `demo`).  
-  - Body: JSON matching `UserCreate` (email, password, full_name, optional role).  
-  - Response: `TokenWithUser` (access_token, token_type, user details).  
-  - Notes: User is automatically logged in upon registration.
+  - Body: `{email, password, full_name?}`. **No role** — the new account is
+    always the default clerk. The body used to accept one, so an unauthenticated
+    `{"role": "admin"}` against any tenant slug returned an administrator's
+    token.  
+  - Response: `TokenWithUser` (access_token, token_type, user details).
 
 - POST `/api/v1/auth/login`  
   - Purpose: Authenticate user and return JWT with user details.  
@@ -692,6 +698,22 @@ GET   /api/v1/invoices/blocked-on-vendor
 POST /api/v1/auth/logout           # revokes ALL of the user's tokens (token_version bump)
 POST /api/v1/auth/change-password  # revokes other sessions; returns a fresh token for the caller
 POST /api/v1/auth/refresh          # rejected for revoked tokens
+POST /api/v1/auth/register?tenant= # DISABLED unless ALLOW_SELF_REGISTRATION is set. The body
+                                   # cannot carry a role: the new account is always the default
+                                   # clerk. It previously accepted one, so an unauthenticated
+                                   # {"role":"admin"} against any tenant slug returned an
+                                   # administrator's token.
+```
+
+### Users (accounts are granted, not claimed)
+```bash
+GET   /api/v1/users?active_only=   # directory for the delegate picker; requires users.view
+POST  /api/v1/users                # create an account in YOUR tenant; requires users.manage.
+                                   # {email, password (12+ chars), full_name?, role?} — audited
+                                   # with the role granted. This is how accounts are made now
+                                   # that self-registration is closed by default.
+PATCH /api/v1/users/{id}/role      # requires users.manage; never self-service; revokes the
+                                   # target's existing tokens
 ```
 
 ## Procure-to-Pay (added 2026-08)

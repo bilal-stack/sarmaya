@@ -11,9 +11,10 @@ from app.core.security import (
     decode_access_token,
 )
 from app.schemas.auth import LoginIn, Token, TokenWithUser, PasswordChange, ProfileUpdate
-from app.schemas.user import UserCreate, UserOut
+from app.schemas.user import RegistrationRequest, UserOut
 from app.models.user import User
 from app.models.tenant import Tenant
+from app.core.config import settings
 from app.core.roles import DEFAULT_ROLE, is_valid_role
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -55,10 +56,36 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 @router.post("/register", response_model=TokenWithUser, status_code=status.HTTP_201_CREATED)
 def register(
-    user_in: UserCreate,
+    user_in: RegistrationRequest,
     db: Session = Depends(get_db),
     tenant: str = Query("demo", description="Tenant slug; default 'demo'"),
 ):
+    """Self-service signup into an existing tenant.
+
+    Two things this endpoint must not do, both of which it used to.
+
+    It must not let the caller choose a role. `UserCreate` inherits `role`, so
+    an unauthenticated `{"role": "admin"}` against any tenant slug returned 201
+    with an administrator's token — remote takeover of any tenant whose slug
+    could be guessed, needing no isolation bypass at all. The body no longer
+    carries a role and the assignment below is unconditional.
+
+    It must not be open by default. Even at the default clerk role a stranger
+    can create vendors, raise invoices, prepare payment runs and import bank
+    statements — an accounts-payable system enrols staff, it does not accept
+    walk-ins. Deployments turn it on deliberately; administrators otherwise
+    create accounts through POST /users, where the act is permissioned and
+    audited.
+    """
+    if not settings.ALLOW_SELF_REGISTRATION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Self-registration is disabled. An administrator creates "
+                "accounts for this organisation."
+            ),
+        )
+
     # Resolve tenant
     tenant_obj = db.query(Tenant).filter(Tenant.slug == tenant).first()
     if not tenant_obj:
@@ -73,9 +100,9 @@ def register(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists for tenant")
 
     hashed = get_password_hash(user_in.password)
-    role = (user_in.role or DEFAULT_ROLE).lower()
-    if not is_valid_role(role):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
+    # Not negotiable by the caller. Anything above this is granted by someone
+    # who already holds users.manage.
+    role = DEFAULT_ROLE
     user = User(
         tenant_id=tenant_obj.id,
         email=user_in.email,

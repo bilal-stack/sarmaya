@@ -33,6 +33,13 @@ class Settings(BaseSettings):
 
     SQLALCHEMY_ECHO: bool = False
     
+    # Whether strangers may sign themselves into an existing tenant by naming
+    # its slug. Off by default: even at the default clerk role a self-registered
+    # user can create vendors, raise invoices, prepare payment runs and import
+    # bank statements. An accounts-payable system enrols staff; it does not take
+    # walk-ins. Administrators create accounts through POST /users.
+    ALLOW_SELF_REGISTRATION: bool = False
+
     # Security
     SECRET_KEY: str = "change-me-in-production-min-32-chars"
     ALGORITHM: str = "HS256"

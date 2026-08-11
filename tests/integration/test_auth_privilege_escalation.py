@@ -17,6 +17,7 @@ over HTTP — the service layer never sees where a value came from.
 import pytest
 
 from app.core.enums import UserRole
+from app.core.roles import DEFAULT_ROLE
 from app.models.user import User
 
 pytestmark = pytest.mark.integration
@@ -224,3 +225,145 @@ class TestAdminDemotionIsStillPossible:
 
         assert response.status_code == 200
         assert _role_of(db, target) == "manager"
+
+
+class TestRegistrationCannotGrantItselfAuthority:
+    """`PUT /auth/me?role=admin` was the first version of this bug. The second
+    was on the way in: `/auth/register` took `UserCreate`, which inherits
+    `role`, so an unauthenticated request could name its own.
+
+    Posting `{"role": "admin"}` at any tenant slug returned 201 with an
+    administrator's token — remote takeover of any tenant whose slug could be
+    guessed, needing no isolation bypass at all. Confirmed against a running
+    server before it was fixed.
+    """
+
+    @pytest.fixture
+    def open_registration(self, monkeypatch):
+        """Self-registration is off by default; these tests are about what it
+        does when a deployment turns it on."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ALLOW_SELF_REGISTRATION", True)
+        return settings
+
+    @pytest.fixture
+    def signup_client(self, db):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+        from app.core.database import get_db
+
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            yield TestClient(app)
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_a_requested_role_is_not_honoured(
+        self, signup_client, db, tenant, open_registration
+    ):
+        response = signup_client.post(
+            f"/api/v1/auth/register?tenant={tenant.slug}",
+            json={"email": "stranger@evil.test", "password": "Str0ngPassw0rd!",
+                  "full_name": "Stranger", "role": "admin"},
+        )
+
+        assert response.status_code == 201, response.text
+        created = db.query(User).filter(User.email == "stranger@evil.test").first()
+        role = str(getattr(created.role, "value", created.role)).lower()
+        assert role != "admin", "self-registration granted administrator rights"
+        assert role == DEFAULT_ROLE
+
+    def test_the_returned_token_is_not_an_admins(
+        self, signup_client, db, tenant, open_registration
+    ):
+        """The response hands back a working session, so the role inside it is
+        what an attacker would actually wield."""
+        response = signup_client.post(
+            f"/api/v1/auth/register?tenant={tenant.slug}",
+            json={"email": "stranger2@evil.test", "password": "Str0ngPassw0rd!",
+                  "role": "admin"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["user"]["role"] != "admin"
+
+    def test_registration_is_closed_unless_a_deployment_opens_it(
+        self, signup_client, db, tenant
+    ):
+        """Even at the clerk role a stranger could create vendors, raise
+        invoices and prepare payment runs."""
+        response = signup_client.post(
+            f"/api/v1/auth/register?tenant={tenant.slug}",
+            json={"email": "walkin@evil.test", "password": "Str0ngPassw0rd!"},
+        )
+        assert response.status_code == 403, response.text
+        assert db.query(User).filter(User.email == "walkin@evil.test").first() is None
+
+
+class TestAdministratorsCreateAccountsInstead:
+    """What closing self-registration replaces it with: an act by someone who
+    already holds users.manage, confined to their tenant, and audited."""
+
+    def test_an_admin_creates_a_user(self, client, db, make_user, as_user):
+        as_user(make_user(UserRole.ADMIN))
+
+        response = client.post("/api/v1/users", json={
+            "email": "New.Clerk@example.com", "password": "Str0ngPassw0rd!",
+            "full_name": "New Clerk", "role": "ap_clerk",
+        })
+
+        assert response.status_code == 201, response.text
+        assert response.json()["email"] == "new.clerk@example.com"
+
+    def test_a_clerk_cannot_create_users(self, client, db, make_user, as_user):
+        as_user(make_user(UserRole.AP_CLERK))
+
+        response = client.post("/api/v1/users", json={
+            "email": "sidekick@example.com", "password": "Str0ngPassw0rd!",
+            "role": "admin",
+        })
+
+        assert response.status_code == 403, response.text
+        assert db.query(User).filter(User.email == "sidekick@example.com").first() is None
+
+    def test_a_weak_password_is_refused(self, client, db, make_user, as_user):
+        as_user(make_user(UserRole.ADMIN))
+
+        response = client.post("/api/v1/users", json={
+            "email": "weak@example.com", "password": "short",
+        })
+
+        assert response.status_code == 422, response.text
+
+    def test_the_creation_is_audited_with_the_role_granted(
+        self, client, db, make_user, as_user
+    ):
+        from app.models.audit_log import AuditLog
+
+        as_user(make_user(UserRole.ADMIN))
+        response = client.post("/api/v1/users", json={
+            "email": "audited@example.com", "password": "Str0ngPassw0rd!",
+            "role": "cfo",
+        })
+        assert response.status_code == 201, response.text
+
+        entry = (
+            db.query(AuditLog)
+            .filter(AuditLog.object_id == response.json()["id"],
+                    AuditLog.action == "user_created")
+            .first()
+        )
+        assert entry is not None
+        assert entry.after_value["role"] == "cfo"
+
+    def test_a_duplicate_email_in_the_same_tenant_is_refused(
+        self, client, db, make_user, as_user
+    ):
+        admin = make_user(UserRole.ADMIN)
+        as_user(admin)
+
+        response = client.post("/api/v1/users", json={
+            "email": admin["email"], "password": "Str0ngPassw0rd!",
+        })
+        assert response.status_code == 400, response.text

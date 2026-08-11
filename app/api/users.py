@@ -7,10 +7,12 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user, get_db_session
 from app.models.user import User
-from app.schemas.user import UserOut
+from app.schemas.user import AdminUserCreate, UserOut
 from app.services.audit import log_audit
+from app.core.security import get_password_hash
 from app.core.roles import (
-    has_permission, is_valid_role, ADMIN, PERM_VIEW_USERS, PERM_MANAGE_USERS,
+    has_permission, is_valid_role, ADMIN, DEFAULT_ROLE,
+    PERM_VIEW_USERS, PERM_MANAGE_USERS,
 )
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -47,6 +49,75 @@ def list_users(
     if active_only:
         query = query.filter(User.is_active.is_(True))
     return query.order_by(User.email.asc()).all()
+
+
+@router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: AdminUserCreate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Create an account in the caller's tenant. Requires users.manage.
+
+    The counterpart to closing self-registration. Accounts in an
+    accounts-payable system are granted by someone accountable for the grant,
+    not claimed by whoever finds the signup page — so the act sits behind a
+    permission, is confined to the caller's own tenant, and is audited with the
+    role that was handed out.
+
+    Choosing the new user's role is allowed here precisely because the caller
+    already holds users.manage. That is the distinction the registration
+    endpoint failed to make.
+    """
+    if not has_permission(current_user["role"], PERM_MANAGE_USERS):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to manage users",
+        )
+
+    role = str(getattr(payload.role, "value", payload.role) or DEFAULT_ROLE).lower()
+    if not is_valid_role(role):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role"
+        )
+
+    email = payload.email.strip().lower()
+    # Scoped to the caller's tenant explicitly, for the same reason as the role
+    # change below: RLS is absent from any create_all database.
+    existing = (
+        db.query(User)
+        .filter(User.tenant_id == current_user["tenant_id"], User.email == email)
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with that email already exists in this organisation",
+        )
+
+    user = User(
+        tenant_id=current_user["tenant_id"],
+        email=email,
+        full_name=payload.full_name,
+        password=get_password_hash(payload.password),
+        role=role,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+
+    log_audit(
+        db=db,
+        tenant_id=current_user["tenant_id"],
+        user_id=current_user["id"],
+        object_type="user",
+        object_id=user.id,
+        action="user_created",
+        after_value={"email": user.email, "role": role},
+    )
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.patch("/{user_id}/role", response_model=UserOut)
