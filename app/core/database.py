@@ -8,13 +8,33 @@ from app.models.base import mapper_registry
 
 logger = logging.getLogger(__name__)
 
+# Every timestamp column in this schema is TIMESTAMP WITHOUT TIME ZONE and holds
+# UTC. Application code writes them with utc_now(), which returns an *aware*
+# datetime — and Postgres converts an aware value into the session's zone before
+# dropping the offset to fit a naive column. On a server set to Asia/Karachi
+# that stored local time in columns everything else reads as UTC: released_at
+# and created_at on the same payment row landed five hours apart, and the audit
+# log's timestamp disagreed with its own created_at.
+#
+# DR-012 fixed the mirror image of this on the server-side defaults; this is the
+# client-side half. Pinning the session's zone corrects every write at once,
+# rather than depending on ~40 call sites remembering to strip the offset — the
+# same argument as DR-013. Server defaults are already zone-independent
+# (timezone('utc', now())), so they are unaffected.
+#
+# Exported so the test fixtures build their engine the same way: a database
+# session in this project speaks UTC, and that must not be a property only the
+# production engine happens to have.
+ENGINE_CONNECT_ARGS = {"options": "-c timezone=UTC"}
+
 # Create engine
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,  # Verify connections before using
     pool_size=10,
     max_overflow=20,
-    echo=settings.DEBUG  # Log SQL queries in debug mode
+    echo=settings.DEBUG,  # Log SQL queries in debug mode
+    connect_args=ENGINE_CONNECT_ARGS,
 )
 engine.echo = False
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

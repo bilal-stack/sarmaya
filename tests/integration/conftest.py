@@ -45,8 +45,13 @@ def db_engine():
     from sqlalchemy import create_engine
     from sqlalchemy.exc import OperationalError
 
+    from app.core.database import ENGINE_CONNECT_ARGS
+
     url = _resolve_test_db_url()
-    engine = create_engine(url, pool_pre_ping=True)
+    # Same connect args as the application engine, deliberately imported rather
+    # than repeated: they pin the session to UTC, and a test engine that did not
+    # would silently pass timestamps the real one would corrupt.
+    engine = create_engine(url, pool_pre_ping=True, connect_args=ENGINE_CONNECT_ARGS)
     try:
         conn = engine.connect()
         conn.close()

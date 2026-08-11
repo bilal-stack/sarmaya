@@ -59,3 +59,46 @@ class TestTimestampDefaultsAreUTC:
             f"server clock {server_now} is outside the application window "
             f"{before}..{after} — the database is writing a different zone"
         )
+
+
+class TestApplicationWrittenTimestampsAreUTC:
+    """The other half of the same defect.
+
+    `utc_now()` returns an *aware* datetime, and Postgres converts an aware
+    value into the session's zone before dropping the offset to fit a naive
+    column. Fixing the server defaults (DR-012) left this untouched: on a
+    server set to Asia/Karachi, `payments.released_at` and `payments.created_at`
+    on the same row were written five hours apart, and `audit_logs.timestamp`
+    disagreed with its own `created_at`.
+
+    Found by comparing the two on real rows, not by reading the code — the
+    values type-check, serialise and display without complaint.
+    """
+
+    def test_the_session_is_pinned_to_utc(self, db):
+        """The fix, at the only place that covers every write."""
+        assert db.execute(text("SHOW TimeZone")).scalar() == "UTC"
+
+    def test_an_aware_timestamp_round_trips_as_utc(self, db):
+        """The behaviour the pin buys, exercised end to end.
+
+        Without it this stores local time: the value comes back shifted by the
+        server's offset, silently, in a column every reader treats as UTC.
+        """
+        written = utc_now()
+        stored = db.execute(
+            text("SELECT CAST(:value AS timestamp without time zone)"),
+            {"value": written},
+        ).scalar()
+
+        assert stored == written.replace(tzinfo=None), (
+            f"wrote {written} and the database stored {stored} — the session "
+            "converted it into another zone on the way in"
+        )
+
+    def test_the_application_engine_carries_the_pin(self, db):
+        """Guards production directly. The fixture engine imports these args,
+        so a test-only pin would otherwise let the real one drift."""
+        from app.core.database import ENGINE_CONNECT_ARGS
+
+        assert "timezone=UTC" in ENGINE_CONNECT_ARGS.get("options", "")
