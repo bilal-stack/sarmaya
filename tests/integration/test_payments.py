@@ -378,3 +378,40 @@ class TestAnInstructionMustBePayable:
             assert cells[-2].strip(), f"no currency on the line: {row}"
             # IBAN or account number — something to pay into.
             assert cells[5].strip() or cells[4].strip(), f"nowhere to pay: {row}"
+
+
+class TestWhoActedIsLegible:
+    """Maker-checker is the point of a payment run, so the screen has to name
+    the two people. Resolved server-side rather than from the user directory:
+    reading that needs users.view, which the clerks who prepare runs
+    deliberately do not have — so the run would show them two raw UUIDs."""
+
+    def test_the_preparer_is_named(self, db, setup):
+        payment = _prepared(db, setup, [_approved_invoice(db, setup)])
+        assert payment.prepared_by_name
+        # A name or email, never the raw id the screen would otherwise show.
+        assert payment.prepared_by_name != str(payment.prepared_by)
+
+    def test_the_releaser_is_named_once_released(self, db, setup):
+        service = PaymentService(db)
+        payment = _prepared(db, setup, [_approved_invoice(db, setup)])
+        service.submit_for_release(payment.id, setup["clerk"])
+        released = service.release_payment(payment.id, setup["cfo"])
+
+        assert released.released_by_name
+        assert released.released_by_name != released.prepared_by_name
+
+    def test_a_preparer_sees_both_names_without_directory_access(self, db, setup):
+        """The clerk who prepared it has no users.view, and must still be able
+        to read who released their run."""
+        from app.core.roles import has_permission, PERM_VIEW_USERS
+
+        assert has_permission(setup["clerk"]["role"], PERM_VIEW_USERS) is False
+
+        service = PaymentService(db)
+        payment = _prepared(db, setup, [_approved_invoice(db, setup)])
+        service.submit_for_release(payment.id, setup["clerk"])
+        service.release_payment(payment.id, setup["cfo"])
+
+        seen = service.get_payment(payment.id, setup["clerk"])
+        assert seen.prepared_by_name and seen.released_by_name

@@ -57,14 +57,17 @@ class PaymentService:
         payment = self.db.query(Payment).filter(Payment.id == payment_id).first()
         if not payment:
             raise ValueError("Payment not found")
-        return payment
+        return self._with_names(payment)
 
     def list_payments(self, current_user: dict, state: Optional[str] = None) -> List[Payment]:
         self._require(current_user, PERM_VIEW_PAYMENT, "view payments")
         query = self.db.query(Payment)
         if state:
             query = query.filter(Payment.current_state == state)
-        return query.order_by(Payment.created_at.desc()).limit(200).all()
+        return [
+            self._with_names(p)
+            for p in query.order_by(Payment.created_at.desc()).limit(200).all()
+        ]
 
     def payable_invoices(self, current_user: dict) -> List[Invoice]:
         """Approved invoices not already claimed by an open or released run.
@@ -171,7 +174,7 @@ class PaymentService:
         )
         self.db.commit()
         self.db.refresh(payment)
-        return payment
+        return self._with_names(payment)
 
     def submit_for_release(self, payment_id: UUID, current_user: dict) -> Payment:
         self._require(current_user, PERM_PREPARE_PAYMENT, "submit payments for release")
@@ -196,7 +199,7 @@ class PaymentService:
         )
         self.db.commit()
         self.db.refresh(payment)
-        return payment
+        return self._with_names(payment)
 
     def release_payment(self, payment_id: UUID, current_user: dict) -> Payment:
         """Authorise the run and settle its invoices.
@@ -284,7 +287,7 @@ class PaymentService:
         )
         self.db.commit()
         self.db.refresh(payment)
-        return payment
+        return self._with_names(payment)
 
     def reject_payment(self, payment_id: UUID, reason: str, current_user: dict) -> Payment:
         can_release, _ = resolve_permission(self.db, current_user, PERM_RELEASE_PAYMENT)
@@ -316,9 +319,28 @@ class PaymentService:
         )
         self.db.commit()
         self.db.refresh(payment)
-        return payment
+        return self._with_names(payment)
 
     # --- helpers -------------------------------------------------------------
+
+    def _with_names(self, payment: Payment) -> Payment:
+        """Attach preparer and releaser names for display.
+
+        Set on the instance rather than joined in every query: it is a
+        presentation concern, and resolving it here means the screen never has
+        to hold users.view just to show who authorised a run.
+        """
+        from app.models.user import User
+
+        ids = {payment.prepared_by, payment.released_by} - {None}
+        if ids:
+            people = {
+                u.id: (u.full_name or u.email)
+                for u in self.db.query(User).filter(User.id.in_(ids)).all()
+            }
+            payment.prepared_by_name = people.get(payment.prepared_by)
+            payment.released_by_name = people.get(payment.released_by)
+        return payment
 
     def _get(self, payment_id: UUID) -> Payment:
         payment = self.db.query(Payment).filter(Payment.id == payment_id).first()

@@ -71,6 +71,12 @@ class PaymentResponse(BaseModel):
     correlation_id: Optional[UUID] = None
     prepared_by: UUID
     released_by: Optional[UUID] = None
+    #: Resolved server-side. Maker-checker is the point of a payment run, and
+    #: two raw UUIDs prove nothing to the person reading the screen — while
+    #: reading them from the user directory would need users.view, which the
+    #: clerks who prepare runs deliberately do not have.
+    prepared_by_name: Optional[str] = None
+    released_by_name: Optional[str] = None
     released_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
     bank_file_hash: Optional[str] = None
@@ -89,6 +95,8 @@ class PaymentListResponse(BaseModel):
     current_state: PaymentState
     prepared_by: UUID
     released_by: Optional[UUID] = None
+    prepared_by_name: Optional[str] = None
+    released_by_name: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
