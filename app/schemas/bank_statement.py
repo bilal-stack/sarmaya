@@ -125,6 +125,11 @@ class BankStatementListResponse(BaseModel):
     statement_date: Optional[date] = None
     closing_balance: Optional[Decimal] = None
     currency: Optional[Currency] = None
+    #: A CSV carries no statement identifier of its own, so every CSV import
+    #: reports the same reference and the list cannot tell two files apart.
+    #: The filename is the only thing distinguishing them to the person who
+    #: downloaded them.
+    original_filename: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

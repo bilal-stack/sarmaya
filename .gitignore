@@ -265,3 +265,4 @@ document_ai_full_dump.txt
 *.pdf
 uploads/
 demo_assets/
+.claude/launch.json
