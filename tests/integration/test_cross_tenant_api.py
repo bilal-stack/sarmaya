@@ -415,3 +415,111 @@ class TestEvidencePacksAreNotSealedOverNothing:
         response = client.post(f"/api/v1/audit/evidence-pack/{correlation_id}")
         assert response.status_code == 200, response.text
         assert response.json()["counts"]["objects"] >= 1
+
+
+class TestAutopilotActsOnlyOnItsOwnTenant:
+    """The write with the widest blast radius in the system.
+
+    Autopilot approves every eligible invoice it finds in one call, so a
+    missing tenant boundary here does not leak one record — it approves another
+    company's payables. The scan relies on the session's bound tenant rather
+    than naming it, which is the same shape as the provisioning bug above, so
+    it is worth pinning down rather than reasoning about.
+
+    This went untested for a while because the endpoint refuses to run unless
+    autopilot is enabled, and probes that never got past that refusal recorded
+    a pass. Enabling it for *both* tenants is the point of the setup below.
+    """
+
+    ENABLED = {
+        "enabled": True, "max_auto_approve_amount": 5000,
+        "require_active_vendor": True, "require_no_duplicate": True,
+    }
+
+    @pytest.fixture
+    def eligible_invoice(self, db, insider):
+        """A pending invoice in the caller's tenant that autopilot may approve."""
+        from app.models.vendor import Vendor as VendorModel
+
+        vendor = VendorModel(
+            id=uuid.uuid4(), tenant_id=insider["tenant_id"],
+            legal_name="Own Vendor", status=VendorStatus.ACTIVE,
+            created_by=insider["id"],
+        )
+        db.add(vendor)
+        db.flush()
+
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=insider["tenant_id"], vendor_id=vendor.id,
+            vendor_name=vendor.legal_name, invoice_number="OWN-AUTO-001",
+            invoice_date=date(2026, 8, 4), total_amount=Decimal("1000"),
+            current_state=InvoiceState.PENDING_APPROVAL, created_by=insider["id"],
+        )
+        db.add(invoice)
+        db.flush()
+        return invoice
+
+    @pytest.fixture
+    def outsider_eligible(self, db, outsider):
+        """The same invoice, in the other tenant, equally eligible."""
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=outsider["tenant_id"],
+            vendor_id=outsider["vendor"].id, vendor_name=outsider["vendor"].legal_name,
+            invoice_number="OUTSIDER-AUTO-001",
+            invoice_date=date(2026, 8, 4), total_amount=Decimal("1000"),
+            current_state=InvoiceState.PENDING_APPROVAL,
+            created_by=outsider["admin_id"],
+        )
+        db.add(invoice)
+        db.flush()
+        return invoice
+
+    def _enable(self, client):
+        response = client.put("/api/v1/config/autopilot", json=self.ENABLED)
+        assert response.status_code == 200, response.text
+
+    def test_a_run_approves_only_its_own_invoices(
+        self, client, db, insider, eligible_invoice, outsider_eligible
+    ):
+        self._enable(client)
+
+        response = client.post("/api/v1/autopilot/run", json={})
+        assert response.status_code == 200, response.text
+        approved = {a["invoice_number"] for a in response.json()["approved"]}
+
+        assert "OWN-AUTO-001" in approved
+        assert "OUTSIDER-AUTO-001" not in approved, (
+            "autopilot approved another tenant's payables"
+        )
+
+    def test_the_other_tenants_invoice_is_left_pending(
+        self, client, db, insider, eligible_invoice, outsider_eligible
+    ):
+        """Checked in the database, not just in the response: an approval that
+        happened but went unreported is the worse outcome."""
+        self._enable(client)
+        client.post("/api/v1/autopilot/run", json={})
+
+        db.refresh(outsider_eligible)
+        state = str(getattr(
+            outsider_eligible.current_state, "value", outsider_eligible.current_state
+        )).lower()
+        assert state == InvoiceState.PENDING_APPROVAL.value
+        assert outsider_eligible.approved_by is None
+
+    def test_the_preview_does_not_see_them_either(
+        self, client, insider, eligible_invoice, outsider_eligible
+    ):
+        self._enable(client)
+
+        response = client.get("/api/v1/autopilot/preview")
+        assert response.status_code == 200, response.text
+        assert "OUTSIDER-AUTO-001" not in response.text
+
+    def test_cannot_revert_another_tenants_auto_approval(
+        self, client, db, insider, eligible_invoice, outsider
+    ):
+        response = client.post(
+            f"/api/v1/autopilot/{outsider['invoice'].id}/revert", json={}
+        )
+        assert response.status_code >= 400, response.text
