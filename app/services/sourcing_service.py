@@ -472,9 +472,14 @@ class SourcingService:
 
         status = getattr(vendor.status, "value", vendor.status)
         if status != VendorStatus.ACTIVE.value:
+            # Says the actual status rather than assuming "blocked": an
+            # unverified vendor and a blocked one need different responses
+            # from the buyer, and telling them the wrong one sends them to
+            # argue with the wrong person.
             raise ValueError(
-                f"{vendor.legal_name} is {status}, not active. Inviting a "
-                "blocked vendor to quote is how a blocked vendor gets work."
+                f"{vendor.legal_name} is {status}, not active. Only an active "
+                "vendor may be invited to quote — inviting one that is not is "
+                "how a vendor nobody approved ends up winning work."
             )
         if any(v.vendor_id == vendor.id for v in rfq.invited_vendors):
             return
