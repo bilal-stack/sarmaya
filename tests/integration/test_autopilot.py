@@ -254,3 +254,118 @@ class TestAutopilotCannotExceedTheRunnersOwnAuthority:
         self._pending(db, tenant, admin, "900000", "CFO-OK-001")
 
         assert AutopilotService(db).run(cfo)["approved_count"] == 1
+
+
+class TestAutopilotRespectsMakerChecker:
+    """Autopilot calls transition_state directly rather than going through
+    InvoiceService.approve_invoice, so nothing in it consulted the rule that
+    refuses approving what you created.
+
+    Unreachable as the roles stand — only `admin` holds both invoices.create
+    and invoices.approve, and DR-005 exempts admins from SoD anyway. It goes
+    live the moment another role gains both, which the Build Book's HR and
+    procurement administration roles plausibly will, and whoever grants that
+    permission will be thinking about who may raise invoices rather than about
+    a bulk-approval path that quietly skips maker-checker.
+
+    So the condition is created here deliberately: a manager is given
+    invoices.create for the duration of the test, which is exactly the change
+    that would make this real.
+    """
+
+    @pytest.fixture
+    def manager_who_can_also_raise(self, monkeypatch):
+        """The permission grant that makes the gap reachable."""
+        from app.core.roles import (
+            MANAGER, ROLE_PERMISSIONS, PERM_CREATE_INVOICE,
+        )
+
+        monkeypatch.setitem(
+            ROLE_PERMISSIONS, MANAGER,
+            [*ROLE_PERMISSIONS[MANAGER], PERM_CREATE_INVOICE],
+        )
+
+    def _enabled(self, db, admin):
+        AutopilotService(db).set_config(
+            AutopilotConfig(
+                enabled=True, max_auto_approve_amount=50_000,
+                require_active_vendor=True, require_no_duplicate=True,
+            ),
+            admin,
+        )
+
+    def _pending_raised_by(self, db, tenant, raiser, number):
+        vendor = Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="SoD Vendor",
+            status=VendorStatus.ACTIVE, created_by=raiser["id"],
+        )
+        db.add(vendor)
+        db.flush()
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=tenant.id, vendor_id=vendor.id,
+            vendor_name=vendor.legal_name, invoice_number=number,
+            invoice_date=date(2026, 8, 1), total_amount=Decimal("1000"),
+            current_state=InvoiceState.PENDING_APPROVAL,
+            created_by=raiser["id"],
+        )
+        db.add(invoice)
+        db.flush()
+        return invoice
+
+    def test_it_will_not_approve_an_invoice_the_runner_raised(
+        self, db, tenant, make_user, manager_who_can_also_raise
+    ):
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        self._enabled(db, admin)
+        own = self._pending_raised_by(db, tenant, manager, "OWN-SOD-001")
+
+        result = AutopilotService(db).run(manager)
+
+        assert result["approved_count"] == 0
+        db.refresh(own)
+        assert str(
+            getattr(own.current_state, "value", own.current_state)
+        ).lower() == InvoiceState.PENDING_APPROVAL.value
+        assert own.approved_by is None
+
+    def test_the_preview_says_why(self, db, tenant, make_user, manager_who_can_also_raise):
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        self._enabled(db, admin)
+        self._pending_raised_by(db, tenant, manager, "OWN-SOD-002")
+
+        preview = AutopilotService(db).preview(manager)
+        reasons = " ".join(c["reason"] for c in preview["candidates"])
+        assert "someone other than whoever created it" in reasons
+
+    def test_someone_elses_invoice_still_runs(
+        self, db, tenant, make_user, manager_who_can_also_raise
+    ):
+        """The control: the bound must not disable autopilot altogether."""
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        clerk = make_user(UserRole.AP_CLERK)
+        self._enabled(db, admin)
+        theirs = self._pending_raised_by(db, tenant, clerk, "THEIRS-SOD-001")
+
+        result = AutopilotService(db).run(manager)
+
+        assert result["approved_count"] == 1
+        db.refresh(theirs)
+        assert str(
+            getattr(theirs.current_state, "value", theirs.current_state)
+        ).lower() == InvoiceState.APPROVED.value
+
+    def test_an_admin_is_still_exempt(self, db, tenant, make_user):
+        """DR-005's carve-out, so a one-person tenant keeps working — and so
+        this behaves exactly as the manual approval path does."""
+        admin = make_user(UserRole.ADMIN)
+        self._enabled(db, admin)
+        own = self._pending_raised_by(db, tenant, admin, "ADMIN-SOD-001")
+
+        assert AutopilotService(db).run(admin)["approved_count"] == 1
+        db.refresh(own)
+        assert str(
+            getattr(own.current_state, "value", own.current_state)
+        ).lower() == InvoiceState.APPROVED.value

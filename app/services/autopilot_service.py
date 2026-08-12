@@ -9,6 +9,7 @@ from app.models.invoice import Invoice
 from app.models.audit_log import AuditLog
 from app.services.invoice_service import InvoiceService
 from app.services.workflow import transition_state
+from app.services import sod
 from app.services.audit import log_audit
 from app.services.config_versioning import record_version, TYPE_AUTOPILOT
 from app.schemas.autopilot import AutopilotConfig
@@ -259,6 +260,24 @@ class AutopilotService:
         allowed, why_not = can_approve_amount(current_user.get("role", ""), amount)
         if not allowed:
             return False, why_not
+        # Maker-checker, for the same reason and by the same rule as the manual
+        # path: autopilot calls transition_state directly rather than going
+        # through InvoiceService.approve_invoice, so nothing here consulted the
+        # SoD rule that refuses approving what you created.
+        #
+        # Not reachable as the roles stand — only `admin` holds both
+        # invoices.create and invoices.approve, and DR-005 exempts admins from
+        # SoD anyway, so this returns False for them exactly as the manual path
+        # does. It goes live the moment another role gains both, which the
+        # Build Book's HR and procurement administration roles plausibly will,
+        # and the person granting that permission will be thinking about who may
+        # raise invoices, not about a bulk-approval path that quietly skips
+        # maker-checker.
+        if sod.violates_self_invoice_approval(invoice, current_user):
+            return False, (
+                "Raised by the person running autopilot; an invoice must be "
+                "approved by someone other than whoever created it."
+            )
         return True, (
             f"Within autopilot bounds (amount {amount:,.0f} <= "
             f"{cfg.max_auto_approve_amount:,.0f}, active vendor, no duplicate)."
