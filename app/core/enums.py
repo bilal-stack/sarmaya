@@ -24,6 +24,46 @@ class InvoiceState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class RequisitionState(str, Enum):
+    """Purchase requisition workflow states.
+
+    A requisition is a request, so it ends where it stops being one: `approved`
+    means the need is authorised and may be sourced, and `converted` means an
+    order was actually raised against it. The two are separate because an
+    approved requisition that nobody ever ordered is a real and interesting
+    state — it is budget someone was told they could spend and did not.
+    """
+    DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    CONVERTED = "converted"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
+class RFQState(str, Enum):
+    """Request-for-quotation states.
+
+    `closed` is the point of no return for the bidders: quoting is over and no
+    quote may be added or altered after it, because from here the field is
+    known. `awarded` records that a winner was chosen.
+    """
+    DRAFT = "draft"
+    ISSUED = "issued"
+    CLOSED = "closed"
+    AWARDED = "awarded"
+    CANCELLED = "cancelled"
+
+
+class QuoteState(str, Enum):
+    """States of a single vendor's quote."""
+    RECEIVED = "received"
+    SHORTLISTED = "shortlisted"
+    AWARDED = "awarded"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+
+
 class PurchaseOrderState(str, Enum):
     """Purchase order workflow states.
 

@@ -722,6 +722,57 @@ The full chain: order → receive → match → approve → pay → reconcile. E
 is a separate authority, so no single person can carry a spend from request to
 settlement.
 
+### Requisitions (`/requisitions`) — the request that justifies an order
+
+```bash
+GET  /api/v1/requisitions?state=       # list (requisitions.view)
+POST /api/v1/requisitions              # {title, justification, budget_code?, department?,
+                                       #  needed_by?, lines[{description, quantity,
+                                       #  estimated_unit_price}]}
+                                       # No vendor: naming one here would let the requester
+                                       # pre-select the winner before anyone has quoted.
+                                       # Mints the correlation id the whole chain inherits.
+GET  /api/v1/requisitions/{id}
+POST /api/v1/requisitions/{id}/submit  # guards: needs lines and a real justification
+POST /api/v1/requisitions/{id}/approve # requisitions.approve; SoD refuses the requester;
+                                       # the approval matrix's amount limits apply. The
+                                       # approved estimate is the ceiling for any order.
+POST /api/v1/requisitions/{id}/reject  # {"reason": "..."}
+POST /api/v1/requisitions/{id}/cancel  # {"reason": "..."}
+```
+
+### Sourcing (`/rfqs`) — tender, quotes, award
+
+```bash
+GET  /api/v1/rfqs?state=               # list
+POST /api/v1/rfqs                      # {requisition_id, title?, closes_at?, vendor_ids[]}
+                                       # requisition must be APPROVED; inherits its chain
+GET  /api/v1/rfqs/{id}
+POST /api/v1/rfqs/{id}/vendors         # {vendor_id} — blocked vendors refused
+POST /api/v1/rfqs/{id}/issue           # needs >= 2 invited vendors; one quote is not a
+                                       # comparison. For a single source, raise the PO direct.
+POST /api/v1/rfqs/{id}/quotes          # {vendor_id, lead_time_days?, payment_terms?,
+                                       #  is_compliant?, lines[]} — invited vendors only,
+                                       #  one quote each, captured_by records who typed it
+POST /api/v1/rfqs/{id}/close           # QUOTES LOCK HERE. Nothing may be added or altered
+                                       # afterwards, by anyone. Snapshots the field.
+GET  /api/v1/rfqs/{id}/comparison      # side by side + lowest COMPLIANT quote, who was
+                                       # invited and never answered, and whether the market
+                                       # came in over the approved estimate
+POST /api/v1/rfqs/{id}/award           # {quote_id, justification?} — sourcing.award, which
+                                       # the buyer who ran the tender does NOT hold.
+                                       # Anything but the lowest compliant quote requires a
+                                       # written reason; stored with the figure it beat.
+POST /api/v1/rfqs/{id}/convert         # raise the PO. Refused above the approved estimate;
+                                       # marks the requisition converted so one approval
+                                       # cannot cover two orders. Carries the chain through.
+POST /api/v1/rfqs/{id}/cancel          # {"reason": "..."}
+```
+
+> **Roles as shipped:** clerk raises the need and runs the tender; manager/CFO
+> approve the need and award. No single person can carry a purchase from "I want
+> this" to "this vendor wins".
+
 ### Purchase orders (`/purchase-orders`)
 ```bash
 GET    /api/v1/purchase-orders?state=       # list

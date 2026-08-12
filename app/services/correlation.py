@@ -91,10 +91,12 @@ class CorrelationService:
                 objects.append({
                     "object_type": object_type,
                     "object_id": row.id,
-                    "reference": getattr(row, "invoice_number", None)
-                    or getattr(row, "po_number", None)
-                    or getattr(row, "grn_number", None)
-                    or str(row.id),
+                    # Each model declares its own REFERENCE_FIELD rather than
+                    # this keeping a chain of getattr fallbacks that every new
+                    # module has to remember to extend — which payments had
+                    # already failed to, so a payment showed as a raw UUID in
+                    # the story it belonged to.
+                    "reference": self._reference(row),
                     # A goods receipt has no state — it records that something
                     # arrived rather than moving through a workflow.
                     "state": getattr(
@@ -168,3 +170,18 @@ class CorrelationService:
             "total_events": len(events),
             "events": events,
         }
+
+    @staticmethod
+    def _reference(row) -> str:
+        """How a record names itself in the story.
+
+        Read from the model's own REFERENCE_FIELD so a new module joins the
+        chain legibly the moment it declares one, rather than appearing as a
+        UUID until somebody remembers to extend a list here.
+        """
+        field = getattr(type(row), "REFERENCE_FIELD", None)
+        if field:
+            value = getattr(row, field, None)
+            if value:
+                return str(value)
+        return str(row.id)

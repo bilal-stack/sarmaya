@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse
-from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot, delegations, users, purchase_orders, payments, bank_statements
+from app.api import auth, invoices, dashboard, vendors, conversation, audit, config, inbox, autopilot, delegations, users, requisitions, sourcing, purchase_orders, payments, bank_statements
 import logging
 import uuid
 from app.utils.datetime_helpers import utc_now
@@ -55,6 +55,8 @@ api_v1.include_router(autopilot.router)
 api_v1.include_router(delegations.router)
 api_v1.include_router(users.router)
 api_v1.include_router(purchase_orders.router)
+api_v1.include_router(requisitions.router)
+api_v1.include_router(sourcing.router)
 api_v1.include_router(payments.router)
 api_v1.include_router(bank_statements.router)
 

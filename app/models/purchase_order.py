@@ -32,6 +32,9 @@ class PurchaseOrder(BaseModel):
     #: How this module names itself in the audit trail and correlation chain.
     OBJECT_TYPE = "purchase_order"
 
+    #: How this record names itself in a correlation chain.
+    REFERENCE_FIELD = "po_number"
+
     tenant_id = Column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False, index=True,

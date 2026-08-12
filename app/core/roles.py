@@ -21,6 +21,18 @@ PERM_APPROVE_INVOICE = "invoices.approve"
 PERM_REJECT_INVOICE = "invoices.reject"
 PERM_MARK_PAID_INVOICE = "invoices.mark_paid"
 
+# Requisitions and sourcing. Asking for something, choosing who supplies it,
+# and committing the company to buy are three different authorities. Anyone may
+# raise a requisition — that is the point, it is how a need enters the system —
+# but approving one, running a tender and awarding it are each held separately,
+# so no single person can carry a purchase from "I want this" to "this vendor
+# wins" unobserved.
+PERM_CREATE_REQUISITION = "requisitions.create"
+PERM_VIEW_REQUISITION = "requisitions.view"
+PERM_APPROVE_REQUISITION = "requisitions.approve"
+PERM_MANAGE_SOURCING = "sourcing.manage"      # run an RFQ, capture quotes
+PERM_AWARD_SOURCING = "sourcing.award"        # pick the winner
+
 # Purchase orders. Separate from invoice permissions on purpose: buying and
 # paying are different authorities, and letting one imply the other would
 # undo segregation of duties across the two modules.
@@ -66,6 +78,12 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
         PERM_MARK_PAID_INVOICE,
+        # Requisitions and sourcing - ALL
+        PERM_CREATE_REQUISITION,
+        PERM_VIEW_REQUISITION,
+        PERM_APPROVE_REQUISITION,
+        PERM_MANAGE_SOURCING,
+        PERM_AWARD_SOURCING,
         # Purchase orders - ALL
         PERM_CREATE_PO,
         PERM_VIEW_PO,
@@ -97,6 +115,12 @@ ROLE_PERMISSIONS = {
         PERM_CREATE_INVOICE,
         PERM_VIEW_INVOICE,
         PERM_UPDATE_INVOICE,
+        # Raises the request and runs the tender, but neither approves the
+        # need nor picks the winner — the buyer who collects the quotes must
+        # not also be the one who decides which of them wins.
+        PERM_CREATE_REQUISITION,
+        PERM_VIEW_REQUISITION,
+        PERM_MANAGE_SOURCING,
         # Raises orders and records what arrives, but never approves the spend.
         PERM_CREATE_PO,
         PERM_VIEW_PO,
@@ -117,6 +141,11 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_INVOICE,
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
+        # Approves the need and picks the winner; does not run the tender.
+        PERM_CREATE_REQUISITION,
+        PERM_VIEW_REQUISITION,
+        PERM_APPROVE_REQUISITION,
+        PERM_AWARD_SOURCING,
         PERM_VIEW_PO,
         PERM_APPROVE_PO,
         PERM_MANAGE_VENDORS,
@@ -124,6 +153,9 @@ ROLE_PERMISSIONS = {
     ],
     CFO: [
         PERM_VIEW_INVOICE,
+        PERM_VIEW_REQUISITION,
+        PERM_APPROVE_REQUISITION,
+        PERM_AWARD_SOURCING,
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
         PERM_MARK_PAID_INVOICE,
@@ -141,11 +173,14 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_INVOICE,
         PERM_APPROVE_INVOICE,
         PERM_REJECT_INVOICE,
+        PERM_VIEW_REQUISITION,
+        PERM_APPROVE_REQUISITION,
         PERM_VIEW_PO,
         PERM_APPROVE_PO,
     ],
     AUDITOR: [
         PERM_VIEW_INVOICE,
+        PERM_VIEW_REQUISITION,
         PERM_VIEW_PO,
         PERM_VIEW_PAYMENT,
         PERM_VIEW_BANK_STATEMENT,

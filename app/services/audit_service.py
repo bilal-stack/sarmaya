@@ -14,6 +14,7 @@ from app.core.roles import (
     PERM_VIEW_PO,
     PERM_VIEW_PAYMENT,
     PERM_VIEW_BANK_STATEMENT,
+    PERM_VIEW_REQUISITION,
 )
 
 # object_type -> permission required to view its timeline. Live Audit Mode is
@@ -30,6 +31,10 @@ _VIEW_PERMISSION = {
     "goods_receipt": PERM_VIEW_PO,
     "payment": PERM_VIEW_PAYMENT,
     "bank_statement": PERM_VIEW_BANK_STATEMENT,
+    "requisition": PERM_VIEW_REQUISITION,
+    # A tender is part of the requisition's story.
+    "rfq": PERM_VIEW_REQUISITION,
+    "quote": PERM_VIEW_REQUISITION,
 }
 
 

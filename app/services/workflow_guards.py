@@ -66,6 +66,59 @@ def _po_has_lines(db, obj):
     return True, ""
 
 
+def _requisition_has_lines(db, obj):
+    """A requisition with no lines asks for nothing, so there is nothing for an
+    approver to decide on and nothing for a quote to price."""
+    lines = getattr(obj, "lines", None) or []
+    if not lines:
+        return False, "Requisition has no lines"
+    total = getattr(obj, "estimated_amount", None)
+    if total is None or total <= 0:
+        return False, "Requisition estimate must be greater than zero"
+    return True, ""
+
+
+def _requisition_justified(db, obj):
+    """The justification is what the approver is actually deciding on.
+
+    Enforced as a guard rather than trusted to the form, because an approval
+    granted against an empty reason is the record an auditor will ask about
+    first — and by then the reason is unrecoverable.
+    """
+    reason = (getattr(obj, "justification", None) or "").strip()
+    if len(reason) < 10:
+        return False, (
+            "Requisition needs a justification an approver can act on "
+            "(at least 10 characters)"
+        )
+    return True, ""
+
+
+def _rfq_has_invited_vendors(db, obj):
+    """An RFQ issued to nobody cannot produce a competitive award.
+
+    Two is the minimum that makes the word "comparison" mean anything; a
+    single-source purchase is legitimate but is a different decision, and
+    should be raised as a directly-awarded order rather than dressed as a
+    tender.
+    """
+    invited = getattr(obj, "invited_vendors", None) or []
+    if len(invited) < 2:
+        return False, (
+            "An RFQ needs at least two invited vendors to be a comparison; "
+            "for a single source, raise the order directly instead"
+        )
+    return True, ""
+
+
+def _rfq_has_quotes(db, obj):
+    """Awarding with no quote on file is an award to nobody."""
+    quotes = getattr(obj, "quotes", None) or []
+    if not quotes:
+        return False, "No quotes were received, so there is nothing to award"
+    return True, ""
+
+
 def _payment_has_lines(db, obj):
     """A run with no lines pays nobody and would export an empty bank file."""
     lines = getattr(obj, "lines", None) or []
@@ -148,6 +201,10 @@ def _payment_lines_still_payable(db, obj):
 
 GUARD_REGISTRY = {
     "required_fields_present": _required_fields_present,
+    "requisition_has_lines": _requisition_has_lines,
+    "requisition_justified": _requisition_justified,
+    "rfq_has_invited_vendors": _rfq_has_invited_vendors,
+    "rfq_has_quotes": _rfq_has_quotes,
     "po_has_lines": _po_has_lines,
     "payment_has_lines": _payment_has_lines,
     "payment_lines_still_payable": _payment_lines_still_payable,

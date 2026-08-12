@@ -13,6 +13,8 @@ from app.models.ai_action_log import AIActionLog
 from app.models.policy_eval import PolicyEval
 from app.models.evidence_pack import EvidencePack
 from app.models.delegation import Delegation
+from app.models.requisition import PurchaseRequisition, PurchaseRequisitionLine
+from app.models.rfq import RFQ, RFQVendor, Quote, QuoteLine
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from app.models.goods_receipt import GoodsReceipt, GoodsReceiptLine
 from app.models.payment import Payment, PaymentLine
@@ -36,6 +38,12 @@ __all__ = [
     "PolicyEval",
     "EvidencePack",
     "Delegation",
+    "PurchaseRequisition",
+    "PurchaseRequisitionLine",
+    "RFQ",
+    "RFQVendor",
+    "Quote",
+    "QuoteLine",
     "PurchaseOrder",
     "PurchaseOrderLine",
     "GoodsReceipt",

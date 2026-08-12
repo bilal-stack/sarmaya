@@ -9,7 +9,9 @@ rows without a code deploy).
 These mirror migration 008's demo-tenant seed; the migration is a historical
 snapshot, this module is what runtime provisioning uses.
 """
-from app.core.enums import InvoiceState, PurchaseOrderState, PaymentState
+from app.core.enums import (
+    InvoiceState, RequisitionState, RFQState, PurchaseOrderState, PaymentState,
+)
 
 DRAFT = InvoiceState.DRAFT.value
 VALIDATED = InvoiceState.VALIDATED.value
@@ -50,6 +52,48 @@ PO_CANCELLED = PurchaseOrderState.CANCELLED.value
 # may arrive — which is why the guard on that transition checks the vendor is
 # verified: the invoice-side check comes too late to prevent an order being
 # placed with an unverified party.
+REQ_DRAFT = RequisitionState.DRAFT.value
+REQ_PENDING = RequisitionState.PENDING_APPROVAL.value
+REQ_APPROVED = RequisitionState.APPROVED.value
+REQ_CONVERTED = RequisitionState.CONVERTED.value
+REQ_REJECTED = RequisitionState.REJECTED.value
+REQ_CANCELLED = RequisitionState.CANCELLED.value
+
+# A requisition is the first record in the chain, so its approval is what every
+# later control is protecting. `converted` is terminal: once an order exists
+# against it the request has been acted on, and re-using it would let one
+# approval cover two orders.
+DEFAULT_REQUISITION_STATES = [
+    (REQ_DRAFT, "Draft", 1, True, False, [REQ_PENDING, REQ_CANCELLED], "#gray",
+        {REQ_PENDING: ["requisition_has_lines", "requisition_justified"]}, {}),
+    (REQ_PENDING, "Pending Approval", 2, False, False, [REQ_APPROVED, REQ_REJECTED], "#yellow",
+        {}, {"hours": 24, "escalate_to": "manager"}),
+    (REQ_APPROVED, "Approved", 3, False, False, [REQ_CONVERTED, REQ_CANCELLED], "#green",
+        {}, {}),
+    (REQ_CONVERTED, "Converted to Order", 4, False, True, [], "#blue", {}, {}),
+    (REQ_REJECTED, "Rejected", 5, False, True, [REQ_DRAFT], "#red", {}, {}),
+    (REQ_CANCELLED, "Cancelled", 6, False, True, [], "#orange", {}, {}),
+]
+
+RFQ_DRAFT = RFQState.DRAFT.value
+RFQ_ISSUED = RFQState.ISSUED.value
+RFQ_CLOSED = RFQState.CLOSED.value
+RFQ_AWARDED = RFQState.AWARDED.value
+RFQ_CANCELLED = RFQState.CANCELLED.value
+
+# Closing is the point of no return for the bidders: no quote may be added or
+# altered afterwards, so an RFQ cannot be issued without vendors to ask, and
+# cannot be awarded without having closed.
+DEFAULT_RFQ_STATES = [
+    (RFQ_DRAFT, "Draft", 1, True, False, [RFQ_ISSUED, RFQ_CANCELLED], "#gray",
+        {RFQ_ISSUED: ["rfq_has_invited_vendors"]}, {}),
+    (RFQ_ISSUED, "Issued", 2, False, False, [RFQ_CLOSED, RFQ_CANCELLED], "#yellow", {}, {}),
+    (RFQ_CLOSED, "Closed", 3, False, False, [RFQ_AWARDED, RFQ_CANCELLED], "#blue",
+        {RFQ_AWARDED: ["rfq_has_quotes"]}, {}),
+    (RFQ_AWARDED, "Awarded", 4, False, True, [], "#green", {}, {}),
+    (RFQ_CANCELLED, "Cancelled", 5, False, True, [], "#orange", {}, {}),
+]
+
 DEFAULT_PURCHASE_ORDER_STATES = [
     (PO_DRAFT, "Draft", 1, True, False, [PO_PENDING, PO_CANCELLED], "#gray",
         {PO_PENDING: ["po_has_lines"]}, {}),
@@ -90,6 +134,8 @@ DEFAULT_PAYMENT_STATES = [
 #: {workflow_type: states} — provisioning seeds each independently, so a tenant
 #: created before a workflow existed gains it on the next run.
 DEFAULT_WORKFLOWS = {
+    "requisition": DEFAULT_REQUISITION_STATES,
+    "rfq": DEFAULT_RFQ_STATES,
     "invoice": DEFAULT_INVOICE_STATES,
     "purchase_order": DEFAULT_PURCHASE_ORDER_STATES,
     "payment": DEFAULT_PAYMENT_STATES,

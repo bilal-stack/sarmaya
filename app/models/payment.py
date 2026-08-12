@@ -30,6 +30,9 @@ class Payment(BaseModel):
     WORKFLOW_TYPE = "payment"
     OBJECT_TYPE = "payment"
 
+    #: How this record names itself in a correlation chain.
+    REFERENCE_FIELD = "payment_number"
+
     tenant_id = Column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False, index=True,

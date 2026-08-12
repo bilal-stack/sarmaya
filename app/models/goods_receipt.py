@@ -27,6 +27,9 @@ class GoodsReceipt(BaseModel):
     #: is no WORKFLOW_TYPE because a receipt has no state machine.
     OBJECT_TYPE = "goods_receipt"
 
+    #: How this record names itself in a correlation chain.
+    REFERENCE_FIELD = "grn_number"
+
     tenant_id = Column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False, index=True,
