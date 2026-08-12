@@ -13,7 +13,9 @@ from app.services.audit import log_audit
 from app.services.config_versioning import record_version, TYPE_AUTOPILOT
 from app.schemas.autopilot import AutopilotConfig
 from app.core.enums import InvoiceState, VendorStatus
-from app.core.roles import has_permission, PERM_APPROVE_INVOICE, PERM_MANAGE_POLICIES
+from app.core.roles import (
+    has_permission, can_approve_amount, PERM_APPROVE_INVOICE, PERM_MANAGE_POLICIES,
+)
 from app.utils.money import money_to_float
 from app.utils.datetime_helpers import utc_now
 
@@ -95,7 +97,7 @@ class AutopilotService:
     def preview(self, current_user: dict) -> Dict:
         self._require_approve(current_user)
         cfg = self._load_config()
-        candidates = self._scan(cfg)
+        candidates = self._scan(cfg, current_user)
         eligible = [c for c in candidates if c["eligible"]]
         return {
             "enabled": cfg.enabled,
@@ -111,7 +113,7 @@ class AutopilotService:
         if not cfg.enabled:
             raise ValueError("Autopilot is disabled; enable it in configuration first")
 
-        candidates = self._scan(cfg)
+        candidates = self._scan(cfg, current_user)
         approved: List[Dict] = []
 
         for cand, invoice in candidates:
@@ -205,14 +207,14 @@ class AutopilotService:
             return AutopilotConfig()
         return AutopilotConfig(**(policy.rule_config or {}))
 
-    def _scan(self, cfg: AutopilotConfig) -> List:
+    def _scan(self, cfg: AutopilotConfig, current_user: dict) -> List:
         """Evaluate eligibility for each pending invoice. Returns a list whose
         items are dicts (candidate view); run() also needs the Invoice, so this
         returns tuples (candidate, invoice) but is list-comprehension friendly via
         the .eligible flag on the candidate."""
         results = []
         for invoice, vendor in self.repository.get_pending_with_vendor(limit=500):
-            eligible, reason = self._evaluate(cfg, invoice, vendor)
+            eligible, reason = self._evaluate(cfg, invoice, vendor, current_user)
             cand = {
                 "invoice_id": invoice.id,
                 "invoice_number": invoice.invoice_number,
@@ -225,7 +227,9 @@ class AutopilotService:
         return results
 
     @staticmethod
-    def _evaluate(cfg: AutopilotConfig, invoice: Invoice, vendor) -> Tuple[bool, str]:
+    def _evaluate(
+        cfg: AutopilotConfig, invoice: Invoice, vendor, current_user: dict
+    ) -> Tuple[bool, str]:
         if not cfg.enabled:
             return False, "Autopilot is disabled."
         amount = money_to_float(invoice.total_amount)
@@ -242,6 +246,19 @@ class AutopilotService:
                 f"Amount {amount:,.0f} exceeds the autopilot limit "
                 f"{cfg.max_auto_approve_amount:,.0f}."
             )
+        # Autopilot must not approve what the person running it could not
+        # approve by hand. The autopilot cap is configured by an admin and is
+        # unrelated to the approval matrix, so a manager limited to 250k could
+        # click run against a 1m cap and approve a 900k invoice — recorded as
+        # approved_by that manager, an authority the matrix explicitly denies
+        # them. Reproduced before this check existed.
+        #
+        # The matrix rule is reused rather than reimplemented, so the two paths
+        # cannot drift: whatever a role may approve manually is exactly what it
+        # may approve here.
+        allowed, why_not = can_approve_amount(current_user.get("role", ""), amount)
+        if not allowed:
+            return False, why_not
         return True, (
             f"Within autopilot bounds (amount {amount:,.0f} <= "
             f"{cfg.max_auto_approve_amount:,.0f}, active vendor, no duplicate)."

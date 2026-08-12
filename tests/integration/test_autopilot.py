@@ -6,6 +6,7 @@ is reversible, and is permission-gated.
 """
 import uuid
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -158,3 +159,98 @@ class TestAutopilotPermissions:
             svc.get_config(clerk)
         with pytest.raises(PermissionError):
             svc.set_config(AutopilotConfig(enabled=True), clerk)
+
+
+class TestAutopilotCannotExceedTheRunnersOwnAuthority:
+    """The autopilot cap is set by an admin and is unrelated to the approval
+    matrix. Without a second check, a manager limited to 250k could click run
+    against a 1m cap and approve a 900k invoice — recorded as `approved_by`
+    that manager, an authority the matrix explicitly denies them.
+
+    Reproduced against the service before this check existed: the manager's
+    manual approval was refused with "can only approve invoices up to 250000",
+    and the same manager's autopilot run approved it anyway.
+    """
+
+    def _enable(self, db, admin, cap):
+        from app.schemas.autopilot import AutopilotConfig
+
+        AutopilotService(db).set_config(
+            AutopilotConfig(
+                enabled=True, max_auto_approve_amount=cap,
+                require_active_vendor=True, require_no_duplicate=True,
+            ),
+            admin,
+        )
+
+    def _pending(self, db, tenant, admin, amount, number):
+        vendor = Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="Bounded Vendor",
+            status=VendorStatus.ACTIVE, created_by=admin["id"],
+        )
+        db.add(vendor)
+        db.flush()
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=tenant.id, vendor_id=vendor.id,
+            vendor_name=vendor.legal_name, invoice_number=number,
+            invoice_date=date(2026, 8, 1), total_amount=Decimal(amount),
+            current_state=InvoiceState.PENDING_APPROVAL, created_by=admin["id"],
+        )
+        db.add(invoice)
+        db.flush()
+        return invoice
+
+    def test_a_manager_cannot_auto_approve_beyond_their_limit(
+        self, db, tenant, make_user
+    ):
+        from app.core.roles import can_approve_amount
+
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        self._enable(db, admin, cap=1_000_000)
+        invoice = self._pending(db, tenant, admin, "900000", "OVER-LIMIT-001")
+
+        # The manual path refuses this; autopilot must agree.
+        assert can_approve_amount("manager", 900_000)[0] is False
+
+        result = AutopilotService(db).run(manager)
+
+        assert result["approved_count"] == 0
+        db.refresh(invoice)
+        state = str(getattr(invoice.current_state, "value", invoice.current_state))
+        assert state.lower() == InvoiceState.PENDING_APPROVAL.value
+        assert invoice.approved_by is None
+
+    def test_the_preview_says_why(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        self._enable(db, admin, cap=1_000_000)
+        self._pending(db, tenant, admin, "900000", "OVER-LIMIT-002")
+
+        preview = AutopilotService(db).preview(manager)
+        reasons = " ".join(c["reason"] for c in preview["candidates"])
+        assert "250000" in reasons or "up to" in reasons
+
+    def test_within_their_limit_still_runs(self, db, tenant, make_user):
+        """The control: the bound must not disable autopilot altogether."""
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        self._enable(db, admin, cap=1_000_000)
+        invoice = self._pending(db, tenant, admin, "1000", "WITHIN-LIMIT-001")
+
+        result = AutopilotService(db).run(manager)
+
+        assert result["approved_count"] == 1
+        db.refresh(invoice)
+        assert str(
+            getattr(invoice.current_state, "value", invoice.current_state)
+        ).lower() == InvoiceState.APPROVED.value
+
+    def test_an_unlimited_approver_is_unaffected(self, db, tenant, make_user):
+        """A CFO has no ceiling in the matrix, so only the autopilot cap binds."""
+        admin = make_user(UserRole.ADMIN)
+        cfo = make_user(UserRole.CFO)
+        self._enable(db, admin, cap=1_000_000)
+        self._pending(db, tenant, admin, "900000", "CFO-OK-001")
+
+        assert AutopilotService(db).run(cfo)["approved_count"] == 1
