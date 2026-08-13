@@ -314,6 +314,27 @@ NEXT_PUBLIC_API_BASE_URL=https://sarmaya-api.onrender.com/api/v1
 It is inlined at build time, so changing it needs a redeploy — and it is public
 by definition, so never put a secret in a `NEXT_PUBLIC_` variable.
 
+### Checking the deployment actually worked
+
+A deployment can answer 200 on every route and still be wrong in ways nothing
+surfaces — most importantly if `DATABASE_URL` connects as the database owner,
+which bypasses every RLS policy silently. The connection string a provider
+hands you *is* the owner's, so this is the easy one to get wrong.
+
+```bash
+python -m scripts.verify_deployment https://sarmaya-api.onrender.com --database-url "postgresql://os_app:...@...neon.tech/neondb" --origin https://sarmaya.vercel.app
+```
+
+It checks that the app role cannot bypass RLS, that every tenant-owned table
+has policies and that a bound tenant still sees its own rows, that migrations
+are at head and the newest module is deployed, that self-registration is
+closed and the published demo credentials do not work, that CORS admits your
+frontend, and that somebody can actually sign in. Exits non-zero on any
+failure, so it can gate a release.
+
+Anything it could not test is reported as unchecked rather than passed — an
+unchecked control is not a passing one.
+
 ### Configuration that will stop a deploy
 
 Deliberately, because each of these looks like a working system until it is far
