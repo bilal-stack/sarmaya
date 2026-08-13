@@ -1,19 +1,36 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
+from pydantic import field_validator, model_validator
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated, List
+import json
 
 # Point to .env at project root (c:\python\os\.env)
 ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+
+#: The value shipped in the repository. Checked by name so the refusal below
+#: cannot drift from the default above.
+PLACEHOLDER_SECRET = "change-me-in-production-min-32-chars"
+
 
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "Sarmaya OS"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    #: Off by default. The 500 handler includes the exception type and message
+    #: when this is on, so a deployment that inherited a True default would
+    #: hand internals to anyone who could provoke an error. Turn it on locally
+    #: via .env, never on a server.
+    DEBUG: bool = False
     
     # CORS Configuration. Includes the Next.js frontend dev port (9002) plus the
     # common Vite/CRA ports. Override via the CORS_ORIGINS env var in production.
-    CORS_ORIGINS: list = [
+    #: NoDecode because pydantic-settings JSON-decodes list fields inside the
+    #: settings source, before any validator runs — so `CORS_ORIGINS=https://x`
+    #: died with a JSON parse error and the tolerant parser below never got a
+    #: look. Which is the exact failure it was written to prevent, and the sort
+    #: a hosting provider's environment box produces by default.
+    CORS_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:9002", "http://127.0.0.1:9002",
         "http://localhost:3000", "http://127.0.0.1:3000",
         "http://localhost:5173", "http://127.0.0.1:5173",
@@ -41,6 +58,11 @@ class Settings(BaseSettings):
     ALLOW_SELF_REGISTRATION: bool = False
 
     # Security
+    #: Every access token is signed with this. The placeholder below is in a
+    #: public repository, so a deployment that keeps it has tokens anyone who
+    #: reads the source can forge — including one claiming an admin's id. The
+    #: validator at the bottom of this class refuses to start with it unless
+    #: DEBUG is on.
     SECRET_KEY: str = "change-me-in-production-min-32-chars"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
@@ -97,6 +119,56 @@ class Settings(BaseSettings):
     GOOGLE_DOCUMENT_AI_PROCESSOR_ID: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Path to service account JSON
     
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_origins(cls, v):
+        """Accept a comma-separated list as well as JSON.
+
+        pydantic-settings parses a `list` field from the environment as JSON,
+        so `CORS_ORIGINS=https://app.example.com` fails to start with a parse
+        error — and a comma-separated string is what a person actually types
+        into a hosting provider's environment box.
+        """
+        if isinstance(v, str):
+            text = v.strip()
+            if text.startswith("["):
+                return json.loads(text)
+            return [origin.strip() for origin in text.split(",") if origin.strip()]
+        return v
+
+    @model_validator(mode="after")
+    def _refuse_insecure_production(self):
+        """Fail at startup rather than serve something forgeable.
+
+        A misconfiguration that only shows up as "tokens are forgeable" shows
+        up as nothing at all — the app works perfectly, right up until someone
+        who has read the public repo mints an admin token. So it is refused
+        loudly, at the only moment anyone is watching: the deploy.
+        """
+        if self.DEBUG:
+            return self
+
+        if self.SECRET_KEY == PLACEHOLDER_SECRET:
+            raise ValueError(
+                "SECRET_KEY is still the placeholder from the repository. "
+                "Every access token would be forgeable by anyone who can read "
+                "the source. Set SECRET_KEY to a random value "
+                "(python -c \"import secrets; print(secrets.token_urlsafe(48))\")."
+            )
+        if len(self.SECRET_KEY) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters."
+            )
+        if any("localhost" in o or "127.0.0.1" in o for o in self.CORS_ORIGINS):
+            # Not fatal on its own, but it means CORS_ORIGINS was never set for
+            # this environment, and the browser will refuse the real frontend.
+            raise ValueError(
+                "CORS_ORIGINS still lists localhost, so the deployed frontend "
+                "would be refused by the browser. Set it to your frontend's "
+                "origin, e.g. CORS_ORIGINS=https://sarmaya.vercel.app"
+            )
+        return self
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         case_sensitive=True,

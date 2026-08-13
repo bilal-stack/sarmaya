@@ -1,0 +1,60 @@
+# Render blueprint for the API.
+#
+# Render is one option, not a commitment: the Dockerfile is plain and the app
+# reads everything from the environment, so Fly, Railway or a VM take the same
+# settings. This file exists so the free tier can be stood up without clicking
+# through a form and mistyping a variable.
+#
+# The database is deliberately NOT defined here. Render's free Postgres is
+# deleted after 30 days; Neon's free tier is not, and it is real Postgres 17
+# with the row-level security this app's isolation depends on. Point
+# DATABASE_URL at Neon and this service stays free indefinitely.
+services:
+  - type: web
+    name: sarmaya-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+
+    # Render pings this to decide the service is up. It is unauthenticated and
+    # returns no data, which is what a health check should be.
+    healthCheckPath: /api/v1/ping
+
+    # Migrations run once per deploy, before the new instance takes traffic —
+    # not on container start, where two instances would race and a failure
+    # would crash-loop instead of stopping the deploy.
+    preDeployCommand: alembic upgrade head
+
+    envVars:
+      # --- set these yourself -------------------------------------------------
+      # The app's own connection. MUST be a non-superuser, non-BYPASSRLS role:
+      # a superuser silently bypasses every row-level security policy, so the
+      # tenant isolation would be application-level only.
+      - key: DATABASE_URL
+        sync: false
+      # Used only by Alembic for DDL. May be the owner.
+      - key: ADMIN_DATABASE_URL
+        sync: false
+      # Your frontend's origin, e.g. https://sarmaya.vercel.app
+      # The app refuses to start if this still says localhost.
+      - key: CORS_ORIGINS
+        sync: false
+
+      # --- generated once, then kept ------------------------------------------
+      # Every access token is signed with this. The app refuses to start on the
+      # repository's placeholder, because a public default means anyone who can
+      # read the source can mint an admin token.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # --- fixed --------------------------------------------------------------
+      # Never true on a server: the 500 handler includes the exception type and
+      # message when it is, and it also disables the startup checks above.
+      - key: DEBUG
+        value: "false"
+      # Strangers may not sign themselves into a tenant. Administrators create
+      # accounts through POST /users.
+      - key: ALLOW_SELF_REGISTRATION
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.12"

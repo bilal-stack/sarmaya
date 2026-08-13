@@ -1,0 +1,21 @@
+# Keep the image small and, more importantly, keep local secrets and data out
+# of it. A .env baked into an image is a secret shipped to wherever the image
+# goes.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.git/
+.github/
+.claude/
+tests/
+uploads/
+docs/
+demo_assets/
+*.md
+!README.md
+.pytest_cache/
