@@ -686,6 +686,31 @@ POST /api/v1/autopilot/run              # execute within configured bounds
 POST /api/v1/autopilot/{invoice_id}/revert
 ```
 
+### Vendor bank changes (`/vendors`) — the AP fraud control
+
+```bash
+POST /api/v1/vendors/{id}/bank-change   # {reason, iban?, bank_account_number?, ...}
+                                        # Bank fields are REFUSED by PATCH /vendors/{id};
+                                        # they only change through here. Records the old
+                                        # values beside the new. Payments to this vendor
+                                        # are held from now until it is resolved.
+GET  /api/v1/vendors/bank-changes?vendor_id=&state=
+POST /api/v1/vendors/bank-changes/{id}/approve   # vendors.approve_bank_change, which the
+                                                 # clerk who maintains vendors does NOT hold.
+                                                 # Refuses the requester, no admin exemption.
+                                                 # Starts the cooling period; changes nothing yet.
+POST /api/v1/vendors/bank-changes/{id}/apply     # writes it to the vendor, once the clock has run
+POST /api/v1/vendors/bank-changes/{id}/reject    # {"reason": "..."}
+POST /api/v1/vendors/bank-changes/{id}/cancel    # {"reason": "..."}
+```
+
+> Build Book A1 control. The most common invoice fraud is a real invoice paid
+> to a changed account: every downstream control passes because nothing
+> downstream is wrong. Cooling period defaults to 24h
+> (`VENDOR_BANK_CHANGE_COOLING_HOURS`), and while a change is open payments are
+> held to **either** account — during a dispute neither destination is known
+> to be right.
+
 ### Vendors (governance gate)
 ```bash
 GET   /api/v1/vendors/review-queue      # vendors blocking invoices, highest impact first

@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     # walk-ins. Administrators create accounts through POST /users.
     ALLOW_SELF_REGISTRATION: bool = False
 
+    #: How long after approval a vendor's new bank details must wait before a
+    #: payment may use them. The window is the control: it gives the real
+    #: vendor time to notice a change they never requested, and the approver
+    #: time to confirm it on a number they already had.
+    #:
+    #: An operator setting rather than tenant configuration — a fraud control
+    #: whose timing the tenant can edit is one an attacker with a tenant login
+    #: can set to zero.
+    VENDOR_BANK_CHANGE_COOLING_HOURS: int = 24
+
     # Security
     #: Every access token is signed with this. The placeholder below is in a
     #: public repository, so a deployment that keeps it has tokens anyone who

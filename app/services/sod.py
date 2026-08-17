@@ -8,7 +8,8 @@ request must not be the one who approves it. Two rules are enforced today:
 
 Admins are treated as the Build Book's "unless explicitly allowed" carve-out and
 are exempt. Finer-grained configuration (per-rule toggles, amount thresholds, and
-the vendor-bank-change rule) is a documented follow-up.
+is a documented follow-up. The vendor-bank-change rule is implemented
+below.
 """
 from app.core.roles import ADMIN
 
@@ -67,3 +68,16 @@ def violates_self_reconciliation(released_by, current_user: dict) -> bool:
     the verification of money that has already left.
     """
     return _same_person(released_by, current_user.get("id"))
+
+
+def violates_self_bank_change_approval(requested_by, current_user: dict) -> bool:
+    """True if the person who requested a vendor bank change is approving it.
+
+    No admin exemption, unlike the invoice and vendor rules. Those carve-outs
+    exist so a one-person demo tenant still functions, and their cost is
+    bounded because a wrongly approved invoice still meets every downstream
+    control. This one has no downstream control: once the account is changed,
+    the next genuine invoice, genuinely approved and genuinely released, pays
+    the wrong person. A second pair of eyes is the entire mechanism.
+    """
+    return _same_person(requested_by, current_user.get("id"))

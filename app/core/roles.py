@@ -57,6 +57,10 @@ PERM_IMPORT_BANK_STATEMENT = "bank_statements.import"
 PERM_RECONCILE_PAYMENT = "bank_statements.reconcile"
 
 PERM_MANAGE_VENDORS = "vendors.manage"
+# Approving a change of a vendor's bank account is separate from managing
+# vendors, because whoever maintains vendor records is exactly who would
+# make this change — and the control is that somebody else agrees to it.
+PERM_APPROVE_BANK_CHANGE = "vendors.approve_bank_change"
 PERM_VIEW_VENDORS = "vendors.view"
 
 PERM_MANAGE_USERS = "users.manage"
@@ -98,9 +102,10 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_BANK_STATEMENT,
         PERM_IMPORT_BANK_STATEMENT,
         PERM_RECONCILE_PAYMENT,
-        # Vendors - ALL
+        # Vendors - ALL (self-approval is still refused by SoD)
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
+        PERM_APPROVE_BANK_CHANGE,
         # Users - ALL
         PERM_MANAGE_USERS,
         PERM_VIEW_USERS,
@@ -150,6 +155,7 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_PO,
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
+        PERM_APPROVE_BANK_CHANGE,
     ],
     CFO: [
         PERM_VIEW_INVOICE,
@@ -167,6 +173,7 @@ ROLE_PERMISSIONS = {
         # releases runs, and SoD would refuse those anyway.
         PERM_VIEW_BANK_STATEMENT,
         PERM_VIEW_VENDORS,
+        PERM_APPROVE_BANK_CHANGE,
         PERM_VIEW_AUDIT,
     ],
     APPROVER: [

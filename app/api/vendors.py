@@ -14,6 +14,10 @@ from app.schemas.vendor import (
     VendorReviewItem,
 )
 from app.services.vendor_service import VendorService
+from app.services.vendor_bank_service import VendorBankService
+from app.schemas.vendor_bank_change import (
+    BankChangeRequest, RejectBankChangeRequest, BankChangeResponse,
+)
 
 router = APIRouter(prefix="/vendors", tags=["Vendors"])
 
@@ -68,6 +72,26 @@ def vendor_review_queue(
     """
     try:
         return VendorService(db).get_review_queue(current_user, limit=limit)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/bank-changes", response_model=List[BankChangeResponse])
+def list_bank_changes(
+    vendor_id: Optional[UUID] = None,
+    state: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Proposed and historical bank changes, newest first.
+
+    Declared before /{vendor_id} so the literal path is not parsed as a UUID —
+    the same reason review-queue sits above it.
+    """
+    try:
+        return VendorBankService(db).list_changes(
+            current_user, vendor_id=vendor_id, state=state
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -130,5 +154,106 @@ def delete_vendor(
 ):
     try:
         VendorService(db).delete_vendor(vendor_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+# --- bank detail changes -----------------------------------------------------
+#
+# Build Book A1 control: vendor bank change verification with dual approval and
+# a cooling period. Bank fields are refused by PATCH /vendors/{id} and come
+# through here instead, because redirecting a vendor's payments is the most
+# common invoice fraud there is and every downstream control passes while it
+# happens: the invoice is genuine, the approval is genuine, the release is
+# genuine. Only the destination changed.
+
+
+@router.post("/{vendor_id}/bank-change", response_model=BankChangeResponse,
+             status_code=status.HTTP_201_CREATED)
+def request_bank_change(
+    vendor_id: UUID,
+    payload: BankChangeRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Propose new bank details.
+
+    Records the old values alongside the new, so the trail shows the
+    substitution rather than only the result. Payments to this vendor are held
+    from now until the change is resolved — including payments to the *old*
+    account, because during a disputed change neither destination is known to
+    be right.
+    """
+    try:
+        return VendorBankService(db).request_change(vendor_id, payload, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post("/bank-changes/{change_id}/approve", response_model=BankChangeResponse)
+def approve_bank_change(
+    change_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Agree the new account is legitimate, starting the cooling period.
+
+    Requires vendors.approve_bank_change, which whoever maintains vendors
+    deliberately does not hold, and refuses the requester with no admin
+    exemption — this is the exact step the fraud needs.
+
+    Does not change the vendor. Approval starts a clock; the details are
+    applied separately once it has run.
+    """
+    try:
+        return VendorBankService(db).approve_change(change_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post("/bank-changes/{change_id}/apply", response_model=VendorResponse)
+def apply_bank_change(
+    change_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Write the approved details onto the vendor, once the clock has run.
+
+    Refused while the cooling period is still going. The wait is the control:
+    it is the window in which the real vendor can say they never asked for this.
+    """
+    try:
+        return VendorBankService(db).apply_change(change_id, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post("/bank-changes/{change_id}/reject", response_model=BankChangeResponse)
+def reject_bank_change(
+    change_id: UUID,
+    payload: RejectBankChangeRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        return VendorBankService(db).reject_change(
+            change_id, payload.reason, current_user
+        )
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.post("/bank-changes/{change_id}/cancel", response_model=BankChangeResponse)
+def cancel_bank_change(
+    change_id: UUID,
+    payload: RejectBankChangeRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Withdraw a request you raised."""
+    try:
+        return VendorBankService(db).cancel_change(
+            change_id, payload.reason, current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)

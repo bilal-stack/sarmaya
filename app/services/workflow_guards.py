@@ -166,6 +166,22 @@ def _payment_lines_still_payable(db, obj):
                 )
                 continue
 
+        # Re-checked at release, not only at preparation: a run can wait days,
+        # and a bank change raised in that window is exactly the case this
+        # control exists for. The details on the line were copied when the run
+        # was prepared, so without this the run would pay an account that is
+        # now disputed.
+        if invoice.vendor_id:
+            from app.services.vendor_bank_service import VendorBankService
+
+            pending = VendorBankService(db).pending_for_vendor(invoice.vendor_id)
+            if pending:
+                problems.append(
+                    f"{invoice.invoice_number}: {line.vendor_name} has a bank "
+                    "change awaiting resolution; payments to them are held"
+                )
+                continue
+
         # An instruction with no destination account is not payable. The bank
         # rejects it at best and silently drops the line at worst, so the run
         # must not reach `released` looking authorised.

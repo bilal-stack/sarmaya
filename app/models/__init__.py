@@ -2,6 +2,7 @@ from app.models.base import Base, BaseModel
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.vendor import Vendor
+from app.models.vendor_bank_change import VendorBankChange
 from app.models.workflow_state import WorkflowState
 from app.models.policy import Policy
 from app.models.file import File
@@ -26,6 +27,7 @@ __all__ = [
     "Tenant",
     "User",
     "Vendor",
+    "VendorBankChange",
     "WorkflowState",
     "Policy",
     "File",

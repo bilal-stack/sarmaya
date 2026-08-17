@@ -96,6 +96,26 @@ class PaymentState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class BankChangeState(str, Enum):
+    """States of a proposed change to a vendor's bank details.
+
+    Deliberately not a configured workflow like invoices or orders. Those are
+    business processes a tenant should be able to reshape; this is a fraud
+    control, and a control a tenant can edit away in the workflow screen is a
+    control in name only.
+
+    `approved` and `effective` are separate because the cooling period is the
+    point: approval starts a clock, and only when it expires may a payment use
+    the new account. That window is what gives the real vendor time to notice a
+    change they did not ask for.
+    """
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    EFFECTIVE = "effective"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
 class VendorStatus(str, Enum):
     """Vendor statuses"""
     ACTIVE = "active"

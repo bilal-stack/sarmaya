@@ -107,6 +107,25 @@ class VendorService:
 
         changes = data.model_dump(exclude_unset=True)
 
+        # Bank details do not change here. They used to: this endpoint wrote
+        # them directly behind vendors.manage, which the AP clerk holds, and
+        # the audit entry below recorded only the legal name — so redirecting a
+        # vendor's payments was both uncontrolled and invisible. They now go
+        # through VendorBankService, where a second person approves and a
+        # cooling period runs before any payment may use the new account.
+        from app.services.vendor_bank_service import BANK_FIELDS
+
+        attempted = [f for f in BANK_FIELDS if f in changes]
+        if attempted:
+            raise ValueError(
+                "Bank details cannot be edited directly ("
+                + ", ".join(attempted)
+                + "). Raise a change request instead: POST /vendors/{id}"
+                "/bank-change. It needs a second person's approval and a "
+                "cooling period, because redirecting a vendor's payments is "
+                "the most common invoice fraud there is."
+            )
+
         # Guard uniqueness if identifying fields change.
         new_name = changes.get("legal_name")
         if new_name and new_name.lower() != (vendor.legal_name or "").lower():
@@ -118,7 +137,9 @@ class VendorService:
             if self.repository.get_by_vendor_code(new_code):
                 raise ValueError("A vendor with this vendor code already exists")
 
-        before = {"legal_name": vendor.legal_name}
+        # Every changed field, not just the name: an audit entry that records
+        # one field of an update tells a reader nothing about the others.
+        before = {field: getattr(vendor, field, None) for field in changes}
         for field, value in changes.items():
             setattr(vendor, field, value)
 
@@ -134,7 +155,7 @@ class VendorService:
             object_id=vendor.id,
             action="updated",
             before_value=before,
-            after_value={"legal_name": vendor.legal_name},
+            after_value={field: getattr(vendor, field, None) for field in changes},
         )
         self.repository.commit()
         return vendor

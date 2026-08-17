@@ -393,6 +393,22 @@ class PaymentService:
                     f"{invoice.invoice_number}: vendor is {status or 'missing'}, not active"
                 )
 
+            # A vendor whose bank details are mid-change is not payable — to
+            # either account. Paying the old one during a disputed change is
+            # not safe either: if the change is fraudulent the old account may
+            # already be the attacker's, and if it is genuine the vendor is
+            # expecting the new one. Holding is the only answer that is right
+            # in both cases.
+            from app.services.vendor_bank_service import VendorBankService
+
+            pending = VendorBankService(self.db).pending_for_vendor(vendor.id)
+            if pending:
+                raise ValueError(
+                    f"{invoice.invoice_number}: {vendor.legal_name} has a bank "
+                    "change awaiting resolution, so payments to them are held. "
+                    "Resolve it first — this is the window the control exists for."
+                )
+
         clash = (
             self.db.query(PaymentLine)
             .join(Payment, Payment.id == PaymentLine.payment_id)
