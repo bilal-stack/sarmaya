@@ -20,6 +20,7 @@ from app.models.audit_log import AuditLog
 from app.models.policy_eval import PolicyEval
 from app.models.ai_action_log import AIActionLog
 from app.core.roles import has_permission, PERM_VIEW_AUDIT, PERM_VIEW_INVOICE
+from app.utils.records import record_reference
 
 logger = logging.getLogger(__name__)
 
@@ -179,9 +180,4 @@ class CorrelationService:
         chain legibly the moment it declares one, rather than appearing as a
         UUID until somebody remembers to extend a list here.
         """
-        field = getattr(type(row), "REFERENCE_FIELD", None)
-        if field:
-            value = getattr(row, field, None)
-            if value:
-                return str(value)
-        return str(row.id)
+        return record_reference(row)

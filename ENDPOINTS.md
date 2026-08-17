@@ -655,6 +655,29 @@ POST /api/v1/inbox/escalate-overdue      # escalate breached items once per stat
                                          # notifies the escalation role); idempotent — button or cron
 ```
 
+Items come from every module, not just invoices. Seven collectors report: pending
+invoices, requisitions awaiting approval, closed tenders awaiting award, POs
+awaiting approval, payment runs awaiting release, open vendor bank changes, and
+unmatched bank debits. Each filters by permission *and* by segregation of duties,
+so nothing appears that the caller would be refused on.
+
+**Item shape** (neutral — it is no longer invoice-specific):
+
+| field | meaning |
+|---|---|
+| `object_type` / `object_id` | what it is and which one — `invoice`, `requisition`, `rfq`, `purchase_order`, `payment`, `vendor_bank_change`, `bank_statement_line` |
+| `reference` / `subtitle` | the number a person would quote, and whatever identifies it (vendor, title, counterparty) |
+| `category` | one of nine, drives the badge |
+| `work_item_type` | the Build Book's grouping: `approval`, `exception`, `review`, `reconciliation`, `admin` |
+| `detail_url` / `timeline_url` | where to act, and the Live Audit Mode link — **build neither client-side**, they differ per module |
+| `priority` | lower sorts first; `0` = a debit nothing explains, `1` = an open bank change |
+
+The envelope adds `by_work_item_type` alongside `counts`.
+
+> Frontend note: items were once `{invoice_id, invoice_number, vendor_name}` and
+> the client built `/ai-tools/invoices/{id}` itself. Any client still doing that
+> sends the reader to an invoice page for a payment run.
+
 ### Configuration (admin)
 ```bash
 POST /api/v1/config/initialize-defaults                # seed default workflow + approval matrix

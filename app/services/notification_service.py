@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.enums import UserRole
 from app.models.invoice import Invoice
 from app.models.user import User
+from app.utils.records import describe_record
 
 logger = logging.getLogger(__name__)
 
@@ -71,15 +72,26 @@ class NotificationService:
         except Exception:
             logger.exception("Failed to send rejected notification")
 
-    def notify_sla_escalation(self, invoice: Invoice, escalate_to_role: str, hours: int) -> None:
-        """Tell the escalation role an invoice has breached its SLA."""
+    def notify_sla_escalation(self, record, escalate_to_role: str, hours: int) -> None:
+        """Tell the escalation role that a record has breached its SLA.
+
+        The runner escalates every workflow, not only invoices. This assumed an
+        invoice and read `invoice_number`; for anything else it raised, and the
+        `except` below turned that into a log line nobody reads. The breach was
+        recorded in the audit trail and the person who had to act was never
+        told — which is the whole purpose of escalating.
+        """
         try:
-            recipients = self._approver_emails(invoice.tenant_id, escalate_to_role)
-            subject = f"SLA breached: invoice {invoice.invoice_number} awaiting action"
+            label = describe_record(record)
+            recipients = self._approver_emails(record.tenant_id, escalate_to_role)
+            state = getattr(record.current_state, "value", record.current_state)
+            amount = getattr(record, "total_amount", None) or getattr(
+                record, "estimated_amount", None
+            )
+            subject = f"SLA breached: {label} awaiting action"
             body = (
-                f"Invoice {invoice.invoice_number} from {invoice.vendor_name} "
-                f"for {invoice.total_amount} has been waiting in "
-                f"{invoice.current_state} for more than {hours} hours.\n\n"
+                f"{label}{f' for {amount}' if amount is not None else ''} has been "
+                f"waiting in {state} for more than {hours} hours.\n\n"
                 f"It has been escalated to {escalate_to_role.upper()}."
             )
             self._send(recipients, subject, body)

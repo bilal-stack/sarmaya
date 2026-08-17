@@ -70,7 +70,7 @@ class SlaService:
             due, overdue, cfg = sla_status(invoice, sla_map)
             if not overdue:
                 continue
-            if self._already_escalated(invoice):
+            if self._already_escalated(invoice, workflow_type):
                 continue
 
             role = cfg["escalate_to"]
@@ -109,18 +109,24 @@ class SlaService:
 
         return escalated
 
-    def _already_escalated(self, invoice: Invoice) -> bool:
+    def _already_escalated(self, record, workflow_type: str) -> bool:
         """One escalation per state entry: has an sla_escalated event been
-        recorded since the invoice entered its current state?"""
-        entered = invoice.state_entered_at or invoice.updated_at or invoice.created_at
+        recorded since this record entered its current state?
+
+        The object_type must match what the escalation actually writes, which is
+        the workflow type. Hardcoding "invoice" made this true only for
+        invoices: every other workflow found no matching audit row, so each run
+        escalated the same overdue record again and re-notified the approver.
+        """
+        entered = record.state_entered_at or record.updated_at or record.created_at
         if entered is None:
             return False
         entered_naive = make_naive(to_utc(entered))
         return (
             self.db.query(AuditLog)
             .filter(
-                AuditLog.object_type == "invoice",
-                AuditLog.object_id == invoice.id,
+                AuditLog.object_type == workflow_type,
+                AuditLog.object_id == record.id,
                 AuditLog.action == "sla_escalated",
                 AuditLog.timestamp >= entered_naive,
             )

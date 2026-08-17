@@ -151,6 +151,85 @@ class TestEscalationRunner:
         # Idempotent: nothing new on a second run.
         assert SlaService(db).run_escalations(admin)["escalated_count"] == 0
 
+    def test_escalates_a_requisition_once_too(self, db, tenant, make_user):
+        """The runner scans every declared workflow, but the once-per-state-entry
+        check queried audit rows with object_type "invoice" hardcoded. The
+        escalation writes the workflow type instead, so for every non-invoice
+        workflow the check never matched: each run escalated the same overdue
+        record again and re-notified the approver, indefinitely.
+        """
+        from decimal import Decimal
+        from app.core.enums import RequisitionState
+        from app.models.requisition import PurchaseRequisition
+
+        admin = make_user(UserRole.ADMIN)
+        db.add(WorkflowState(
+            tenant_id=tenant.id, workflow_type="requisition",
+            state_name="pending_approval", state_order=2,
+            allowed_transitions=["approved", "rejected"],
+            sla={"hours": 24, "escalate_to": "cfo"},
+        ))
+        req = PurchaseRequisition(
+            id=uuid.uuid4(), tenant_id=tenant.id, requisition_number="REQ-SLA",
+            title="Laptops", justification="Overdue for approval.",
+            requested_date=date(2026, 8, 1), estimated_amount=Decimal("1000"),
+            current_state=RequisitionState.PENDING_APPROVAL, created_by=admin["id"],
+            state_entered_at=utc_now() - timedelta(hours=72),
+        )
+        db.add(req)
+        db.flush()
+
+        assert SlaService(db).run_escalations(admin)["escalated_count"] == 1
+        assert SlaService(db).run_escalations(admin)["escalated_count"] == 0
+
+        events = db.query(AuditLog).filter(
+            AuditLog.object_id == req.id, AuditLog.action == "sla_escalated"
+        ).all()
+        assert len(events) == 1
+
+    def test_a_requisition_escalation_actually_reaches_the_approver(
+        self, db, tenant, make_user, monkeypatch
+    ):
+        """`notify_sla_escalation` read `invoice_number` off whatever it was
+        given, so for a requisition it raised — and its own `except` logged the
+        failure and moved on. The audit trail said the breach was escalated to
+        the CFO while no message was ever sent. Assert on what was sent, since
+        no exception will ever surface this.
+        """
+        from decimal import Decimal
+        from app.core.enums import RequisitionState
+        from app.models.requisition import PurchaseRequisition
+
+        sent: list = []
+        monkeypatch.setattr(
+            NotificationService, "_send",
+            lambda self, recipients, subject, body: sent.append((recipients, subject)),
+        )
+
+        admin = make_user(UserRole.ADMIN)
+        cfo = make_user(UserRole.CFO)
+        db.add(WorkflowState(
+            tenant_id=tenant.id, workflow_type="requisition",
+            state_name="pending_approval", state_order=2,
+            allowed_transitions=["approved", "rejected"],
+            sla={"hours": 24, "escalate_to": "cfo"},
+        ))
+        db.add(PurchaseRequisition(
+            id=uuid.uuid4(), tenant_id=tenant.id, requisition_number="REQ-NOTIFY",
+            title="Laptops", justification="Overdue for approval.",
+            requested_date=date(2026, 8, 1), estimated_amount=Decimal("1000"),
+            current_state=RequisitionState.PENDING_APPROVAL, created_by=admin["id"],
+            state_entered_at=utc_now() - timedelta(hours=72),
+        ))
+        db.flush()
+
+        SlaService(db).run_escalations(admin)
+
+        assert sent, "the breach was escalated but nobody was notified"
+        recipients, subject = sent[0]
+        assert cfo["email"] in recipients
+        assert "REQ-NOTIFY" in subject
+
     def test_requires_manage_workflow_permission(self, db, make_user):
         manager = make_user(UserRole.MANAGER)
         with pytest.raises(PermissionError):
