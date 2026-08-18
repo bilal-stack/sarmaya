@@ -6,6 +6,8 @@ from app.repositories.policy_repository import PolicyRepository
 from app.models.policy import Policy
 from app.schemas.policy import ApprovalPolicyCreate, ApprovalPolicyUpdate
 from app.services.audit import log_audit
+from app.services.soft_delete import withdraw
+from app.services.watchlist_service import alert_policy_change
 from app.services.config_versioning import record_version, policy_snapshot, TYPE_APPROVAL_POLICY
 from app.core.roles import has_permission, PERM_MANAGE_POLICIES
 
@@ -51,6 +53,10 @@ class ApprovalPolicyService:
         record_version(
             self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy.id,
             policy_snapshot(policy), "created", current_user["id"],
+        )
+        alert_policy_change(
+            self.db, current_user, policy.id, policy.policy_name, "created",
+            after=policy_snapshot(policy),
         )
         # Flush, do not commit: the audit entry below belongs to the same
         # transaction as the change it describes.
@@ -100,6 +106,10 @@ class ApprovalPolicyService:
             self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy.id,
             policy_snapshot(policy), "updated", current_user["id"],
         )
+        alert_policy_change(
+            self.db, current_user, policy.id, policy.policy_name, "updated",
+            before=before, after=policy_snapshot(policy),
+        )
         # Flush, do not commit: the audit entry below belongs to the same
         # transaction as the change it describes.
         self.db.flush()
@@ -118,17 +128,33 @@ class ApprovalPolicyService:
         self.repository.commit()
         return policy
 
-    def delete_policy(self, policy_id: UUID, current_user: dict) -> None:
+    def delete_policy(self, policy_id: UUID, current_user: dict, reason: str) -> None:
+        """Withdraw an approval policy.
+
+        Destroying the row left every `config_versions` entry for this policy —
+        including the "deleted" one written just below — keyed to an id that no
+        longer existed, so the rollback this module offers could restore a
+        snapshot of nothing. Keeping the row makes the history navigable and
+        the restore real.
+        """
         self._require_manage(current_user)
         policy = self._load(policy_id)
 
         # Snapshot the final state before removal so the deletion is itself a
         # recorded version in the object's history.
         final_snapshot = policy_snapshot(policy)
-        self.repository.delete(policy)
+        withdraw(
+            self.db, policy, current_user, reason,
+            object_type="approval_policy",
+            before_value=final_snapshot,
+        )
         record_version(
             self.db, current_user["tenant_id"], TYPE_APPROVAL_POLICY, policy_id,
             final_snapshot, "deleted", current_user["id"],
+        )
+        alert_policy_change(
+            self.db, current_user, policy_id, policy.policy_name, "deleted",
+            before=final_snapshot,
         )
         # Flush, do not commit: the audit entry below belongs to the same
         # transaction as the deletion it describes.

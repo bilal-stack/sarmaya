@@ -360,7 +360,7 @@ class TestCreateUpdateDeletePermissions:
         inv = _make_invoice(db, tenant.id, clerk["id"],
                             InvoiceState.DRAFT.value, 1000)
         with pytest.raises(PermissionError):
-            InvoiceService(db).delete_invoice(inv.id, auditor)
+            InvoiceService(db).delete_invoice(inv.id, auditor, "Auditor should never get here.")
 
 
 class TestDashboardSummary:

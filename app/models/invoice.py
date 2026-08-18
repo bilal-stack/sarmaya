@@ -1,10 +1,10 @@
 from sqlalchemy import Column, String, Integer, Date, Numeric, JSON, ForeignKey, DateTime, Boolean, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from app.models.base import BaseModel, UTC_NOW
+from app.models.base import BaseModel, SoftDeleteMixin, UTC_NOW
 from app.core.enums import InvoiceState, Currency
 
-class Invoice(BaseModel):
+class Invoice(BaseModel, SoftDeleteMixin):
     __tablename__ = "invoices"
 
     #: Which configured state machine governs this record. Read by the

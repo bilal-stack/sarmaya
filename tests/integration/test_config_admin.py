@@ -71,7 +71,7 @@ class TestApprovalPolicyCrud:
         assert updated.priority == 5
         assert updated.is_active is False
 
-        svc.delete_policy(created.id, admin)
+        svc.delete_policy(created.id, admin, "Superseded by the new tiered matrix.")
         with pytest.raises(ValueError):
             svc.get_policy(created.id, admin)
 

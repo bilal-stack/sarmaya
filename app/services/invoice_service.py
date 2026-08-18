@@ -16,6 +16,7 @@ from app.services.policy import explain_approval_routing
 from app.services.policy_eval import record_approval_routing_eval
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
+from app.services.soft_delete import withdraw
 from app.services import sod
 from app.services.delegation import resolve_authority, resolve_permission
 from app.services.notification_service import NotificationService
@@ -421,12 +422,14 @@ class InvoiceService:
         self.repository.commit()
         return invoice
     
-    def delete_invoice(self, invoice_id: UUID, current_user: dict) -> None:
-        """
-        Delete invoice
-        
-        Business logic:
-        - Only allow delete in draft state
+    def delete_invoice(self, invoice_id: UUID, current_user: dict, reason: str) -> None:
+        """Withdraw a draft invoice.
+
+        Still draft-only: once submitted it carries approvals and belongs to a
+        workflow. The row is now kept rather than destroyed — a duplicate check
+        that cannot see the withdrawn original will happily accept the same
+        invoice again, and the upload path matches on file hash and vendor plus
+        number, both of which went with the row.
         """
         invoice = self.repository.get_by_id(invoice_id)
 
@@ -440,19 +443,13 @@ class InvoiceService:
 
         if invoice.current_state != InvoiceState.DRAFT.value:
             raise ValueError("Can only delete draft invoices")
-        
-        # Log before delete
-        log_audit(
-            db=self.db,
-            tenant_id=current_user["tenant_id"],
-            user_id=current_user["id"],
+
+        withdraw(
+            self.db, invoice, current_user, reason,
             object_type="invoice",
-            object_id=invoice.id,
-            action="deleted",
-            before_value={"invoice_number": invoice.invoice_number}
+            before_value={"invoice_number": invoice.invoice_number,
+                          "vendor_name": invoice.vendor_name},
         )
-        
-        self.repository.delete(invoice)
         self.repository.commit()
     
     def validate_invoice(

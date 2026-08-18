@@ -215,7 +215,7 @@ class TestDelete:
         svc = VendorService(db)
         vendor = svc.create_vendor(_vendor_payload(), admin)
 
-        svc.delete_vendor(vendor.id, admin)
+        svc.delete_vendor(vendor.id, admin, "Duplicate record created in error.")
         with pytest.raises(ValueError):
             svc.get_vendor(vendor.id, admin)
 
@@ -226,7 +226,7 @@ class TestDelete:
         _make_invoice_for_vendor(db, tenant.id, admin["id"], vendor)
 
         with pytest.raises(ValueError):
-            svc.delete_vendor(vendor.id, admin)
+            svc.delete_vendor(vendor.id, admin, "Duplicate record created in error.")
 
     def test_auditor_cannot_delete(self, db, tenant, make_user):
         admin = make_user(UserRole.ADMIN)
@@ -234,4 +234,4 @@ class TestDelete:
         vendor = VendorService(db).create_vendor(_vendor_payload(), admin)
 
         with pytest.raises(PermissionError):
-            VendorService(db).delete_vendor(vendor.id, auditor)
+            VendorService(db).delete_vendor(vendor.id, auditor, "Auditor should never get here.")

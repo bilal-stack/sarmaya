@@ -65,7 +65,7 @@ class TestPolicyVersioning:
         admin = make_user(UserRole.ADMIN)
         svc = ApprovalPolicyService(db)
         policy = svc.create_policy(ApprovalPolicyCreate(policy_name="Doomed", rule=_rule(1)), admin)
-        svc.delete_policy(policy.id, admin)
+        svc.delete_policy(policy.id, admin, "Replaced during the annual policy review.")
 
         versions = ConfigVersionService(db).list_versions(TYPE_APPROVAL_POLICY, str(policy.id), admin)
         assert versions[0].version == 2

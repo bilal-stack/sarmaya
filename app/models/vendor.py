@@ -1,10 +1,10 @@
 from sqlalchemy import Column, String, Integer, JSON, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
+from app.models.base import BaseModel, SoftDeleteMixin
 from app.core.enums import VendorStatus
 
-class Vendor(BaseModel):
+class Vendor(BaseModel, SoftDeleteMixin):
     __tablename__ = "vendors"
     
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)

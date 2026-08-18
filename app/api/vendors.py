@@ -18,6 +18,7 @@ from app.services.vendor_bank_service import VendorBankService
 from app.schemas.vendor_bank_change import (
     BankChangeRequest, RejectBankChangeRequest, BankChangeResponse,
 )
+from app.schemas.withdrawal import WithdrawRequest
 
 router = APIRouter(prefix="/vendors", tags=["Vendors"])
 
@@ -162,11 +163,12 @@ def update_vendor_status(
 @router.delete("/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_vendor(
     vendor_id: UUID,
+    payload: WithdrawRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
-        VendorService(db).delete_vendor(vendor_id, current_user)
+        VendorService(db).delete_vendor(vendor_id, current_user, payload.reason)
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 

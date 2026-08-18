@@ -20,6 +20,7 @@ from app.schemas.autopilot import AutopilotConfig
 from app.services.autopilot_service import AutopilotService
 from app.schemas.config_version import ConfigVersionResponse
 from app.services.config_versioning import ConfigVersionService
+from app.schemas.withdrawal import WithdrawRequest
 
 router = APIRouter(prefix="/config", tags=["Configuration"])
 
@@ -187,11 +188,12 @@ def update_approval_policy(
 @router.delete("/approval-policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_approval_policy(
     policy_id: UUID,
+    payload: WithdrawRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
-        ApprovalPolicyService(db).delete_policy(policy_id, current_user)
+        ApprovalPolicyService(db).delete_policy(policy_id, current_user, payload.reason)
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 

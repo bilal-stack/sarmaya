@@ -1,10 +1,10 @@
 from sqlalchemy import Column, String, Integer, Boolean, JSON, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from app.models.base import BaseModel
+from app.models.base import BaseModel, SoftDeleteMixin
 
 
-class Policy(BaseModel):
+class Policy(BaseModel, SoftDeleteMixin):
     __tablename__ = "policies"
     
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)

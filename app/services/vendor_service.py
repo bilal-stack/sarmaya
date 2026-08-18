@@ -7,6 +7,8 @@ from app.models.vendor import Vendor
 from app.schemas.vendor import VendorCreate, VendorUpdate
 from app.core.enums import VendorStatus
 from app.services.audit import log_audit
+from app.services.soft_delete import withdraw
+from app.services.watchlist_service import alert_master_data
 from app.services import sod
 from app.core.roles import has_permission, PERM_MANAGE_VENDORS, PERM_VIEW_VENDORS
 
@@ -157,6 +159,10 @@ class VendorService:
             before_value=before,
             after_value={field: getattr(vendor, field, None) for field in changes},
         )
+        alert_master_data(
+            self.db, current_user, vendor, before,
+            {field: getattr(vendor, field, None) for field in changes},
+        )
         self.repository.commit()
         return vendor
 
@@ -208,9 +214,15 @@ class VendorService:
         self.repository.commit()
         return vendor
 
-    def delete_vendor(self, vendor_id: UUID, current_user: dict) -> None:
-        """Hard-delete a vendor. Blocked if any invoice references it — callers
-        should deactivate (set_status INACTIVE) instead to preserve history."""
+    def delete_vendor(self, vendor_id: UUID, current_user: dict, reason: str) -> None:
+        """Withdraw a vendor. Blocked if any invoice references it — callers
+        should deactivate (set_status INACTIVE) instead to preserve history.
+
+        The row is kept. It used to be destroyed, which left the audit entry
+        for the deletion pointing at an id nothing resolved, and orphaned every
+        bank change recorded against the vendor — the history of who moved that
+        account, surviving with nothing to attach it to.
+        """
         self._require_manage(current_user)
 
         vendor = self.repository.get_by_id(vendor_id)
@@ -222,17 +234,11 @@ class VendorService:
                 "Cannot delete a vendor with linked invoices; deactivate it instead"
             )
 
-        self.repository.delete(vendor)
-        self.db.flush()
-
-        log_audit(
-            db=self.db,
-            tenant_id=current_user["tenant_id"],
-            user_id=current_user["id"],
+        withdraw(
+            self.db, vendor, current_user, reason,
             object_type="vendor",
-            object_id=vendor_id,
-            action="deleted",
-            before_value={"legal_name": vendor.legal_name},
+            before_value={"legal_name": vendor.legal_name,
+                          "status": getattr(vendor.status, "value", vendor.status)},
         )
         self.repository.commit()
 

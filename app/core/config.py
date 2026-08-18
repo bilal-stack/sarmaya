@@ -78,11 +78,22 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     
     # Email (for approval notifications)
+    #: Delivery is opt-in. Every notification is sent synchronously inside the
+    #: request that triggered it, so an unreachable mail server does not fail
+    #: quietly — it stalls the action. That was tolerable while notifications
+    #: fired only on invoice submit/approve/reject; the change watchlist fires
+    #: on ordinary vendor edits, which put a socket connect in the path of a
+    #: routine save. Defaulting to off means a deployment that has not
+    #: configured SMTP pays nothing, rather than paying a timeout per write and
+    #: swallowing the error.
+    SMTP_ENABLED: bool = False
     SMTP_HOST: str = "localhost"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "noreply@sarmaya.com"
+    #: Seconds. Short on purpose: this is on the request path.
+    SMTP_TIMEOUT: int = 5
     
     # AI Services
     GOOGLE_CLOUD_VISION_CREDENTIALS: str = ""

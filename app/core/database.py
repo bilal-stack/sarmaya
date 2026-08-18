@@ -155,6 +155,93 @@ def _scope_query_to_tenant(execute_state):
         )
 
 
+class HardDeleteRefused(RuntimeError):
+    """Something tried to destroy a record the audit trail still refers to."""
+
+
+_SOFT_DELETE_MAPPERS = None
+
+
+def _soft_delete_mappers():
+    """Every mapped class carrying SoftDeleteMixin, discovered once."""
+    global _SOFT_DELETE_MAPPERS
+    if _SOFT_DELETE_MAPPERS is None:
+        from app.models.base import SoftDeleteMixin
+
+        _SOFT_DELETE_MAPPERS = [
+            mapper.class_
+            for mapper in mapper_registry.mappers
+            if issubclass(mapper.class_, SoftDeleteMixin)
+        ]
+    return _SOFT_DELETE_MAPPERS
+
+
+#: Set on session.info to see withdrawn rows — the audit trail and evidence
+#: packs must still resolve what a deletion event refers to, which is the whole
+#: reason the row was kept.
+INCLUDE_DELETED = "include_deleted"
+
+
+def include_deleted(session: Session, value: bool = True) -> None:
+    session.info[INCLUDE_DELETED] = value
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _exclude_soft_deleted(execute_state):
+    """Hide withdrawn rows from every ORM SELECT.
+
+    Same mechanism and the same argument as the tenant scoping above: one rule
+    applied centrally beats ~40 call sites remembering a filter, and the one
+    that forgets is the one that shows a deleted vendor in a payment run.
+
+    Deliberately *not* conditional on a bound tenant, unlike tenant scoping.
+    That filter is a safety net over RLS, which already enforces it in the
+    database; there is no second mechanism behind this one.
+    """
+    if (
+        not execute_state.is_select
+        or execute_state.is_column_load
+        or execute_state.is_relationship_load
+    ):
+        return
+    if execute_state.session.info.get(INCLUDE_DELETED):
+        return
+
+    for model in _soft_delete_mappers():
+        execute_state.statement = execute_state.statement.options(
+            with_loader_criteria(
+                model,
+                model.deleted_at.is_(None),
+                include_aliases=True,
+            )
+        )
+
+
+@event.listens_for(Session, "before_flush")
+def _refuse_hard_deletes(session, flush_context, instances):
+    """The guardrail the Build Book asks for, at the last point it can be applied.
+
+    Withdrawing a record is a service-layer decision that writes an audit entry
+    and a reason. Nothing should reach the database as a DELETE for these
+    models — not a stray `session.delete()`, not a cascade, not a cleanup
+    script that seemed harmless. Raising here makes that structural rather than
+    a convention people have to remember, and the error names the alternative
+    so whoever hits it is not left guessing.
+    """
+    if not session.deleted:
+        return
+    from app.models.base import SoftDeleteMixin
+
+    for obj in session.deleted:
+        if isinstance(obj, SoftDeleteMixin):
+            raise HardDeleteRefused(
+                f"{type(obj).__name__} cannot be hard-deleted: the audit trail "
+                "would keep an entry pointing at a row that no longer exists. "
+                "Withdraw it instead (soft delete with a reason), which keeps "
+                "the record resolvable and out of every query."
+            )
+
+
 # ============================================
 # TENANT ISOLATION STRATEGY
 # ============================================

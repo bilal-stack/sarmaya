@@ -72,6 +72,12 @@ PERM_MANAGE_USERS = "users.manage"
 PERM_VIEW_USERS = "users.view"
 
 PERM_VIEW_AUDIT = "audit.view"
+# The Build Book's "watchlist role": who is told, in real time, when a vendor's
+# bank details move, master data is edited, or an approval policy changes.
+# Oversight rather than operations — the people who hold it are deliberately not
+# the ones making these changes, or the alert would be addressed to its author.
+PERM_RECEIVE_WATCHLIST = "watchlist.receive"
+PERM_VIEW_WATCHLIST = "watchlist.view"
 PERM_MANAGE_POLICIES = "policies.manage"
 
 PERM_MANAGE_WORKFLOW = "workflow.manage"
@@ -117,6 +123,8 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_USERS,
         # Audit - ALL
         PERM_VIEW_AUDIT,
+        PERM_RECEIVE_WATCHLIST,
+        PERM_VIEW_WATCHLIST,
         # Policies - ALL
         PERM_MANAGE_POLICIES,
         # Workflow - ALL
@@ -184,6 +192,8 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_BANK_CHANGE,
         PERM_VIEW_BANK_DETAILS,
         PERM_VIEW_AUDIT,
+        PERM_RECEIVE_WATCHLIST,
+        PERM_VIEW_WATCHLIST,
     ],
     APPROVER: [
         PERM_VIEW_INVOICE,
@@ -203,6 +213,8 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_VENDORS,
         PERM_VIEW_USERS,
         PERM_VIEW_AUDIT,
+        PERM_RECEIVE_WATCHLIST,
+        PERM_VIEW_WATCHLIST,
     ],
     SYSTEM: [
         PERM_VIEW_INVOICE,

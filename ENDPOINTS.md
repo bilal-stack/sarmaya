@@ -678,6 +678,39 @@ The envelope adds `by_work_item_type` alongside `counts`.
 > the client built `/ai-tools/invoices/{id}` itself. Any client still doing that
 > sends the reader to an invoice page for a payment run.
 
+### Change Watchlist
+```bash
+GET  /api/v1/watchlist?open_only=&category=   # alerts newest first + open_count
+POST /api/v1/watchlist/{alert_id}/acknowledge # {note?} — records that somebody looked
+```
+
+Raised by the three changes the Build Book names — vendor bank changes, vendor
+master data edits, and approval policy create/update/delete. Each moves money or
+moves the rules **without touching an invoice**, so nothing else surfaces them.
+
+Needs `watchlist.view` (admin, CFO, auditor). The clerk and manager who make
+these changes deliberately do not hold it — they are the subjects of the
+watchlist, not its audience. Whoever caused a change cannot acknowledge its own
+alert. Account numbers are masked here as everywhere else.
+
+> Email delivery is opt-in: set `SMTP_ENABLED=true`. Notifications are sent
+> synchronously inside the request, so an unconfigured mail server would
+> otherwise add a socket timeout to every vendor edit.
+
+### Deleting records
+
+`DELETE /vendors/{id}`, `DELETE /invoices/{id}` and
+`DELETE /config/approval-policies/{id}` **withdraw** rather than destroy, and
+each takes a body:
+
+```json
+{ "reason": "at least 10 characters explaining why" }
+```
+
+Withdrawn rows vanish from every query but stay resolvable, so the audit entry
+describing the deletion still points at something. A reason is required because
+a deletion is the one event nobody can reconstruct from what is left.
+
 ### Configuration (admin)
 ```bash
 POST /api/v1/config/initialize-defaults                # seed default workflow + approval matrix

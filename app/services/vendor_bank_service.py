@@ -41,6 +41,7 @@ from app.core.roles import (
     PERM_APPROVE_BANK_CHANGE,
 )
 from app.services.audit import log_audit
+from app.services.watchlist_service import alert_bank_change
 from app.services import sod
 from app.utils.datetime_helpers import utc_now, to_utc, make_naive
 
@@ -171,6 +172,7 @@ class VendorBankService:
                 "requested_by": str(current_user["id"]),
             },
         )
+        alert_bank_change(self.db, current_user, vendor, change, "requested")
         self.db.commit()
         self.db.refresh(change)
         return change
@@ -221,6 +223,9 @@ class VendorBankService:
                 "effective_at": change.effective_at.isoformat(),
                 "cooling_hours": hours,
             },
+        )
+        alert_bank_change(
+            self.db, current_user, self._vendor(change.vendor_id), change, "approved"
         )
         self.db.commit()
         self.db.refresh(change)
@@ -278,6 +283,7 @@ class VendorBankService:
                 "approved_by": str(change.approved_by),
             },
         )
+        alert_bank_change(self.db, current_user, vendor, change, "applied")
         self.db.commit()
         self.db.refresh(vendor)
         return vendor

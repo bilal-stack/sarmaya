@@ -48,6 +48,12 @@ CALLER_COMMITS = {
     # run_escalations sweeps every workflow and commits once for the whole
     # run, so the per-workflow helper deliberately does not.
     "app/services/sla_service.py::_escalate_workflow",
+    # Shared helpers: the withdrawal and the audit entry describing it must
+    # land in one transaction, so the calling service commits both together.
+    # Committing here would split them and could leave a record marked deleted
+    # with no entry saying who did it — the opposite of the point.
+    "app/services/soft_delete.py::withdraw",
+    "app/services/soft_delete.py::restore",
 }
 
 

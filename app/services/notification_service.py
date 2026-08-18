@@ -141,6 +141,17 @@ class NotificationService:
     def _deliver(self, to_email: str, subject: str, body: str) -> None:
         """Send a single email via SMTP. Isolated so tests can patch it and so
         one bad address doesn't stop the rest of the batch."""
+        if not settings.SMTP_ENABLED:
+            # Not an error: delivery is opt-in, because this runs inside the
+            # request that triggered it. Logged at info so a deployment that
+            # expected mail can see immediately why none arrived, rather than
+            # finding an exception swallowed further down.
+            logger.info(
+                "SMTP disabled; not sending '%s' to %s. Set SMTP_ENABLED=true "
+                "once a mail server is configured.", subject, to_email,
+            )
+            return
+
         msg = EmailMessage()
         msg["From"] = settings.SMTP_FROM_EMAIL
         msg["To"] = to_email
@@ -148,7 +159,9 @@ class NotificationService:
         msg.set_content(body)
 
         try:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
+            with smtplib.SMTP(
+                settings.SMTP_HOST, settings.SMTP_PORT, timeout=settings.SMTP_TIMEOUT
+            ) as server:
                 server.starttls()
                 if settings.SMTP_USER:
                     server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)

@@ -17,6 +17,7 @@ from app.agents.invoice_agent import InvoiceNextActionAgent
 from app.core.enums import InvoiceState
 from app.core.config import settings
 from app.core.roles import has_permission, PERM_VIEW_INVOICE
+from app.schemas.withdrawal import WithdrawRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invoices", tags=["Invoices"])
@@ -147,6 +148,7 @@ def update_invoice(
 @router.delete("/{invoice_id}")
 def delete_invoice(
     invoice_id: UUID,
+    payload: WithdrawRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
@@ -156,7 +158,7 @@ def delete_invoice(
     service = InvoiceService(db)
     
     try:
-        service.delete_invoice(invoice_id, current_user)
+        service.delete_invoice(invoice_id, current_user, payload.reason)
         return {"message": "Invoice deleted successfully"}
     except ValueError as e:
         raise HTTPException(
