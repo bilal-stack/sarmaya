@@ -678,6 +678,16 @@ The envelope adds `by_work_item_type` alongside `counts`.
 > the client built `/ai-tools/invoices/{id}` itself. Any client still doing that
 > sends the reader to an invoice page for a payment run.
 
+### Notifications and SLAs
+
+Every module tells whoever can act when work arrives — requisition submitted, PO
+submitted, tender closed, payment awaiting release — resolved by *permission*,
+excluding whoever raised it. Email delivery is opt-in (`SMTP_ENABLED`).
+
+Every workflow's waiting state carries an SLA. RFQ `closed` was the exception
+and now escalates to manager after 48h: quoting has ended, the vendors are
+waiting, and nothing else chases it.
+
 ### Change Watchlist
 ```bash
 GET  /api/v1/watchlist?open_only=&category=   # alerts newest first + open_count

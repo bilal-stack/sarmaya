@@ -33,6 +33,8 @@ from app.core.roles import (
 )
 from app.services.workflow import transition_state
 from app.services.audit import log_audit
+from app.services.notification_service import NotificationService
+from app.core.roles import PERM_AWARD_SOURCING
 from app.services.delegation import resolve_permission
 from app.utils.datetime_helpers import utc_now
 
@@ -342,6 +344,11 @@ class SourcingService:
                     for q in rfq.quotes
                 ],
             },
+        )
+        # The bidders are now waiting on an answer and nothing else chases it.
+        NotificationService(self.db).notify_awaiting_action(
+            rfq, PERM_AWARD_SOURCING, "award or cancel",
+            exclude_user_id=rfq.created_by,
         )
         self.db.commit()
         self.db.refresh(rfq)

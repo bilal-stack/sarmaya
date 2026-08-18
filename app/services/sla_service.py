@@ -21,6 +21,7 @@ from app.services.workflow import workflow_models
 from app.services.notification_service import NotificationService
 from app.core.roles import has_permission, PERM_MANAGE_WORKFLOW
 from app.utils.datetime_helpers import to_utc, make_naive
+from app.utils.records import record_reference
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +100,12 @@ class SlaService:
                 # client; reference is the workflow-agnostic label.
                 "invoice_id": str(invoice.id),
                 "invoice_number": getattr(invoice, "invoice_number", None),
-                "reference": getattr(invoice, "invoice_number", None)
-                or getattr(invoice, "po_number", None)
-                or str(invoice.id),
+                # Read from the model's own REFERENCE_FIELD. The hardcoded
+                # invoice_number-or-po_number fallback here was the same shape
+                # of bug DR-033 fixed elsewhere: every workflow outside that
+                # pair reported a raw UUID, so an escalation about RFQ-SLA
+                # arrived naming a number nobody can look up.
+                "reference": record_reference(invoice),
                 "state": state,
                 "escalated_to": role,
                 "sla_due_at": due.isoformat() if due else None,

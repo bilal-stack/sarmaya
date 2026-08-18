@@ -38,6 +38,7 @@ from app.services.policy import explain_approval_routing
 from app.services.policy_eval import record_approval_routing_eval
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
+from app.services.notification_service import NotificationService
 from app.services import sod
 from app.services.delegation import resolve_authority, resolve_permission
 from app.utils.datetime_helpers import utc_now
@@ -211,6 +212,10 @@ class PurchaseOrderService:
                 "policy_name": routing["policy_name"],
                 "routing_reason": routing["reason"],
             },
+        )
+        NotificationService(self.db).notify_awaiting_action(
+            order, PERM_APPROVE_PO, "approve or reject",
+            exclude_user_id=order.created_by,
         )
         self.repository.commit()
         return self.repository.refresh(order), required_role

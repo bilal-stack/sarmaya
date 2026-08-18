@@ -88,8 +88,15 @@ DEFAULT_RFQ_STATES = [
     (RFQ_DRAFT, "Draft", 1, True, False, [RFQ_ISSUED, RFQ_CANCELLED], "#gray",
         {RFQ_ISSUED: ["rfq_has_invited_vendors"]}, {}),
     (RFQ_ISSUED, "Issued", 2, False, False, [RFQ_CLOSED, RFQ_CANCELLED], "#yellow", {}, {}),
+    # The only state in this workflow with a deadline, and the one that needed
+    # it: quoting has ended, the vendors are waiting on an answer, and nothing
+    # else chases it. Every other workflow had an SLA on its waiting state while
+    # a closed tender could sit unawarded indefinitely without ever becoming
+    # overdue — invisible to the escalation runner and to the "overdue only"
+    # view, because a timer that does not exist never breaches.
     (RFQ_CLOSED, "Closed", 3, False, False, [RFQ_AWARDED, RFQ_CANCELLED], "#blue",
-        {RFQ_AWARDED: ["rfq_has_quotes"]}, {}),
+        {RFQ_AWARDED: ["rfq_has_quotes"]},
+        {"hours": 48, "escalate_to": "manager"}),
     (RFQ_AWARDED, "Awarded", 4, False, True, [], "#green", {}, {}),
     (RFQ_CANCELLED, "Cancelled", 5, False, True, [], "#orange", {}, {}),
 ]

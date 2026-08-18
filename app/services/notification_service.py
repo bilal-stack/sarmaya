@@ -98,9 +98,61 @@ class NotificationService:
         except Exception:
             logger.exception("Failed to send SLA escalation notification")
 
+    def notify_awaiting_action(
+        self, record, permission: str, action_label: str,
+        exclude_user_id=None,
+    ) -> None:
+        """Tell whoever can act on this that it has arrived.
+
+        Every module except invoices was silent on arrival. A requisition
+        approver, a tender awarder and a payment releaser were told only when
+        the item had already breached its SLA — the first message about a
+        decision was a complaint that it was late, which is a poor way to run
+        a queue and makes the escalation meaningless as a signal.
+
+        Recipients are resolved by *permission*, not by role: who may award a
+        tender is a capability, and naming roles here would drift from
+        `roles.py` the moment one is granted somewhere new. Whoever created the
+        item is excluded, because segregation of duties will refuse them at the
+        decision anyway.
+        """
+        try:
+            recipients = [
+                e for e in self._permission_holders(record.tenant_id, permission)
+                if e
+            ]
+            if exclude_user_id:
+                excluded = self._user_emails([exclude_user_id])
+                recipients = [e for e in recipients if e not in excluded]
+
+            label = describe_record(record)
+            amount = getattr(record, "total_amount", None) or getattr(
+                record, "estimated_amount", None
+            )
+            subject = f"{label} awaiting your {action_label}"
+            body = (
+                f"{label}{f' for {amount}' if amount is not None else ''} is "
+                f"waiting on you to {action_label}.\n\n"
+                "It is in your Decision Inbox."
+            )
+            self._send(recipients, subject, body)
+        except Exception:
+            logger.exception("Failed to send awaiting-action notification")
+
     # ------------------------------------------------------------------ #
     # Recipient resolution
     # ------------------------------------------------------------------ #
+    def _permission_holders(self, tenant_id: UUID, permission: str) -> List[str]:
+        """Active users in the tenant whose role carries `permission`."""
+        from app.core.roles import has_permission
+
+        return [
+            u.email for u in self.db.query(User).filter(
+                User.tenant_id == tenant_id, User.is_active.is_(True)
+            ).all()
+            if u.email and has_permission(u.role, permission)
+        ]
+
     def _approver_emails(self, tenant_id: UUID, required_role: str) -> List[str]:
         """Active users in the tenant who can act on the approval: anyone with
         the required role (e.g. manager/cfo) plus admins."""

@@ -32,6 +32,8 @@ from app.core.roles import (
 from app.services.workflow import transition_state
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
+from app.services.notification_service import NotificationService
+from app.core.roles import PERM_APPROVE_REQUISITION
 from app.services import sod
 from app.services.delegation import resolve_permission
 from app.utils.datetime_helpers import utc_now
@@ -152,6 +154,10 @@ class RequisitionService:
             workflow_step=self._state(requisition),
             workflow_type=OBJECT_TYPE,
             after_value={"estimated_amount": str(requisition.estimated_amount)},
+        )
+        NotificationService(self.db).notify_awaiting_action(
+            requisition, PERM_APPROVE_REQUISITION, "approve or reject",
+            exclude_user_id=requisition.created_by,
         )
         self.db.commit()
         self.db.refresh(requisition)

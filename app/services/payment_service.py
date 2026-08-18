@@ -39,6 +39,7 @@ from app.core.roles import (
 from app.services.workflow import transition_state
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
+from app.services.notification_service import NotificationService
 from app.services import sod
 from app.services.delegation import resolve_permission
 from app.utils.datetime_helpers import utc_now
@@ -210,6 +211,12 @@ class PaymentService:
             workflow_step=self._state(payment),
             workflow_type=OBJECT_TYPE,
             after_value={"total_amount": str(payment.total_amount)},
+        )
+        # Maker-checker means somebody else has to release this, so somebody
+        # else has to know it is there.
+        NotificationService(self.db).notify_awaiting_action(
+            payment, PERM_RELEASE_PAYMENT, "release or reject",
+            exclude_user_id=payment.prepared_by,
         )
         self.db.commit()
         self.db.refresh(payment)
