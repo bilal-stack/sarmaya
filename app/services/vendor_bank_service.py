@@ -258,6 +258,7 @@ class VendorBankService:
 
         change.current_state = BankChangeState.EFFECTIVE
         change.applied_at = now
+        change.applied_by = current_user["id"]
         self.db.add(vendor)
         self.db.add(change)
         self.db.flush()

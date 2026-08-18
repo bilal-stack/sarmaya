@@ -81,3 +81,37 @@ def violates_self_bank_change_approval(requested_by, current_user: dict) -> bool
     the wrong person. A second pair of eyes is the entire mechanism.
     """
     return _same_person(requested_by, current_user.get("id"))
+
+
+def violates_first_payment_after_bank_change(change, current_user: dict) -> bool:
+    """True if whoever changed a vendor's bank details is releasing the first
+    payment to that vendor since the change.
+
+    Build Book, line 193: "Same person cannot change vendor bank details and
+    approve the first payment after change."
+
+    DR-032 holds payments while a change is *open*, which covers the window
+    before anyone has agreed to it. It says nothing about afterwards — and
+    afterwards is when the money actually moves. A clerk who requests a change,
+    gets it approved by a colleague who glances at it, waits out the cooling
+    period and then releases the first run to that vendor has completed the
+    fraud with every control formally satisfied. The second signature at
+    approval only means something if it is not the same person again here.
+
+    Both the requester and whoever applied it count as having changed the
+    details: applying needs only vendors.manage, so the person who writes the
+    new account onto the vendor may not be the one who asked for it, and either
+    of them choosing the destination and then approving the payment to it is
+    the same conflict.
+
+    No admin exemption, for the same reason as the approval rule: this is one
+    payment, not a standing restriction, and the carve-out that keeps a
+    one-person tenant working would keep a one-person fraud working.
+    """
+    if change is None:
+        return False
+    user_id = current_user.get("id")
+    return (
+        _same_person(change.requested_by, user_id)
+        or _same_person(getattr(change, "applied_by", None), user_id)
+    )

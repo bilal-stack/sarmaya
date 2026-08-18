@@ -89,9 +89,12 @@ def list_bank_changes(
     the same reason review-queue sits above it.
     """
     try:
-        return VendorBankService(db).list_changes(
-            current_user, vendor_id=vendor_id, state=state
-        )
+        return [
+            BankChangeResponse.for_user(c, current_user)
+            for c in VendorBankService(db).list_changes(
+                current_user, vendor_id=vendor_id, state=state
+            )
+        ]
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -103,7 +106,9 @@ def get_vendor(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return VendorService(db).get_vendor(vendor_id, current_user)
+        return VendorResponse.for_user(
+            VendorService(db).get_vendor(vendor_id, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -115,7 +120,9 @@ def create_vendor(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return VendorService(db).create_vendor(payload, current_user)
+        return VendorResponse.for_user(
+            VendorService(db).create_vendor(payload, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -128,7 +135,10 @@ def update_vendor(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return VendorService(db).update_vendor(vendor_id, payload, current_user)
+        return VendorResponse.for_user(
+            VendorService(db).update_vendor(vendor_id, payload, current_user),
+            current_user,
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -141,7 +151,10 @@ def update_vendor_status(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return VendorService(db).set_status(vendor_id, payload.status, current_user)
+        return VendorResponse.for_user(
+            VendorService(db).set_status(vendor_id, payload.status, current_user),
+            current_user,
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -185,7 +198,10 @@ def request_bank_change(
     be right.
     """
     try:
-        return VendorBankService(db).request_change(vendor_id, payload, current_user)
+        return BankChangeResponse.for_user(
+            VendorBankService(db).request_change(vendor_id, payload, current_user),
+            current_user,
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -206,7 +222,9 @@ def approve_bank_change(
     applied separately once it has run.
     """
     try:
-        return VendorBankService(db).approve_change(change_id, current_user)
+        return BankChangeResponse.for_user(
+            VendorBankService(db).approve_change(change_id, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -223,7 +241,9 @@ def apply_bank_change(
     it is the window in which the real vendor can say they never asked for this.
     """
     try:
-        return VendorBankService(db).apply_change(change_id, current_user)
+        return VendorResponse.for_user(
+            VendorBankService(db).apply_change(change_id, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -236,8 +256,9 @@ def reject_bank_change(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return VendorBankService(db).reject_change(
-            change_id, payload.reason, current_user
+        return BankChangeResponse.for_user(
+            VendorBankService(db).reject_change(change_id, payload.reason, current_user),
+            current_user,
         )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
@@ -252,8 +273,9 @@ def cancel_bank_change(
 ):
     """Withdraw a request you raised."""
     try:
-        return VendorBankService(db).cancel_change(
-            change_id, payload.reason, current_user
+        return BankChangeResponse.for_user(
+            VendorBankService(db).cancel_change(change_id, payload.reason, current_user),
+            current_user,
         )
     except (ValueError, PermissionError) as e:
         _raise_for(e)

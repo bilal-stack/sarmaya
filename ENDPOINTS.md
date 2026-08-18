@@ -711,6 +711,14 @@ POST /api/v1/autopilot/{invoice_id}/revert
 
 ### Vendor bank changes (`/vendors`) — the AP fraud control
 
+> **Account numbers are masked unless you hold `vendors.view_bank_details`.**
+> Held by admin, AP clerk, manager and CFO — the roles that act on payment
+> details — and deliberately not by the auditor. Masked values keep the last
+> four (`••••6702`) so an account stays identifiable, and the response carries
+> `bank_details_visible: false` so a client can say why. This applies to the
+> vendor record, both sides of a bank change, and the destination on every
+> payment line.
+
 ```bash
 POST /api/v1/vendors/{id}/bank-change   # {reason, iban?, bank_account_number?, ...}
                                         # Bank fields are REFUSED by PATCH /vendors/{id};
@@ -726,6 +734,14 @@ POST /api/v1/vendors/bank-changes/{id}/apply     # writes it to the vendor, once
 POST /api/v1/vendors/bank-changes/{id}/reject    # {"reason": "..."}
 POST /api/v1/vendors/bank-changes/{id}/cancel    # {"reason": "..."}
 ```
+
+The control does not end when the change is applied. Build Book line 193: whoever
+requested or applied a change cannot **release** the first payment to that vendor
+afterwards — the second signature at approval means nothing if it is the same
+person again at the money. Measured against releases, so a run that was prepared
+and rejected does not discharge it, and the restriction lifts once one payment
+has gone out with somebody else's signature. Preparation is unaffected.
+
 
 > Build Book A1 control. The most common invoice fraud is a real invoice paid
 > to a changed account: every downstream control passes because nothing

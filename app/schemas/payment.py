@@ -42,6 +42,12 @@ class RejectPaymentRequest(BaseModel):
 
 
 class PaymentLineResponse(BaseModel):
+    """One invoice being settled, with the destination copied at preparation.
+
+    These carry the same account identifiers as the vendor record, so masking
+    the vendor while leaving these open would just move the leak: the auditor
+    holds payments.view.
+    """
     id: UUID
     line_number: Decimal
     invoice_id: UUID
@@ -83,8 +89,27 @@ class PaymentResponse(BaseModel):
     bank_file_generated_at: Optional[datetime] = None
     created_at: datetime
     lines: List[PaymentLineResponse] = []
+    #: False when the destination accounts on the lines are masked.
+    bank_details_visible: bool = True
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def for_user(cls, payment, current_user: dict) -> "PaymentResponse":
+        """Serialise a run, masking each line's destination unless the caller
+        holds `vendors.view_bank_details`."""
+        from app.core.roles import has_permission, PERM_VIEW_BANK_DETAILS
+        from app.utils.masking import mask_account
+
+        response = cls.model_validate(payment)
+        if has_permission(current_user["role"], PERM_VIEW_BANK_DETAILS):
+            return response
+
+        for line in response.lines:
+            line.bank_account_number = mask_account(line.bank_account_number)
+            line.iban = mask_account(line.iban)
+        response.bank_details_visible = False
+        return response
 
 
 class PaymentListResponse(BaseModel):

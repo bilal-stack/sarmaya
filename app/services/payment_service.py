@@ -30,7 +30,9 @@ from sqlalchemy.orm import Session
 from app.models.invoice import Invoice
 from app.models.payment import Payment, PaymentLine
 from app.models.vendor import Vendor
-from app.core.enums import InvoiceState, PaymentState, VendorStatus, Currency
+from app.core.enums import (
+    InvoiceState, PaymentState, VendorStatus, Currency, BankChangeState,
+)
 from app.core.roles import (
     has_permission, PERM_VIEW_PAYMENT, PERM_PREPARE_PAYMENT, PERM_RELEASE_PAYMENT,
 )
@@ -242,6 +244,20 @@ class PaymentService:
                 "other than the person who prepared it."
             )
 
+        # Build Book line 193. DR-032 holds payments while a change is open;
+        # this covers the other side of it, when the new account is live and
+        # the money is about to go there for the first time.
+        blocking = self._first_payment_after_bank_change(payment, current_user)
+        if blocking:
+            vendor_name, change = blocking
+            self._audit_block(payment, current_user, "first_payment_after_bank_change")
+            raise PermissionError(
+                f"Segregation of duties: you changed {vendor_name}'s bank "
+                "details, so the first payment to them afterwards must be "
+                "released by somebody else. The second signature on the change "
+                "only means something if it is not the same person again here."
+            )
+
         if not transition_state(
             self.db, payment, PaymentState.RELEASED.value, current_user["id"]
         ):
@@ -426,6 +442,57 @@ class PaymentService:
                 f"{invoice.invoice_number} is already on another payment run"
             )
         return invoice
+
+    def _first_payment_after_bank_change(self, payment: Payment, current_user: dict):
+        """(vendor_name, change) if this run is the first payment to a vendor
+        since the caller changed that vendor's bank details — otherwise None.
+
+        "First" is measured against releases, not preparations: a run that was
+        prepared and rejected never paid anybody, so it does not spend the one
+        payment this rule guards. Only vendors on *this* run are considered, so
+        a change to some unrelated vendor never blocks a release.
+
+        The restriction lifts by itself once one payment has gone through with
+        somebody else's signature on it. It is a gate on a single moment, not a
+        standing ban on the person who maintains vendor records.
+        """
+        from app.models.vendor_bank_change import VendorBankChange
+
+        vendor_ids = {line.vendor_id for line in payment.lines if line.vendor_id}
+        for vendor_id in vendor_ids:
+            change = (
+                self.db.query(VendorBankChange)
+                .filter(
+                    VendorBankChange.vendor_id == vendor_id,
+                    VendorBankChange.current_state == BankChangeState.EFFECTIVE.value,
+                    VendorBankChange.applied_at.isnot(None),
+                )
+                .order_by(VendorBankChange.applied_at.desc())
+                .first()
+            )
+            if not change:
+                continue
+            if not sod.violates_first_payment_after_bank_change(change, current_user):
+                continue
+
+            already_paid = (
+                self.db.query(PaymentLine.id)
+                .join(Payment, Payment.id == PaymentLine.payment_id)
+                .filter(
+                    PaymentLine.vendor_id == vendor_id,
+                    PaymentLine.payment_id != payment.id,
+                    Payment.current_state == PaymentState.RELEASED.value,
+                    Payment.released_at.isnot(None),
+                    Payment.released_at >= change.applied_at,
+                )
+                .first()
+            )
+            if already_paid:
+                continue
+
+            vendor = self.db.query(Vendor).filter(Vendor.id == vendor_id).first()
+            return (vendor.legal_name if vendor else "this vendor"), change
+        return None
 
     def _audit_block(self, payment: Payment, current_user: dict, reason: str) -> None:
         """A refused release is committed on its own, so the attempt survives

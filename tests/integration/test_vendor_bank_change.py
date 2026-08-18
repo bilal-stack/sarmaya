@@ -371,3 +371,148 @@ class TestTheWholeFraudAttempt:
             PaymentService(db).prepare_payment(
                 [invoice.id], PaymentCreate(invoice_ids=[invoice.id]), setup["clerk"]
             )
+
+
+class TestTheFirstPaymentAfterAChange:
+    """Build Book line 193: "Same person cannot change vendor bank details and
+    approve the first payment after change."
+
+    The hold above covers the window while a change is *open*. It says nothing
+    about afterwards, and afterwards is when the money moves. Someone who
+    requests a change, gets it approved by a colleague who glances at it, waits
+    out the cooling period and then releases the first run to that vendor has
+    completed the redirection with every control formally satisfied — the
+    second signature at approval means nothing if it is the same person again
+    at the payment.
+
+    The admin is the role that can actually walk this path today: holding
+    everything, they are the one person who can both change the details and
+    authorise the money. Maker-checker is satisfied throughout below — the
+    clerk prepares every run — so the new rule is what catches it.
+    """
+
+    def _applied_change(self, db, setup, requester=None, applier=None):
+        change = _request_change(db, setup, actor=requester or setup["admin"])
+        VendorBankService(db).approve_change(change.id, setup["manager"])
+        change.effective_at = _naive_now() - timedelta(minutes=1)
+        db.flush()
+        VendorBankService(db).apply_change(change.id, applier or setup["clerk"])
+        return change
+
+    def _run_awaiting_release(self, db, setup):
+        invoice = _approved_invoice(db, setup)
+        service = PaymentService(db)
+        payment = service.prepare_payment(
+            [invoice.id], PaymentCreate(invoice_ids=[invoice.id]), setup["clerk"]
+        )
+        service.submit_for_release(payment.id, setup["clerk"])
+        return payment
+
+    def test_whoever_requested_the_change_cannot_release_the_first_payment(
+        self, db, setup
+    ):
+        self._applied_change(db, setup, requester=setup["admin"])
+        payment = self._run_awaiting_release(db, setup)
+
+        with pytest.raises(PermissionError, match="bank details"):
+            PaymentService(db).release_payment(payment.id, setup["admin"])
+
+    def test_whoever_applied_the_change_cannot_either(self, db, setup):
+        """Applying needs only vendors.manage, so it can be a different person
+        from the requester — and writing the new account onto the vendor is
+        just as much "changing the details" as asking for it."""
+        self._applied_change(db, setup, requester=setup["clerk"],
+                             applier=setup["admin"])
+        payment = self._run_awaiting_release(db, setup)
+
+        with pytest.raises(PermissionError, match="bank details"):
+            PaymentService(db).release_payment(payment.id, setup["admin"])
+
+    def test_somebody_else_can_release_it(self, db, setup):
+        """The control is a second pair of eyes, not a freeze. The CFO had no
+        hand in the change, so the payment goes."""
+        self._applied_change(db, setup, requester=setup["admin"])
+        payment = self._run_awaiting_release(db, setup)
+
+        released = PaymentService(db).release_payment(payment.id, setup["cfo"])
+        assert str(released.released_by) == str(setup["cfo"]["id"])
+
+    def test_the_restriction_lifts_after_that_first_payment(self, db, setup):
+        """A gate on one moment, not a standing ban on whoever maintains vendor
+        records. Once a payment to this vendor has gone out with somebody
+        else's signature, the new account has been vouched for."""
+        self._applied_change(db, setup, requester=setup["admin"])
+        service = PaymentService(db)
+
+        first = self._run_awaiting_release(db, setup)
+        service.release_payment(first.id, setup["cfo"])
+
+        second = self._run_awaiting_release(db, setup)
+        released = service.release_payment(second.id, setup["admin"])
+        assert str(released.released_by) == str(setup["admin"]["id"])
+
+    def test_a_run_that_was_never_released_does_not_spend_the_first_payment(
+        self, db, setup
+    ):
+        """"First" is measured against releases. A run prepared and rejected
+        paid nobody, so it cannot be what discharges the rule."""
+        self._applied_change(db, setup, requester=setup["admin"])
+        service = PaymentService(db)
+
+        rejected = self._run_awaiting_release(db, setup)
+        service.reject_payment(rejected.id, "Wrong invoice attached.", setup["cfo"])
+
+        payment = self._run_awaiting_release(db, setup)
+        with pytest.raises(PermissionError, match="bank details"):
+            service.release_payment(payment.id, setup["admin"])
+
+    def test_a_change_to_an_unrelated_vendor_does_not_block_the_release(
+        self, db, setup, make_user
+    ):
+        """Only vendors actually on the run are considered — otherwise one open
+        change would freeze every payment the person could authorise."""
+        other = Vendor(
+            id=uuid.uuid4(), tenant_id=setup["tenant"].id,
+            legal_name="Someone Else Ltd", status=VendorStatus.ACTIVE,
+            iban="PK00OTHER000000000000001",
+        )
+        db.add(other)
+        db.flush()
+        self._applied_change(db, setup, requester=setup["admin"])
+
+        invoice = Invoice(
+            id=uuid.uuid4(), tenant_id=setup["tenant"].id, vendor_id=other.id,
+            vendor_name=other.legal_name, invoice_number="INV-OTHER",
+            invoice_date=date(2026, 8, 1), total_amount=Decimal("1000"),
+            current_state=InvoiceState.APPROVED, created_by=setup["clerk"]["id"],
+        )
+        db.add(invoice)
+        db.flush()
+        service = PaymentService(db)
+        payment = service.prepare_payment(
+            [invoice.id], PaymentCreate(invoice_ids=[invoice.id]), setup["clerk"]
+        )
+        service.submit_for_release(payment.id, setup["clerk"])
+
+        released = service.release_payment(payment.id, setup["admin"])
+        assert str(released.released_by) == str(setup["admin"]["id"])
+
+    def test_the_refusal_is_recorded_against_the_run(self, db, setup):
+        """A blocked attempt is evidence. It is committed on its own so the
+        attempt survives even though the release does not."""
+        self._applied_change(db, setup, requester=setup["admin"])
+        payment = self._run_awaiting_release(db, setup)
+
+        with pytest.raises(PermissionError):
+            PaymentService(db).release_payment(payment.id, setup["admin"])
+
+        assert "release_blocked" in _actions(db, payment.id)
+
+    def test_the_applier_is_recorded_on_the_change(self, db, setup):
+        """The rule needs to know who wrote the account onto the vendor, and
+        the trail is better for naming them regardless."""
+        change = self._applied_change(db, setup, requester=setup["clerk"],
+                                      applier=setup["admin"])
+        db.refresh(change)
+        assert str(change.applied_by) == str(setup["admin"]["id"])
+        assert str(change.requested_by) == str(setup["clerk"]["id"])

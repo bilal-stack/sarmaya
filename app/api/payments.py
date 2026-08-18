@@ -66,8 +66,11 @@ def prepare_payment(
     vendor's details change afterwards.
     """
     try:
-        return PaymentService(db).prepare_payment(
-            payload.invoice_ids, payload, current_user
+        return PaymentResponse.for_user(
+            PaymentService(db).prepare_payment(
+                payload.invoice_ids, payload, current_user
+            ),
+            current_user,
         )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
@@ -80,7 +83,9 @@ def get_payment(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return PaymentService(db).get_payment(payment_id, current_user)
+        return PaymentResponse.for_user(
+            PaymentService(db).get_payment(payment_id, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -93,7 +98,9 @@ def submit_for_release(
 ):
     """Hand the run to whoever releases payments."""
     try:
-        return PaymentService(db).submit_for_release(payment_id, current_user)
+        return PaymentResponse.for_user(
+            PaymentService(db).submit_for_release(payment_id, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -112,7 +119,9 @@ def release_payment(
     wait days, and release cannot be undone.
     """
     try:
-        return PaymentService(db).release_payment(payment_id, current_user)
+        return PaymentResponse.for_user(
+            PaymentService(db).release_payment(payment_id, current_user), current_user
+        )
     except (ValueError, PermissionError) as e:
         _raise_for(e)
 
@@ -125,8 +134,11 @@ def reject_payment(
     db: Session = Depends(get_db_session),
 ):
     try:
-        return PaymentService(db).reject_payment(
-            payment_id, payload.reason, current_user
+        return PaymentResponse.for_user(
+            PaymentService(db).reject_payment(
+                payment_id, payload.reason, current_user
+            ),
+            current_user,
         )
     except (ValueError, PermissionError) as e:
         _raise_for(e)

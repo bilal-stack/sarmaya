@@ -88,5 +88,29 @@ class BankChangeResponse(BaseModel):
     applied_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
     created_at: datetime
+    #: False when the account fields above are masked.
+    bank_details_visible: bool = True
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def for_user(cls, change, current_user: dict) -> "BankChangeResponse":
+        """Serialise a change, masking both accounts unless the caller holds
+        `vendors.view_bank_details`.
+
+        Listing changes needs only `vendors.view`, which the read-only auditor
+        holds — so masking the vendor record while leaving this open would have
+        been theatre: the same account numbers are here, old and new together.
+        """
+        from app.core.roles import has_permission, PERM_VIEW_BANK_DETAILS
+        from app.utils.masking import mask_account
+
+        response = cls.model_validate(change)
+        if has_permission(current_user["role"], PERM_VIEW_BANK_DETAILS):
+            return response
+
+        for field in ("new_bank_account_number", "new_iban",
+                      "old_bank_account_number", "old_iban"):
+            setattr(response, field, mask_account(getattr(response, field)))
+        response.bank_details_visible = False
+        return response

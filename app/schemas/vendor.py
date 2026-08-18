@@ -73,8 +73,33 @@ class VendorResponse(VendorBase):
     risk_score: int
     created_at: datetime
     updated_at: datetime
+    #: False when the account fields above are masked, so a client can say
+    #: "hidden for your role" rather than rendering bullets as if that were
+    #: the stored value.
+    bank_details_visible: bool = True
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def for_user(cls, vendor, current_user: dict) -> "VendorResponse":
+        """Serialise a vendor, masking the account identifiers unless the
+        caller holds `vendors.view_bank_details`.
+
+        Build this through here rather than returning the ORM row from the
+        endpoint: FastAPI would serialise every field the model declares, and
+        the response model cannot see who is asking.
+        """
+        from app.core.roles import has_permission, PERM_VIEW_BANK_DETAILS
+        from app.utils.masking import mask_account
+
+        response = cls.model_validate(vendor)
+        if has_permission(current_user["role"], PERM_VIEW_BANK_DETAILS):
+            return response
+
+        response.bank_account_number = mask_account(response.bank_account_number)
+        response.iban = mask_account(response.iban)
+        response.bank_details_visible = False
+        return response
 
 
 class VendorListResponse(BaseModel):

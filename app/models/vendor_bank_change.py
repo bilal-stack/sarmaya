@@ -113,6 +113,11 @@ class VendorBankChange(BaseModel):
     #: When the vendor row was actually updated, which is a separate fact from
     #: when it became allowed to be.
     applied_at = Column(DateTime, nullable=True)
+    #: Who wrote the details onto the vendor. Applying needs only vendors.manage,
+    #: so this can be a third person or the requester — and the Build Book's rule
+    #: ("same person cannot change vendor bank details and approve the first
+    #: payment after change") needs to know which.
+    applied_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
     rejection_reason = Column(String, nullable=True)
 

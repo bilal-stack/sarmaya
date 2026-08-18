@@ -62,6 +62,11 @@ PERM_MANAGE_VENDORS = "vendors.manage"
 # make this change — and the control is that somebody else agrees to it.
 PERM_APPROVE_BANK_CHANGE = "vendors.approve_bank_change"
 PERM_VIEW_VENDORS = "vendors.view"
+# Reading a vendor's account number in full is separate from reading the vendor.
+# Five roles hold vendors.view, including the read-only auditor, and the full
+# IBAN is exactly the reconnaissance a payment redirection needs — so the
+# credential follows "do you act on payment details", not "may you see vendors".
+PERM_VIEW_BANK_DETAILS = "vendors.view_bank_details"
 
 PERM_MANAGE_USERS = "users.manage"
 PERM_VIEW_USERS = "users.view"
@@ -106,6 +111,7 @@ ROLE_PERMISSIONS = {
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
         PERM_APPROVE_BANK_CHANGE,
+        PERM_VIEW_BANK_DETAILS,
         # Users - ALL
         PERM_MANAGE_USERS,
         PERM_VIEW_USERS,
@@ -141,6 +147,7 @@ ROLE_PERMISSIONS = {
         PERM_RECONCILE_PAYMENT,
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
+        PERM_VIEW_BANK_DETAILS,
     ],
     MANAGER: [
         PERM_VIEW_INVOICE,
@@ -156,6 +163,7 @@ ROLE_PERMISSIONS = {
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
         PERM_APPROVE_BANK_CHANGE,
+        PERM_VIEW_BANK_DETAILS,
     ],
     CFO: [
         PERM_VIEW_INVOICE,
@@ -174,6 +182,7 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_BANK_STATEMENT,
         PERM_VIEW_VENDORS,
         PERM_APPROVE_BANK_CHANGE,
+        PERM_VIEW_BANK_DETAILS,
         PERM_VIEW_AUDIT,
     ],
     APPROVER: [
