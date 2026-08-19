@@ -22,6 +22,18 @@ from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel
 
+#: How a notification reaches somebody.
+#:
+#: Both live in one table on purpose. For a product whose argument is that
+#: governance events are recorded, "was this approver actually told, and how"
+#: should be one query rather than a join across two designs. It also means a
+#: third channel — a Slack card, a webhook — is a new value here rather than a
+#: new table.
+CHANNEL_EMAIL = "email"
+#: Delivered by existing: an in-app notification is not sent anywhere, it *is*
+#: the row the reader opens. Created already sent, and unread until they look.
+CHANNEL_IN_APP = "in_app"
+
 STATUS_PENDING = "pending"
 STATUS_SENT = "sent"
 #: Given up on. Distinct from pending-with-attempts: something has to be able
@@ -43,7 +55,16 @@ class NotificationOutbox(BaseModel):
         UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True
     )
 
-    to_email = Column(String(255), nullable=False)
+    channel = Column(
+        String(20), nullable=False, default=CHANNEL_EMAIL, index=True
+    )
+
+    #: Where an email goes. Blank for in-app, which targets a user instead.
+    to_email = Column(String(255), nullable=True)
+    #: Who an in-app notification belongs to. Null for email, which is
+    #: addressed to whatever address the recipient had at the time — a person
+    #: who leaves should not stop the record of what was sent to them.
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     subject = Column(String(500), nullable=False)
     body = Column(String, nullable=False)
 
@@ -60,10 +81,21 @@ class NotificationOutbox(BaseModel):
     #: dispatcher's memory, so it survives a restart like everything else.
     next_attempt_at = Column(DateTime, nullable=True)
     sent_at = Column(DateTime, nullable=True)
+    #: In-app only. Null means unread, which is what the bell counts.
+    read_at = Column(DateTime, nullable=True)
+    #: Where the notification points. The inbox is the system of record, so an
+    #: alert that cannot be opened is only half of one.
+    link = Column(String(500), nullable=True)
 
     tenant = relationship("Tenant", backref="notification_outbox")
 
     __table_args__ = (
+        # The bell's only query: what has this person not read?
+        Index(
+            "ix_notification_outbox_unread",
+            "user_id", "created_at",
+            postgresql_where=(read_at.is_(None)),
+        ),
         # The drain's only query: what is due, oldest first.
         Index(
             "ix_notification_outbox_due",

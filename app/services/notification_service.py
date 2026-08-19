@@ -10,7 +10,10 @@ from app.core.config import settings
 from app.core.enums import UserRole
 from app.models.invoice import Invoice
 from app.models.user import User
-from app.models.notification_outbox import NotificationOutbox, STATUS_PENDING
+from app.models.notification_outbox import (
+    NotificationOutbox, STATUS_PENDING, STATUS_SENT,
+    CHANNEL_EMAIL, CHANNEL_IN_APP,
+)
 from app.utils.records import describe_record
 from app.utils.datetime_helpers import utc_now, to_utc, make_naive
 
@@ -45,7 +48,7 @@ class NotificationService:
                 f"Required approver: {required_role.upper()}"
             )
             self._send(invoice.tenant_id, recipients, subject, body,
-                       category="invoice_submitted")
+                       category="invoice_submitted", link="/ai-tools/inbox")
         except Exception:  # never let notification break the workflow
             logger.exception("Failed to send submitted-for-approval notification")
 
@@ -59,7 +62,8 @@ class NotificationService:
                 f"for {invoice.total_amount} has been approved."
             )
             self._send(invoice.tenant_id, recipients, subject, body,
-                       category="invoice_approved")
+                       category="invoice_approved",
+                       link=f"/ai-tools/invoices/{invoice.id}")
         except Exception:
             logger.exception("Failed to send approved notification")
 
@@ -73,7 +77,8 @@ class NotificationService:
                 f"was rejected.\n\nReason: {reason}"
             )
             self._send(invoice.tenant_id, recipients, subject, body,
-                       category="invoice_rejected")
+                       category="invoice_rejected",
+                       link=f"/ai-tools/invoices/{invoice.id}")
         except Exception:
             logger.exception("Failed to send rejected notification")
 
@@ -100,7 +105,7 @@ class NotificationService:
                 f"It has been escalated to {escalate_to_role.upper()}."
             )
             self._send(record.tenant_id, recipients, subject, body,
-                       category="sla_escalation")
+                       category="sla_escalation", link="/ai-tools/inbox")
         except Exception:
             logger.exception("Failed to send SLA escalation notification")
 
@@ -142,7 +147,7 @@ class NotificationService:
                 "It is in your Decision Inbox."
             )
             self._send(record.tenant_id, recipients, subject, body,
-                       category="awaiting_action")
+                       category="awaiting_action", link="/ai-tools/inbox")
         except Exception:
             logger.exception("Failed to send awaiting-action notification")
 
@@ -191,7 +196,7 @@ class NotificationService:
     # ------------------------------------------------------------------ #
     def _send(
         self, tenant_id, to_emails: List[str], subject: str, body: str,
-        category: Optional[str] = None,
+        category: Optional[str] = None, link: Optional[str] = None,
     ) -> None:
         """Queue a message per recipient. Does not talk to a mail server.
 
@@ -210,13 +215,63 @@ class NotificationService:
         for email in recipients:
             self.db.add(NotificationOutbox(
                 tenant_id=tenant_id,
+                channel=CHANNEL_EMAIL,
                 to_email=email,
                 subject=subject,
                 body=body,
                 category=category,
+                link=link,
                 status=STATUS_PENDING,
                 attempts=0,
                 next_attempt_at=make_naive(to_utc(utc_now())),
+            ))
+
+        # The same news, in the app. Email is where a notification goes to be
+        # missed: people who approve things are not reading a shared AP mailbox
+        # all day, and until now being "told" meant exactly that. This costs one
+        # row and needs no delivery, so there is no reason not to.
+        self._send_in_app(
+            tenant_id, recipients, subject, body, category=category, link=link,
+        )
+
+    def _send_in_app(
+        self, tenant_id, to_emails: List[str], subject: str, body: str,
+        category: Optional[str] = None, link: Optional[str] = None,
+    ) -> None:
+        """Give each recipient a row they will see next time they look.
+
+        Resolved from the email addresses the caller already worked out, rather
+        than making every call site compute a second recipient list — the
+        answer to "who should know" is the same question either way, and two
+        lists that can disagree eventually do.
+
+        Created already sent, because nothing is delivered: the row *is* the
+        notification. It stays unread until the person opens it.
+        """
+        if not to_emails:
+            return
+        users = (
+            self.db.query(User)
+            .filter(
+                User.tenant_id == tenant_id,
+                User.email.in_(list(to_emails)),
+                User.is_active.is_(True),
+            )
+            .all()
+        )
+        now = make_naive(to_utc(utc_now()))
+        for user in users:
+            self.db.add(NotificationOutbox(
+                tenant_id=tenant_id,
+                channel=CHANNEL_IN_APP,
+                user_id=user.id,
+                subject=subject,
+                body=body,
+                category=category,
+                link=link,
+                status=STATUS_SENT,
+                sent_at=now,
+                attempts=0,
             ))
 
     def _deliver(self, to_email: str, subject: str, body: str) -> None:

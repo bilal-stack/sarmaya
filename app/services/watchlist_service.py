@@ -102,6 +102,7 @@ class WatchlistService:
             "Raised because this kind of change moves money or moves the rules "
             "without touching an invoice, so nothing else would surface it.",
             category="watchlist",
+            link="/ai-tools/watchlist",
         )
 
     def _watchers(self, tenant_id: UUID) -> List[User]:

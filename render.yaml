@@ -102,3 +102,27 @@ services:
         sync: false
       - key: DEBUG
         value: "false"
+
+  # The workflow clocks: reminders and SLA escalations.
+  #
+  # Escalation has existed since DR-009 with "admin button, cron, or a
+  # scheduler later" in its docstring, and the cron never arrived — so until
+  # now a breached SLA escalated only if an administrator happened to open the
+  # Decision Inbox and click. A deadline nobody is watching is not a deadline.
+  #
+  # Hourly is plenty: SLAs are measured in hours or days, and both jobs are
+  # idempotent — one escalation per state entry, one reminder per interval.
+  - type: cron
+    name: sarmaya-workflow-timers
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    schedule: "0 * * * *"
+    dockerCommand: python -m scripts.run_workflow_timers --quiet
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: DEBUG
+        value: "false"

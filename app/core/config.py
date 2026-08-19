@@ -67,6 +67,23 @@ class Settings(BaseSettings):
     #: can set to zero.
     VENDOR_BANK_CHANGE_COOLING_HOURS: int = 24
 
+    #: How long something may sit with an approver before they are nudged, and
+    #: the minimum gap between nudges. Distinct from the per-state SLA, which
+    #: says when lateness becomes somebody else's problem: this is the quiet
+    #: prod beforehand, so the escalation never has to fire. Daily gets read;
+    #: hourly gets filtered to a folder.
+    REMINDER_INTERVAL_HOURS: int = 24
+
+    #: How far into an item's SLA a reminder fires, as a fraction of it. Halfway
+    #: by default: late enough that the nudge is warranted, early enough that
+    #: acting on it still avoids the breach.
+    #:
+    #: A fraction rather than a fixed delay because the delay has to be shorter
+    #: than the deadline it is protecting, and the deadlines differ per state —
+    #: a fixed 24h reminder against a 24h SLA fires exactly when escalation
+    #: takes over, which is to say never.
+    REMINDER_AT_SLA_FRACTION: float = 0.5
+
     # Security
     #: Every access token is signed with this. The placeholder below is in a
     #: public repository, so a deployment that keeps it has tokens anyone who
