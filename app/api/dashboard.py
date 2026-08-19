@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from app.services.dashboards import DashboardService
 from app.api.deps import get_current_user, get_db_session
 from app.schemas.invoice import (
     InvoiceListResponse,
@@ -49,3 +50,110 @@ def get_pending_approvals(
     """
     service = InvoiceService(db)
     return service.get_pending_approvals()
+
+
+# --- Global dashboards (Build Book lines 265-272) ----------------------------
+#
+# Seven questions somebody actually asks, each computed from history the system
+# already keeps. Uncached on purpose: a stale figure for "what is stuck and
+# what is it costing" is worse than a slow page. See app/services/dashboards.py.
+
+@router.get("/overview")
+def dashboard_overview(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """All seven in one call, because the page shows them together and seven
+    round trips would render it in pieces."""
+    try:
+        return DashboardService(db).overview(current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/control-room")
+def control_room(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What is stuck, why, and the cash behind it."""
+    try:
+        return DashboardService(db).control_room(current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/bottlenecks")
+def approval_bottlenecks(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Cycle time by step and by role, plus how long the undecided have waited."""
+    try:
+        return DashboardService(db).approval_bottlenecks(current_user, days=days)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/exceptions")
+def exceptions_heatmap(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What is being blocked, and which vendors account for it."""
+    try:
+        return DashboardService(db).exceptions_heatmap(current_user, days=days)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/policy-overrides")
+def policy_overrides(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Who set a control aside, how often, and for how much."""
+    try:
+        return DashboardService(db).policy_overrides(current_user, days=days)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/evidence")
+def evidence_completeness(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What would fail an audit right now: missing documents, late approvals."""
+    try:
+        return DashboardService(db).evidence_completeness(current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/reconciliation-health")
+def reconciliation_health(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Money that left with nothing accounting for it, by age."""
+    try:
+        return DashboardService(db).reconciliation_health(current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/autopilot-health")
+def autopilot_health(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What the machine decided, and what came back."""
+    try:
+        return DashboardService(db).autopilot_health(current_user, days=days)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
