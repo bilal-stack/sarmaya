@@ -27,7 +27,7 @@ from app.core.enums import InvoiceState, VendorStatus
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from app.schemas.ai import InvoiceNextActionSuggestion
-from app.services.ai import get_ai_provider
+from app.services.ai.router import AIRouter, AIUnavailable
 from app.services.ai_action_log import (
     log_ai_action,
     STATUS_COMPLETED,
@@ -38,6 +38,8 @@ from app.services.policy import explain_approval_routing
 
 logger = logging.getLogger(__name__)
 
+#: Kept for the deterministic path's log entries. The AI path now
+#: records the registry's version and content hash instead.
 PROMPT_VERSION = "invoice-next-action-v1"
 
 # Suggestions that require a human decision (Build Book HITL triggers).
@@ -47,10 +49,13 @@ HITL_ACTIONS = {"review_extraction", "resolve_duplicate", "verify_vendor"}
 class InvoiceNextActionAgent:
     """Suggests (never executes) the next step for an invoice."""
 
-    def __init__(self, db: Session, current_user: dict):
+    def __init__(self, db: Session, current_user: dict, router: AIRouter = None):
         self.db = db
         self.current_user = current_user
-        self.ai = get_ai_provider()
+        # The router owns model choice, validation and fallback; this agent
+        # owns the gate. Injectable so tests can drive both without a network
+        # call or an API key.
+        self.router = router or AIRouter()
 
     def suggest(self, invoice_id: UUID, use_ai: bool = True) -> dict:
         invoice = self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
@@ -84,9 +89,15 @@ class InvoiceNextActionAgent:
             self.current_user.get("id"),
             action="invoice_next_action",
             status=status,
-            ai_provider=settings.AI_PROVIDER if use_ai else None,
-            ai_model=getattr(self.ai, "model", None) if use_ai else None,
-            prompt_version=PROMPT_VERSION if use_ai else None,
+            # What actually ran, not what is configured. These used to read
+            # the global AI_PROVIDER setting and a module constant, so a
+            # fallback to a second model was recorded as the first one — the
+            # exact provenance problem the router exists to fix. The suggestion
+            # carries the real provider, model and prompt version+hash; the
+            # rules path leaves them None, which is also true.
+            ai_provider=suggestion.ai_provider,
+            ai_model=suggestion.ai_model,
+            prompt_version=suggestion.prompt_version,
             confidence=suggestion.confidence,
             latency_ms=int((time.monotonic() - started) * 1000),
             input_summary=f"invoice={invoice.invoice_number} state={invoice.current_state}",
@@ -202,43 +213,60 @@ class InvoiceNextActionAgent:
         self, invoice: Invoice, permitted_action: str, signals: List[str],
         required_role: Optional[str],
     ) -> Optional[InvoiceNextActionSuggestion]:
-        """Ask the AI to phrase the suggestion for the permitted action. Returns
-        None when the output is malformed or strays outside the gate — the
-        caller then keeps the deterministic result."""
-        prompt = f"""You are the invoice workflow assistant. Policy has already determined the next action for this invoice; your job is to explain it clearly to the user and estimate your confidence.
+        """Ask the AI to phrase the suggestion for the permitted action.
 
-Invoice: {invoice.invoice_number} | vendor: {invoice.vendor_name} | amount: {invoice.total_amount} | state: {invoice.current_state}
-Signals: {json.dumps(signals)}
-Permitted next action (you MUST use exactly this): {permitted_action}
+        Returns None when nothing usable came back or the output strays outside
+        the gate — the caller then keeps the deterministic result, which is
+        always available and is what actually governs.
 
-Return ONLY a JSON object:
-{{"action": "{permitted_action}", "confidence": 0.0, "reasoning": "one or two sentences for the user"}}
-"""
+        The prompt, its version and its schema live in the registry, and the
+        router picks the model and falls back. What stays here is the part that
+        cannot move: checking the AI's action against what policy permits. The
+        router validates *shape*; authority is not its business.
+        """
         try:
-            raw = self.ai.chat(messages=[{"role": "user", "content": prompt}], context=None)
-            data = _parse_json(raw)
-            suggestion = InvoiceNextActionSuggestion(
-                action=str(data.get("action", "")),
-                confidence=data.get("confidence", 0.0),
-                reasoning=str(data.get("reasoning", "")).strip(),
-                signals=signals,
-                required_role=required_role,
-                source="ai",
-                ai_provider=settings.AI_PROVIDER,
-                ai_model=getattr(self.ai, "model", None),
-                prompt_version=PROMPT_VERSION,
+            routed = self.router.run(
+                "invoice_next_action",
+                {
+                    "invoice_number": invoice.invoice_number,
+                    "vendor_name": invoice.vendor_name,
+                    "amount": invoice.total_amount,
+                    "state": invoice.current_state,
+                    "signals": json.dumps(signals),
+                    "permitted_action": permitted_action,
+                },
             )
-            # The gate: the AI may not choose a different action than policy allows.
-            if suggestion.action != permitted_action or not suggestion.reasoning:
-                logger.warning(
-                    "AI next-action output outside gate (got %r, permitted %r)",
-                    suggestion.action, permitted_action,
-                )
-                return None
-            return suggestion
-        except Exception:
-            logger.exception("AI next-action enrichment failed")
+        except AIUnavailable as exc:
+            # Every candidate failed. Logged with what each one said, because
+            # "the AI is being unhelpful" is a different problem from "the AI
+            # is down", and only the attempts distinguish them.
+            logger.warning("No usable AI next-action suggestion: %s", exc)
             return None
+
+        result = routed.output
+        # The gate: the AI may not choose a different action than policy allows.
+        # A validated response is a well-formed suggestion, not a permitted one.
+        if result.action != permitted_action:
+            logger.warning(
+                "AI next-action output outside gate (got %r, permitted %r)",
+                result.action, permitted_action,
+            )
+            return None
+
+        return InvoiceNextActionSuggestion(
+            action=result.action,
+            confidence=result.confidence,
+            reasoning=result.reasoning,
+            signals=signals,
+            required_role=required_role,
+            source="ai",
+            ai_provider=routed.provider,
+            ai_model=routed.model,
+            # Version *and* hash: the hash is what makes the record reproducible
+            # if somebody edits the wording without bumping the version.
+            prompt_version=f"{routed.prompt_name}-{routed.prompt_version}"
+                           f"+{routed.prompt_hash}",
+        )
 
 
 def _parse_json(text: str) -> dict:

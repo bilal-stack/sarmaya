@@ -122,6 +122,25 @@ class Settings(BaseSettings):
     # human review instead of straight to validation.
     AI_EXTRACTION_REVIEW_THRESHOLD: int = 70
 
+    #: The routing table: which models run which kind of task, cheapest first.
+    #: Format is "provider:model, provider:model" — the second entry is the
+    #: fallback, tried only when the first fails schema validation or comes
+    #: back under-confident, so the stronger model costs nothing on the common
+    #: path. Configured rather than hardcoded because which model counts as
+    #: "cheap" changes faster than this code will.
+    #:
+    #: Empty means "use AI_PROVIDER for everything", which is what the system
+    #: did before routing existed.
+    AI_ROUTE_EXTRACTION: str = ""
+    AI_ROUTE_CLASSIFICATION: str = ""
+    AI_ROUTE_REASONING: str = ""
+
+    #: Below this, a response is treated as a failure and the next candidate is
+    #: tried. Build Book: fall back when confidence is low — a confident wrong
+    #: answer and an unconfident right one are indistinguishable from here, so
+    #: the only safe reading of "unsure" is to ask somebody better.
+    AI_MIN_CONFIDENCE: float = 0.4
+
     # Grok Configuration
     GROK_API_KEY: str = ""
 

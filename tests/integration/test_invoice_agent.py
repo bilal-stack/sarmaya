@@ -160,13 +160,27 @@ class _StubAI:
         return self._response
 
 
+def _agent_with_ai(db, user, response: str):
+    """An agent whose every model candidate returns `response`.
+
+    Injected at the provider factory rather than by replacing the agent's
+    client, so these tests now run through the real router — rendering the
+    registered prompt, parsing, and validating against its schema — instead of
+    around it. The gate is what is being tested, and the gate sits after all of
+    that.
+    """
+    from app.services.ai.router import AIRouter
+
+    router = AIRouter(provider_factory=lambda provider, model: _StubAI(response))
+    return InvoiceNextActionAgent(db, user, router=router)
+
+
 class TestAIGate:
     def test_valid_ai_output_is_used(self, db, tenant, make_user):
         user = make_user(UserRole.AP_CLERK)
         vendor = _vendor(db, tenant.id, user["id"])
         inv = _invoice(db, tenant.id, user["id"], vendor_id=vendor.id)
-        agent = InvoiceNextActionAgent(db, user)
-        agent.ai = _StubAI('{"action": "validate", "confidence": 0.9, "reasoning": "Fields look complete."}')
+        agent = _agent_with_ai(db, user, '{"action": "validate", "confidence": 0.9, "reasoning": "Fields look complete."}')
         s = agent.suggest(inv.id, use_ai=True)
         assert s["source"] == "ai"
         assert s["confidence"] == 0.9
@@ -176,9 +190,8 @@ class TestAIGate:
         user = make_user(UserRole.AP_CLERK)
         vendor = _vendor(db, tenant.id, user["id"])
         inv = _invoice(db, tenant.id, user["id"], vendor_id=vendor.id)
-        agent = InvoiceNextActionAgent(db, user)
         # Policy permits "validate"; the AI tries to approve — must be discarded.
-        agent.ai = _StubAI('{"action": "approve", "confidence": 0.99, "reasoning": "Just approve it."}')
+        agent = _agent_with_ai(db, user, '{"action": "approve", "confidence": 0.99, "reasoning": "Just approve it."}')
         s = agent.suggest(inv.id, use_ai=True)
         assert s["action"] == "validate"
         assert s["source"] == "rules"
@@ -188,8 +201,7 @@ class TestAIGate:
         user = make_user(UserRole.AP_CLERK)
         vendor = _vendor(db, tenant.id, user["id"])
         inv = _invoice(db, tenant.id, user["id"], vendor_id=vendor.id)
-        agent = InvoiceNextActionAgent(db, user)
-        agent.ai = _StubAI("I think you should probably validate it?")
+        agent = _agent_with_ai(db, user, "I think you should probably validate it?")
         s = agent.suggest(inv.id, use_ai=True)
         assert s["action"] == "validate"
         assert s["source"] == "rules"
