@@ -28,6 +28,38 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+#: What a token is allowed to do. Absent means an ordinary access token, which
+#: is what every token minted before multi-factor auth existed carries — so the
+#: check that reads this treats absence as access and only ever *adds*
+#: restrictions.
+PURPOSE_ACCESS = "access"
+#: Can do exactly one thing: be exchanged for a real token by somebody holding
+#: the second factor. If this were an ordinary token, MFA would be a screen
+#: rather than a control — the password alone would already have got you in.
+PURPOSE_MFA_CHALLENGE = "mfa_challenge"
+
+#: A challenge is for finishing a sign-in that is already underway. Long enough
+#: to open an authenticator app, short enough that one left in a log or a
+#: browser history is not a standing invitation.
+MFA_CHALLENGE_MINUTES = 5
+
+
+def create_mfa_challenge_token(user_id: str, tenant_id: str) -> str:
+    """A token that proves the password step passed, and nothing else.
+
+    Deliberately carries no role and no token_version: it is not an identity,
+    it is a receipt for one half of a login.
+    """
+    return create_access_token(
+        {
+            "sub": str(user_id),
+            "tenant_id": str(tenant_id),
+            "purpose": PURPOSE_MFA_CHALLENGE,
+        },
+        expires_delta=timedelta(minutes=MFA_CHALLENGE_MINUTES),
+    )
+
+
 def create_access_token(data: Dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Create JWT access token

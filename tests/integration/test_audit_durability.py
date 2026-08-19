@@ -55,6 +55,11 @@ CALLER_COMMITS = {
     # land in one transaction, so the calling service commits both together.
     # Committing here would split them and could leave a record marked deleted
     # with no entry saying who did it — the opposite of the point.
+    # Spending a recovery code is recorded, then committed by whichever entry
+    # point asked — verify, disable, or regenerate_recovery_codes. Checked:
+    # all three commit. Committing here instead would split the "code spent"
+    # record from the sign-in that spent it.
+    "app/services/mfa_service.py::_spend_recovery_code",
     "app/services/soft_delete.py::withdraw",
     "app/services/soft_delete.py::restore",
 }

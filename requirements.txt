@@ -15,6 +15,9 @@ alembic>=1.14,<2
 # Authentication & security
 python-jose[cryptography]>=3.3,<4
 passlib[bcrypt]>=1.7.4,<2
+# TOTP for multi-factor auth. A standard implementation on purpose —
+# hand-rolled crypto in an authentication path is not a saving.
+pyotp>=2.9,<3
 
 # AI / OCR
 google-cloud-vision>=3.8,<4

@@ -9,8 +9,16 @@ from app.core.security import (
     get_password_hash,
     create_access_token,
     decode_access_token,
+    create_mfa_challenge_token,
+    PURPOSE_ACCESS,
+    PURPOSE_MFA_CHALLENGE,
 )
-from app.schemas.auth import LoginIn, Token, TokenWithUser, PasswordChange, ProfileUpdate
+from app.services.mfa_service import MfaService
+from app.schemas.auth import (
+    LoginIn, Token, TokenWithUser, PasswordChange, ProfileUpdate,
+    LoginResult, MfaVerifyIn, MfaCodeIn, MfaDisableIn,
+    MfaEnrolmentOut, MfaStatusOut, MfaRecoveryCodesOut,
+)
 from app.schemas.user import RegistrationRequest, UserOut
 from app.models.user import User
 from app.models.tenant import Tenant
@@ -44,6 +52,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
     # users is RLS-protected; bind tenant before reading it.
     set_tenant_context(db, str(tenant_id))
+    # A half-finished login is not a login. The challenge token issued after a
+    # correct password proves one factor and must never authenticate a request
+    # — if it did, MFA would be a screen somebody could skip by keeping the
+    # token the password already earned them.
+    if payload.get("purpose") not in (None, PURPOSE_ACCESS):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This token cannot be used to authenticate a request",
+        )
+
     user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
@@ -147,8 +165,14 @@ def token_login(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.post("/login", response_model=TokenWithUser)
+@router.post("/login", response_model=LoginResult)
 def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("demo", description="Tenant slug")):
+    """Sign in.
+
+    Returns a session, or — when the account has a second factor — a challenge
+    that can do nothing but be exchanged for one at /auth/mfa/verify. Accounts
+    without MFA are unaffected: they get the same access token as before.
+    """
     tenant_obj = db.query(Tenant).filter(Tenant.slug == tenant).first()
     if not tenant_obj:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant not found")
@@ -162,8 +186,137 @@ def login(data: LoginIn, db: Session = Depends(get_db), tenant: str = Query("dem
     if not user or not verify_password(data.password, hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    if user.mfa_enabled:
+        # The password was right, and that is all this says. No access token is
+        # issued here — if one were, the second factor would be a screen rather
+        # than a control.
+        return {
+            "mfa_required": True,
+            "challenge_token": create_mfa_challenge_token(user.id, user.tenant_id),
+            "token_type": "mfa_challenge",
+        }
+
     access_token = create_access_token(_token_claims(user))
     return {"access_token": access_token, "token_type": "bearer", "user": user}
+
+
+@router.post("/mfa/verify", response_model=TokenWithUser)
+def mfa_verify(
+    data: MfaVerifyIn,
+    db: Session = Depends(get_db),
+):
+    """Finish a sign-in by proving the second factor.
+
+    Takes the challenge from /login plus a code from the authenticator app, or
+    one recovery code. Only here does a real token get issued.
+    """
+    payload = decode_access_token(data.challenge_token)
+    if not payload or payload.get("purpose") != PURPOSE_MFA_CHALLENGE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="That sign-in has expired. Start again.",
+        )
+
+    tenant_id = payload.get("tenant_id")
+    set_tenant_context(db, str(tenant_id))
+    user = db.query(User).filter(
+        User.id == payload.get("sub"), User.tenant_id == tenant_id
+    ).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    try:
+        MfaService(db).verify(user, data.code)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return {
+        "access_token": create_access_token(_token_claims(user)),
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
+# --- enrolling and managing your own second factor ---------------------------
+
+@router.get("/mfa", response_model=MfaStatusOut)
+def mfa_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = MfaService(db)
+    return {
+        "enabled": bool(current_user.mfa_enabled),
+        "confirmed_at": current_user.mfa_confirmed_at,
+        "recovery_codes_remaining": service.remaining_recovery_codes(current_user),
+    }
+
+
+@router.post("/mfa/setup", response_model=MfaEnrolmentOut)
+def mfa_setup(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate a secret to scan. Nothing is switched on until it is confirmed."""
+    try:
+        return MfaService(db).begin_enrolment(current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/mfa/confirm", response_model=MfaRecoveryCodesOut)
+def mfa_confirm(
+    data: MfaCodeIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Prove the app works, switch it on, and hand over the recovery codes.
+
+    Shown once. They are stored hashed, so they cannot be shown again.
+    """
+    try:
+        return {"recovery_codes": MfaService(db).confirm_enrolment(current_user, data.code)}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/mfa/disable", status_code=status.HTTP_200_OK)
+def mfa_disable(
+    data: MfaDisableIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Turn it off. Needs the password and a current code."""
+    try:
+        MfaService(db).disable(current_user, data.password, data.code)
+        return {"success": True}
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/mfa/recovery-codes", response_model=MfaRecoveryCodesOut)
+def mfa_regenerate_recovery_codes(
+    data: MfaCodeIn,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Replace the set, invalidating the old one."""
+    try:
+        return {
+            "recovery_codes": MfaService(db).regenerate_recovery_codes(
+                current_user, data.code
+            )
+        }
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/me", response_model=UserOut)

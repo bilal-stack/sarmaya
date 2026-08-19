@@ -22,6 +22,7 @@ from app.models.payment import Payment, PaymentLine
 from app.models.bank_statement import BankStatement, BankStatementLine
 from app.models.watchlist_alert import WatchlistAlert
 from app.models.notification_outbox import NotificationOutbox
+from app.models.mfa_recovery_code import MfaRecoveryCode
 
 __all__ = [
     "Base",
@@ -58,4 +59,5 @@ __all__ = [
     "BankStatementLine",
     "WatchlistAlert",
     "NotificationOutbox",
+    "MfaRecoveryCode",
 ]

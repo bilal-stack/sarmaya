@@ -1,5 +1,6 @@
-from typing import Optional
+from typing import List, Optional
 
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator, model_validator
 from app.schemas.user import UserOut
 
@@ -52,6 +53,64 @@ class PasswordChange(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+
+class LoginResult(BaseModel):
+    """What /login returns, which is one of two things.
+
+    Either a session, or — when the account has a second factor — a challenge
+    that can do nothing except be exchanged for one. Modelled as a single
+    response with optional halves rather than two endpoints, so a client cannot
+    call the one that skips the check.
+
+    `access_token` stays the first field and is still populated for accounts
+    without MFA, so existing callers are unaffected.
+    """
+    access_token: Optional[str] = None
+    token_type: str = "bearer"
+    user: Optional[UserOut] = None
+
+    #: True when the password was right but the sign-in is not finished.
+    mfa_required: bool = False
+    #: Present only with mfa_required. Expires in minutes and authenticates
+    #: nothing on its own.
+    challenge_token: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MfaVerifyIn(BaseModel):
+    challenge_token: str
+    #: A six-digit code from the authenticator app, or one recovery code.
+    code: str
+
+
+class MfaCodeIn(BaseModel):
+    code: str
+
+
+class MfaDisableIn(BaseModel):
+    """Both, deliberately: the session alone must not be able to remove the
+    protection against a stolen session."""
+    password: str
+    code: str
+
+
+class MfaEnrolmentOut(BaseModel):
+    secret: str
+    provisioning_uri: str
+
+
+class MfaStatusOut(BaseModel):
+    enabled: bool
+    confirmed_at: Optional[datetime] = None
+    recovery_codes_remaining: int = 0
+
+
+class MfaRecoveryCodesOut(BaseModel):
+    """Shown once, at enrolment or reissue. They are not stored in a form that
+    could show them again."""
+    recovery_codes: List[str]
 
 
 class TokenWithUser(BaseModel):
