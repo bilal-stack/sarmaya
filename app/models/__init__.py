@@ -21,6 +21,7 @@ from app.models.goods_receipt import GoodsReceipt, GoodsReceiptLine
 from app.models.payment import Payment, PaymentLine
 from app.models.bank_statement import BankStatement, BankStatementLine
 from app.models.watchlist_alert import WatchlistAlert
+from app.models.notification_outbox import NotificationOutbox
 
 __all__ = [
     "Base",
@@ -56,4 +57,5 @@ __all__ = [
     "BankStatement",
     "BankStatementLine",
     "WatchlistAlert",
+    "NotificationOutbox",
 ]

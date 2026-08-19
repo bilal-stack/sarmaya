@@ -615,10 +615,14 @@ class InvoiceService:
             }
         )
 
-        self.repository.commit()
-
-        # Notify only once the transition and its trail are durable.
+        # Queued before the commit, deliberately: the message is a row in
+        # this transaction now, not an email sent from it. Enqueuing after
+        # the commit would add it to a session nothing commits, so the
+        # notification would be silently dropped — and the atomicity the
+        # outbox exists for would be gone in the one direction that matters.
         self.notification_service.notify_submitted_for_approval(invoice, required_role)
+
+        self.repository.commit()
 
         return invoice, required_role
     
@@ -752,10 +756,14 @@ class InvoiceService:
             file_id=invoice.pdf_file_id
         )
 
-        self.repository.commit()
-
-        # Notify only once the approval and its trail are durable.
+        # Queued before the commit, deliberately: the message is a row in
+        # this transaction now, not an email sent from it. Enqueuing after
+        # the commit would add it to a session nothing commits, so the
+        # notification would be silently dropped — and the atomicity the
+        # outbox exists for would be gone in the one direction that matters.
         self.notification_service.notify_approved(invoice)
+
+        self.repository.commit()
 
         return invoice
     
@@ -823,10 +831,14 @@ class InvoiceService:
             comment=reason
         )
 
-        self.repository.commit()
-
-        # Notify only once the rejection and its trail are durable.
+        # Queued before the commit, deliberately: the message is a row in
+        # this transaction now, not an email sent from it. Enqueuing after
+        # the commit would add it to a session nothing commits, so the
+        # notification would be silently dropped — and the atomicity the
+        # outbox exists for would be gone in the one direction that matters.
         self.notification_service.notify_rejected(invoice, reason)
+
+        self.repository.commit()
 
         return invoice
     

@@ -203,7 +203,7 @@ class TestEscalationRunner:
         sent: list = []
         monkeypatch.setattr(
             NotificationService, "_send",
-            lambda self, recipients, subject, body: sent.append((recipients, subject)),
+            lambda self, tenant_id, recipients, subject, body, category=None: sent.append((recipients, subject)),
         )
 
         admin = make_user(UserRole.ADMIN)

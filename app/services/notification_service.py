@@ -1,7 +1,7 @@
 import logging
 import smtplib
 from email.message import EmailMessage
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -10,7 +10,9 @@ from app.core.config import settings
 from app.core.enums import UserRole
 from app.models.invoice import Invoice
 from app.models.user import User
+from app.models.notification_outbox import NotificationOutbox, STATUS_PENDING
 from app.utils.records import describe_record
+from app.utils.datetime_helpers import utc_now, to_utc, make_naive
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,8 @@ class NotificationService:
                 f"for {invoice.total_amount} is pending approval.\n\n"
                 f"Required approver: {required_role.upper()}"
             )
-            self._send(recipients, subject, body)
+            self._send(invoice.tenant_id, recipients, subject, body,
+                       category="invoice_submitted")
         except Exception:  # never let notification break the workflow
             logger.exception("Failed to send submitted-for-approval notification")
 
@@ -55,7 +58,8 @@ class NotificationService:
                 f"Invoice {invoice.invoice_number} from {invoice.vendor_name} "
                 f"for {invoice.total_amount} has been approved."
             )
-            self._send(recipients, subject, body)
+            self._send(invoice.tenant_id, recipients, subject, body,
+                       category="invoice_approved")
         except Exception:
             logger.exception("Failed to send approved notification")
 
@@ -68,7 +72,8 @@ class NotificationService:
                 f"Invoice {invoice.invoice_number} from {invoice.vendor_name} "
                 f"was rejected.\n\nReason: {reason}"
             )
-            self._send(recipients, subject, body)
+            self._send(invoice.tenant_id, recipients, subject, body,
+                       category="invoice_rejected")
         except Exception:
             logger.exception("Failed to send rejected notification")
 
@@ -94,7 +99,8 @@ class NotificationService:
                 f"waiting in {state} for more than {hours} hours.\n\n"
                 f"It has been escalated to {escalate_to_role.upper()}."
             )
-            self._send(recipients, subject, body)
+            self._send(record.tenant_id, recipients, subject, body,
+                       category="sla_escalation")
         except Exception:
             logger.exception("Failed to send SLA escalation notification")
 
@@ -135,7 +141,8 @@ class NotificationService:
                 f"waiting on you to {action_label}.\n\n"
                 "It is in your Decision Inbox."
             )
-            self._send(recipients, subject, body)
+            self._send(record.tenant_id, recipients, subject, body,
+                       category="awaiting_action")
         except Exception:
             logger.exception("Failed to send awaiting-action notification")
 
@@ -182,27 +189,46 @@ class NotificationService:
     # ------------------------------------------------------------------ #
     # Delivery
     # ------------------------------------------------------------------ #
-    def _send(self, to_emails: List[str], subject: str, body: str) -> None:
+    def _send(
+        self, tenant_id, to_emails: List[str], subject: str, body: str,
+        category: Optional[str] = None,
+    ) -> None:
+        """Queue a message per recipient. Does not talk to a mail server.
+
+        Rows are added to the caller's session, so they land in the same
+        transaction as the action that produced them: an approval that rolls
+        back queues nothing, and one that commits queues for certain. That
+        atomicity is the whole reason this is a table rather than a thread.
+
+        The request now returns without waiting on SMTP. `NotificationDispatcher`
+        drains the queue afterwards.
+        """
         recipients = [e for e in dict.fromkeys(to_emails) if e]  # dedupe, drop blanks
         if not recipients:
-            logger.info("No recipients for '%s'; skipping email", subject)
+            logger.info("No recipients for '%s'; nothing queued", subject)
             return
         for email in recipients:
-            self._deliver(email, subject, body)
+            self.db.add(NotificationOutbox(
+                tenant_id=tenant_id,
+                to_email=email,
+                subject=subject,
+                body=body,
+                category=category,
+                status=STATUS_PENDING,
+                attempts=0,
+                next_attempt_at=make_naive(to_utc(utc_now())),
+            ))
 
     def _deliver(self, to_email: str, subject: str, body: str) -> None:
         """Send a single email via SMTP. Isolated so tests can patch it and so
         one bad address doesn't stop the rest of the batch."""
         if not settings.SMTP_ENABLED:
-            # Not an error: delivery is opt-in, because this runs inside the
-            # request that triggered it. Logged at info so a deployment that
-            # expected mail can see immediately why none arrived, rather than
-            # finding an exception swallowed further down.
-            logger.info(
-                "SMTP disabled; not sending '%s' to %s. Set SMTP_ENABLED=true "
-                "once a mail server is configured.", subject, to_email,
+            # Delivery is opt-in. Messages still queue, so turning SMTP on
+            # later sends the backlog rather than starting from empty.
+            raise RuntimeError(
+                "SMTP is disabled. Set SMTP_ENABLED=true once a mail server is "
+                "configured; queued messages are kept until then."
             )
-            return
 
         msg = EmailMessage()
         msg["From"] = settings.SMTP_FROM_EMAIL

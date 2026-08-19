@@ -93,6 +93,7 @@ class WatchlistService:
         if not recipients:
             return
         NotificationService(self.db)._send(
+            alert.tenant_id,
             recipients,
             f"Watchlist: {alert.summary}",
             f"{alert.summary}\n\n"
@@ -100,6 +101,7 @@ class WatchlistService:
             f"Object: {alert.object_type} {alert.object_id}\n\n"
             "Raised because this kind of change moves money or moves the rules "
             "without touching an invoice, so nothing else would surface it.",
+            category="watchlist",
         )
 
     def _watchers(self, tenant_id: UUID) -> List[User]:

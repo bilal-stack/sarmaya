@@ -688,6 +688,28 @@ Every workflow's waiting state carries an SLA. RFQ `closed` was the exception
 and now escalates to manager after 48h: quoting has ended, the vendors are
 waiting, and nothing else chases it.
 
+### Notification queue
+```bash
+POST /api/v1/notifications/dispatch?limit=       # deliver everything due
+GET  /api/v1/notifications/queue?status=         # pending | sent | failed
+GET  /api/v1/notifications/queue/summary         # counts by status
+POST /api/v1/notifications/queue/retry-failed    # requeue after fixing the cause
+```
+
+Notifications are **queued in the same transaction as the action** that produced
+them and delivered afterwards, so no request waits on a mail server and a
+rolled-back action sends nothing. Needs `workflow.manage`.
+
+Run the drain on a schedule — every minute is fine, and it is cheap when empty:
+
+```bash
+python -m scripts.dispatch_notifications
+```
+
+Delivery is opt-in (`SMTP_ENABLED`). While it is off, messages are **held**
+untouched rather than attempted, so switching it on later sends the backlog
+instead of finding it expired.
+
 ### Change Watchlist
 ```bash
 GET  /api/v1/watchlist?open_only=&category=   # alerts newest first + open_count

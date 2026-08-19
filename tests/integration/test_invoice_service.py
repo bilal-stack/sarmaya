@@ -397,21 +397,29 @@ class TestDashboardSummary:
 
 
 class TestNotifications:
-    """Workflow events fire emails to the right people, and delivery failures
-    never break the workflow. SMTP is patched out at the _deliver boundary."""
+    """Workflow events queue emails for the right people.
+
+    Read from the outbox rather than by patching delivery: nothing is sent
+    inside the request any more, so a test that stubbed `_deliver` would now
+    capture nothing and pass by observing an empty list. The queued row *is*
+    the observable behaviour of submitting an invoice.
+    """
 
     @staticmethod
-    def _capture(monkeypatch):
-        sent = []
-        monkeypatch.setattr(
-            NotificationService,
-            "_deliver",
-            lambda self, to, subject, body: sent.append((to, subject, body)),
-        )
-        return sent
+    def _capture(db, monkeypatch=None):
+        """(to, subject, body) for everything queued so far."""
+        from app.models.notification_outbox import NotificationOutbox
+
+        def read():
+            db.flush()
+            return [
+                (m.to_email, m.subject, m.body)
+                for m in db.query(NotificationOutbox).all()
+            ]
+        return read
 
     def test_submit_notifies_approvers(self, db, tenant, make_user, monkeypatch):
-        sent = self._capture(monkeypatch)
+        queued = self._capture(db)
         clerk = make_user(UserRole.AP_CLERK)
         make_user(UserRole.MANAGER, email="mgr@test.com")
         inv = _make_invoice(db, tenant.id, clerk["id"],
@@ -421,11 +429,11 @@ class TestNotifications:
         svc.validate_invoice(inv.id, clerk)
         svc.submit_for_approval(inv.id, clerk)
 
-        recipients = [to for to, _, _ in sent]
+        recipients = [to for to, _, _ in queued()]
         assert "mgr@test.com" in recipients  # manager approves <=250k
 
     def test_approve_notifies_creator(self, db, tenant, make_user, monkeypatch):
-        sent = self._capture(monkeypatch)
+        queued = self._capture(db)
         clerk = make_user(UserRole.AP_CLERK, email="clerk@test.com")
         manager = make_user(UserRole.MANAGER)
         inv = _make_invoice(db, tenant.id, clerk["id"],
@@ -433,11 +441,12 @@ class TestNotifications:
 
         InvoiceService(db).approve_invoice(inv.id, manager)
 
-        assert "clerk@test.com" in [to for to, _, _ in sent]
-        assert any("approved" in subj.lower() for _, subj, _ in sent)
+        messages = queued()
+        assert "clerk@test.com" in [to for to, _, _ in messages]
+        assert any("approved" in subj.lower() for _, subj, _ in messages)
 
     def test_reject_notifies_creator_with_reason(self, db, tenant, make_user, monkeypatch):
-        sent = self._capture(monkeypatch)
+        queued = self._capture(db)
         clerk = make_user(UserRole.AP_CLERK, email="clerk@test.com")
         manager = make_user(UserRole.MANAGER)
         inv = _make_invoice(db, tenant.id, clerk["id"],
@@ -445,8 +454,9 @@ class TestNotifications:
 
         InvoiceService(db).reject_invoice(inv.id, "missing PO", manager)
 
-        assert "clerk@test.com" in [to for to, _, _ in sent]
-        assert any("missing PO" in body for _, _, body in sent)
+        messages = queued()
+        assert "clerk@test.com" in [to for to, _, _ in messages]
+        assert any("missing PO" in body for _, _, body in messages)
 
     def test_delivery_failure_does_not_break_approval(self, db, tenant, make_user, monkeypatch):
         def boom(self, to, subject, body):

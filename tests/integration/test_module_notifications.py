@@ -40,7 +40,7 @@ def sent(monkeypatch):
     captured = []
     monkeypatch.setattr(
         NotificationService, "_send",
-        lambda self, recipients, subject, body: captured.append(
+        lambda self, tenant_id, recipients, subject, body, category=None: captured.append(
             {"to": list(recipients), "subject": subject, "body": body}
         ),
     )
