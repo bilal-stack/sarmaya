@@ -10,7 +10,6 @@ every ORM query automatically (see `_exclude_soft_deleted`), so callers do not
 filter for it and cannot forget to.
 """
 from typing import Optional
-from uuid import UUID
 
 from sqlalchemy.orm import Session
 

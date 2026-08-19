@@ -11,7 +11,7 @@ different question and a shorter-lived one. An item can be read here and still
 be waiting there.
 """
 import logging
-from typing import List, Optional
+from typing import List
 from uuid import UUID
 
 from sqlalchemy.orm import Session

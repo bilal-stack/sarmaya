@@ -16,7 +16,7 @@ the flows:
   * **Recovery codes are single use and hashed**, and spending one is recorded.
 """
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from sqlalchemy.orm import Session
 

@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional, Dict
@@ -6,6 +8,8 @@ from uuid import UUID
 from app.models.conversation import Conversation, ConversationMessage
 from app.schemas.conversation import ConversationCreate, ConversationMessageCreate
 from app.utils.datetime_helpers import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationService:
@@ -133,8 +137,12 @@ class ConversationService:
                 if len(title) > 60:
                     title = title[:57] + "..."
                 return title
-            except:
-                pass
+            except Exception:
+                # Titling a conversation is cosmetic; the fallback below is
+                # always available. A bare `except` here would also swallow
+                # KeyboardInterrupt and SystemExit, which is never what anybody
+                # means.
+                logger.debug("AI title generation failed; using the fallback")
         
         # Fallback: Use first 6 words of message
         words = message.split()[:6]

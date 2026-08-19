@@ -52,6 +52,17 @@ def get_pending_approvals(
     return service.get_pending_approvals()
 
 
+def _raise_for(exc: Exception) -> None:
+    """Same mapping the rest of the API uses: refusal is 403, bad input is 400.
+
+    A helper rather than the same two lines under every handler — there are
+    eight of them here, and eight copies is eight places for one of them to
+    quietly start answering differently.
+    """
+    if isinstance(exc, PermissionError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
 # --- Global dashboards (Build Book lines 265-272) ----------------------------
 #
 # Seven questions somebody actually asks, each computed from history the system
@@ -67,8 +78,8 @@ def dashboard_overview(
     round trips would render it in pieces."""
     try:
         return DashboardService(db).overview(current_user)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/control-room")
@@ -79,8 +90,8 @@ def control_room(
     """What is stuck, why, and the cash behind it."""
     try:
         return DashboardService(db).control_room(current_user)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/bottlenecks")
@@ -92,8 +103,8 @@ def approval_bottlenecks(
     """Cycle time by step and by role, plus how long the undecided have waited."""
     try:
         return DashboardService(db).approval_bottlenecks(current_user, days=days)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/exceptions")
@@ -105,8 +116,8 @@ def exceptions_heatmap(
     """What is being blocked, and which vendors account for it."""
     try:
         return DashboardService(db).exceptions_heatmap(current_user, days=days)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/policy-overrides")
@@ -118,8 +129,8 @@ def policy_overrides(
     """Who set a control aside, how often, and for how much."""
     try:
         return DashboardService(db).policy_overrides(current_user, days=days)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/evidence")
@@ -130,8 +141,8 @@ def evidence_completeness(
     """What would fail an audit right now: missing documents, late approvals."""
     try:
         return DashboardService(db).evidence_completeness(current_user)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/reconciliation-health")
@@ -142,8 +153,8 @@ def reconciliation_health(
     """Money that left with nothing accounting for it, by age."""
     try:
         return DashboardService(db).reconciliation_health(current_user)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
 
 
 @router.get("/autopilot-health")
@@ -155,5 +166,5 @@ def autopilot_health(
     """What the machine decided, and what came back."""
     try:
         return DashboardService(db).autopilot_health(current_user, days=days)
-    except PermissionError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)

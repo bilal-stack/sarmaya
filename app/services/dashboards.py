@@ -38,9 +38,9 @@ materialised view refreshed on a schedule, not a blanket TTL over both.
 """
 import logging
 from datetime import timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List
 
-from sqlalchemy import Float, case, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.enums import InvoiceState, PaymentState, VendorStatus
