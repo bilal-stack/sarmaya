@@ -33,6 +33,7 @@ Add your frontend's origin to check CORS the way a browser would:
 Exits non-zero if anything failed, so it can gate a release.
 """
 import argparse
+from datetime import datetime, timedelta
 import json
 import sys
 import urllib.error
@@ -241,6 +242,70 @@ def check_database(database_url: str) -> List[Result]:
                                 ", ".join(unprotected)))
             else:
                 results.append((True, "Every tenant-owned table has RLS", ""))
+
+            # Notifications are queued and drained by a scheduler. If nobody
+            # runs the drain, the app looks perfectly healthy while telling
+            # nobody anything — no approval requests, no SLA escalations, no
+            # watchlist alerts. Invisible from outside, which is the same
+            # argument that put the RLS check in this script.
+            #
+            # Counted per tenant with the GUC bound, for the reason spelled out
+            # below the users check: through the app's role with no tenant set,
+            # RLS hides every row, so a plain COUNT(*) here returns 0 on a
+            # completely stuck queue. The first version of this check did
+            # exactly that and reported a healthy queue against a deliberately
+            # stalled one — a check that can only pass is worse than none.
+            try:
+                queue_tenants = conn.execute(text("SELECT id FROM tenants")).scalars().all()
+                pending = 0
+                failed = 0
+                oldest_pending = None
+                for tenant_id in queue_tenants:
+                    conn.execute(
+                        text("SELECT set_config('app.current_tenant_id', :t, false)"),
+                        {"t": str(tenant_id)},
+                    )
+                    row = conn.execute(text("""
+                        SELECT MIN(created_at) FILTER (WHERE status = 'pending'),
+                               COUNT(*) FILTER (WHERE status = 'pending'),
+                               COUNT(*) FILTER (WHERE status = 'failed')
+                        FROM notification_outbox
+                    """)).one()
+                    if row[0] and (oldest_pending is None or row[0] < oldest_pending):
+                        oldest_pending = row[0]
+                    pending += row[1] or 0
+                    failed += row[2] or 0
+                conn.execute(
+                    text("SELECT set_config('app.current_tenant_id', '', false)")
+                )
+                queue_readable = True
+            except Exception as exc:
+                queue_readable = False
+                results.append((None, "Notification queue not checked", str(exc)[:120]))
+
+            if queue_readable:
+                stale = bool(
+                    oldest_pending
+                    and (datetime.utcnow() - oldest_pending) > timedelta(hours=1)
+                )
+                if stale:
+                    results.append((False, "NOTIFICATIONS ARE NOT BEING SENT", (
+                        f"{pending} message(s) queued, oldest from "
+                        f"{oldest_pending:%Y-%m-%d %H:%M} UTC. Either no "
+                        "scheduler is running `python -m scripts."
+                        "dispatch_notifications`, or SMTP_ENABLED is false. "
+                        "Approval requests and SLA escalations are going "
+                        "nowhere."
+                    )))
+                elif failed:
+                    results.append((False, f"{failed} notification(s) gave up", (
+                        "Delivery failed repeatedly. Check "
+                        "GET /api/v1/notifications/queue?status=failed, fix the "
+                        "cause, then POST /api/v1/notifications/queue/retry-failed."
+                    )))
+                else:
+                    results.append((True, "Notification queue is moving",
+                                    f"{pending} pending, none stale"))
 
             # Counted per tenant with the GUC bound, exactly as a request does.
             # A plain `SELECT COUNT(*) FROM users` through the app's role

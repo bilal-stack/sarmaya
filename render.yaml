@@ -58,3 +58,47 @@ services:
         value: "false"
       - key: PYTHON_VERSION
         value: "3.12"
+
+  # The notification drain.
+  #
+  # Notifications are queued in the same transaction as the action that
+  # produced them, which means nothing is delivered until something empties the
+  # queue. This is that something. Without this service the app looks healthy
+  # and silently tells nobody anything — no approval requests, no SLA
+  # escalations, no watchlist alerts.
+  #
+  # Every minute, and cheap when the queue is empty: one indexed query that
+  # returns no rows. It is safe to run alongside a manual
+  # POST /notifications/dispatch — a message already sent is never picked up
+  # twice.
+  #
+  # It needs the same DATABASE_URL as the web service and the same SMTP
+  # settings. With SMTP_ENABLED=false it runs, finds messages, and holds them
+  # untouched rather than burning their retry attempts.
+  - type: cron
+    name: sarmaya-notifications
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    schedule: "* * * * *"
+    dockerCommand: python -m scripts.dispatch_notifications --quiet
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      # Set these to actually deliver. See .env.example for the full note.
+      - key: SMTP_ENABLED
+        value: "false"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: DEBUG
+        value: "false"
