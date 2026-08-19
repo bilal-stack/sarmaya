@@ -266,3 +266,6 @@ document_ai_full_dump.txt
 uploads/
 demo_assets/
 .claude/launch.json
+
+# Working status notes, not part of the repo.
+docs/BUILD_STATUS.txt
