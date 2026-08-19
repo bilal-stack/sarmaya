@@ -1,0 +1,241 @@
+SARMAYA OS — BUILD STATUS
+Generated 2026-08-19. Measured against build-book.txt (owner: Andrew).
+Backend: 729 tests passing. Migrations at head 032. Both repos pushed.
+Not deployed anywhere.
+
+
+===============================================================================
+1. MODULES  (build-book.txt lines 71-81, "Services and Modules")
+===============================================================================
+
+DONE
+----
+Process Engine
+    State machines, transition guards, SLAs, escalation, delegation.
+    5 workflows: invoice, requisition, rfq, purchase_order, payment.
+
+Policy and Controls Engine
+    Versioned rule schema, SoD checks, thresholds, evidence requirements,
+    policy simulator, decision snapshots stored for audit reproducibility.
+
+Decision Inbox
+    Unified task surface. Every work item type reports to it (7 collectors).
+    SLA timers, escalation, one item per thing under its most blocking step.
+
+Document and Evidence Service
+    File store, SHA-256 hashing, OCR extraction, evidence packs sealed
+    under one hash.
+
+Admin Console
+    Configuration screens, policy simulator, audit viewer, job monitor
+    (notification queue). MISSING: error monitor.
+
+
+PARTIAL
+-------
+Identity and Access
+    DONE     : users, roles, RBAC, permission model, tenant isolation
+               (RLS + application-level scoping, two independent locks).
+    MISSING  : SSO (OIDC/SAML — Entra ID, Google Workspace), MFA.
+    NOTE     : enterprise buyers expect "sign in with your work account".
+               This is not optional for the target customer.
+
+AI Orchestrator
+    DONE     : AI action log with provenance, Restricted Autopilot with
+               bounds + revert, next-action suggestion agent, HITL gates.
+    MISSING  : model router, schema validator, prompt/version control.
+
+Notification Service
+    DONE     : email, queued transactionally and delivered by a scheduler,
+               with retry, backoff, give-up limit and queue visibility.
+    MISSING  : in-app notifications (no bell, no unread count), reminders,
+               optional WhatsApp.
+    NOTE     : needs SMTP_ENABLED=true + the drain cron in production, or
+               nothing is delivered. See section 4.
+
+
+NOT STARTED
+-----------
+Integration Hub
+    Connectors, inbound/outbound webhooks, idempotency, dead-letter queues,
+    reconciliation ledger.
+    IMPACT   : Sarmaya is currently an island. Everything enters by hand or
+               by PDF upload. For most real customers this is the blocker,
+               not a nice-to-have.
+    NOTE     : the notification outbox already provides the retry/backoff/
+               DLQ shape a webhook sender would reuse.
+
+Reporting and Metrics
+    Operational dashboards, compliance dashboards, export engine.
+    Today: invoice counts and a pending list. See section 3.
+
+
+===============================================================================
+2. DEFINITION OF DONE  (build-book.txt lines 15-22)
+===============================================================================
+
+[x] All workflows implemented with state machine definitions, transition
+    guards, SLAs, and escalation rules.
+
+[x] All policy checks implemented with a versioned rules schema and
+    deterministic outputs.
+
+[x] Decision Inbox supports every work item type in that variant.
+
+[ ] Reports and dashboards for that variant shipped and validated against
+    seed dataset.
+    -> Largely missing. No seed dataset exists either (database is pristine).
+
+[ ] Integration connectors implemented with retries, idempotency,
+    dead-letter queues, and reconciliation records.
+    -> Not started.
+
+[~] Test pack: acceptance tests (Given/When/Then), regression checklist,
+    and performance smoke tests.
+    -> 729 tests exist and are thorough, but they are not written in
+       Given/When/Then acceptance form, there is no regression checklist
+       document, and no performance smoke tests.
+
+[~] Admin Console: configuration screens, job monitor, error monitor,
+    and audit viewer.
+    -> 3 of 4. Error monitor missing.
+
+
+===============================================================================
+3. DASHBOARDS NOT BUILT  (build-book.txt lines 265-306)
+===============================================================================
+
+Global Dashboards (7)
+    - Executive Control Room: what is stuck, why, and cash impact
+    - Approval Bottlenecks: cycle time by step, by role, by department
+    - Exceptions Heatmap: root causes by vendor, category, department
+    - Policy Overrides: who overrides, frequency, amounts, reasons
+    - Audit Evidence Completeness: missing docs, late approvals
+    - Reconciliation Health: breaks by bank/entity/root cause and aging
+    - Autopilot Health: usage, reversals, sampled reviews, drift alerts
+
+    NOTE: all seven are computable from data already stored — audit
+    timestamps, *_blocked events, award justifications, the breaks table.
+    This is reporting on existing truth, not new plumbing.
+
+Global Matrices (5)
+    Approval / SoD / Vendor Risk / Tolerance / Evidence matrices.
+    The approval matrix exists as config; none are presented as matrices.
+
+Standard Report Catalog — per persona, none built
+    CFO / Finance Director     : cash position, 13-week forecast, AP aging
+                                 with exception funnel, spend analytics,
+                                 working capital, close calendar
+    AP / Treasury              : invoice throughput, payment run status,
+                                 duplicate/anomaly dashboard, bank breaks
+    Procurement Leadership     : RFQ cycle time, savings vs baseline,
+                                 supplier scorecards, contract compliance
+    HR Leadership              : payroll variance, headcount, reimbursements
+    COO / Supply Chain         : inventory turns, stockout risk, P2P cycle
+    Audit / Compliance         : evidence completeness score, overrides
+                                 report, SoD violations blocked, one-click
+                                 audit pack per period and per control
+
+
+===============================================================================
+4. REQUIRED BEFORE / AT PRODUCTION
+===============================================================================
+
+Not deployed anywhere yet. When deploying:
+
+a) SMTP_ENABLED=true plus the SMTP_* settings.
+   While false, messages are HELD untouched rather than attempted, so
+   switching it on later sends the backlog rather than finding it expired.
+
+b) A scheduler running the drain, every minute is fine:
+       python -m scripts.dispatch_notifications
+   Without it, messages queue forever and nobody is told anything.
+   render.yaml defines this as the "sarmaya-notifications" cron service.
+
+c) Run the verifier after deploying. It fails if the queue stalls, if the
+   app connects as a superuser (bypassing RLS), if DEBUG is on, or if
+   self-registration is open:
+       python -m scripts.verify_deployment https://... --database-url ...
+
+d) Frontend needs NEXT_PUBLIC_API_BASE_URL pointed at the deployed API.
+
+Never verified anywhere: real SMTP transmission. No mail server exists in
+the dev environment, so delivery is tested only at the _deliver boundary.
+Watch GET /api/v1/notifications/queue?status=failed on the first deploy.
+
+
+===============================================================================
+5. DEFERRED BY DECISION
+===============================================================================
+
+Teams / Slack cards          Build outbound alerts that deep-link back to the
+                             inbox. Do NOT build in-Slack approve buttons:
+                             accepting an authorising action from Slack's
+                             servers collides with every SoD rule (self-
+                             approval, maker-checker, first-payment-after-
+                             bank-change). Outbound is small; interactive
+                             approval is a project with a new auth surface.
+
+OCR in the background        Upload currently calls an external OCR API
+                             inside the request, so the user waits on a third
+                             party. Moving it off is right, but it is not a
+                             drop-in: it needs a processing state on the
+                             invoice and a UI that reflects it, because today
+                             the upload returns the extracted invoice.
+
+
+===============================================================================
+6. SCOPE NOT YET TOUCHED
+===============================================================================
+
+The Build Book says "Definition of Done for Any Variant", and the ERP
+Blueprint covers Finance, Procurement, Supply Chain and HR.
+
+Built  : one variant — accounts payable, with its procurement upstream
+         (requisition -> RFQ -> quote -> award -> PO -> receipt -> invoice
+         -> payment -> bank reconciliation).
+Not built: Supply Chain and HR. These are whole modules, not gaps.
+
+
+===============================================================================
+7. STACK DIVERGENCE — WORTH A CONVERSATION
+===============================================================================
+
+build-book.txt names these defaults and calls them editable, but if Andrew
+expects them specifically, decide before more is built on the current base:
+
+    named               built instead
+    -----               -------------
+    Temporal            custom state machine on Postgres
+    Open Policy Agent   Python policy engine with versioned rules in Postgres
+    Keycloak / OIDC     local JWT auth, no SSO
+    NATS JetStream      no event bus; direct calls + the notification outbox
+    OpenSearch          Postgres queries
+    S3 / MinIO          local disk file storage
+    Metabase/Superset   none (dashboards not built)
+
+The Build Book's stated principles — workflow-first, policy-first,
+audit-first — are met by the current implementation. The components differ.
+
+
+===============================================================================
+WHAT THE CORE ACTUALLY HAS  (for context, not a to-do)
+===============================================================================
+
+Hash-chained immutable audit trail with integrity verification.
+Segregation of duties that refuses real people: self-approval, maker-checker
+  on payment release, self-reconciliation, bank-change approval, and the
+  first payment after a bank change — the last three with no admin exemption.
+Vendor bank change control: dual approval + cooling period + payments held
+  to both accounts while open.
+Field-level masking of account numbers by role, across all three surfaces
+  that carry them.
+Soft deletes with a mandatory reason, and a database-level guardrail that
+  refuses hard deletes outright.
+Change watchlist on bank changes, master data edits and policy overrides,
+  with recorded acknowledgement by a second person.
+Tenant isolation with two independent locks: Postgres RLS plus
+  application-level query scoping.
+Restricted Autopilot bounded by the approval matrix and SoD, with revert.
+Evidence packs sealed under a single hash.
+729 tests. 38 decisions recorded in docs/DECISION_REGISTER.md.
