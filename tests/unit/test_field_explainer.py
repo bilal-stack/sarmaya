@@ -6,7 +6,6 @@ the source line of OCR text the value came from. Pure logic, no I/O.
 """
 from datetime import date
 
-import pytest
 
 from app.services.ocr.field_explainer import (
     build_field_explanations,

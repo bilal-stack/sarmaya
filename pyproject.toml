@@ -1,0 +1,42 @@
+[tool.ruff]
+# Deliberately narrow. The point is to catch new mistakes mechanically, not to
+# reformat a working codebase — a first run that demands three hundred edits is
+# a linter people turn off.
+target-version = "py312"
+line-length = 100
+
+exclude = [
+    ".venv",
+    "alembic/versions/9ee83d7f931f_initial_schema.py",  # generated, huge
+]
+
+[tool.ruff.lint]
+select = [
+    "E9",   # syntax and IO errors — things that stop the file running at all
+    "F",    # pyflakes: unused imports, undefined names, dead variables
+    "B",    # bugbear: mutable default arguments, silent except-in-loop, and
+            # similar constructs that are legal Python and almost never meant
+]
+
+ignore = [
+    # FastAPI's whole idiom is `def endpoint(db: Session = Depends(get_db))`.
+    # B008 exists to catch `def f(x=[])`, which is a genuine trap; here it fires
+    # 301 times on the framework working as designed.
+    "B008",
+
+    # `raise ... from err` inside an except block. A real improvement — it keeps
+    # the original traceback, which matters when an HTTPException hides the
+    # database error that caused it — but it is 46 pre-existing sites across
+    # every error path in the API, and none of them are wrong today, only
+    # thinner in a log. Deferred on purpose rather than silently: worth doing as
+    # its own change, where the diff can be read.
+    "B904",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Migrations legitimately import both sa and the dialect module for column
+# types that only some branches use.
+"alembic/versions/*.py" = ["F401"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15

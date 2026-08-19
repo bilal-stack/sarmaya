@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from datetime import date
 
 
 class OCRProvider(ABC):

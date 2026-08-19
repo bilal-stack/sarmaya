@@ -1,7 +1,6 @@
 from pydantic import BaseModel, field_validator, ConfigDict
 from typing import Optional
 from uuid import UUID
-from app.core.roles import is_valid_role, DEFAULT_ROLE, list_roles
 from app.core.enums import UserRole
 
 ALLOWED_ROLES = {"admin", "ap_clerk", "manager", "cfo", "approver", "auditor", "user", "system"}

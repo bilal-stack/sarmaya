@@ -11,7 +11,6 @@ the winner, whether a losing quote can be revised after the field is known, and
 whether an order can quietly exceed what was approved.
 """
 import uuid
-from datetime import date
 from decimal import Decimal
 
 import pytest

@@ -13,7 +13,6 @@ The tests that matter most here are not the happy path. They are:
   * turning it off needs more than the session it is protecting.
 """
 import time
-import uuid
 
 import pyotp
 import pytest

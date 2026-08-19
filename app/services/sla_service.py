@@ -13,7 +13,6 @@ from typing import Dict, List
 
 from sqlalchemy.orm import Session
 
-from app.models.invoice import Invoice
 from app.models.workflow_state import WorkflowState
 from app.models.audit_log import AuditLog
 from app.services.audit import log_audit

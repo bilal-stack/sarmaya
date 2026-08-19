@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import date
 from uuid import UUID
-from decimal import Decimal
 
 from app.repositories.invoice_repository import InvoiceRepository
 from app.repositories.vendor_repository import VendorRepository
@@ -574,7 +573,7 @@ class InvoiceService:
         )
         
         if not success:
-            raise ValueError(f"State transition failed")
+            raise ValueError("State transition failed")
         
         # Flush, do not commit: the routing snapshot and audit entry below
         # belong to the same transaction as the transition they describe.

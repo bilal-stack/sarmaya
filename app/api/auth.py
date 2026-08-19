@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import cast, Optional
+from typing import cast
 
 from app.core.database import get_db, set_tenant_context
 from app.core.security import (
@@ -23,7 +23,7 @@ from app.schemas.user import RegistrationRequest, UserOut
 from app.models.user import User
 from app.models.tenant import Tenant
 from app.core.config import settings
-from app.core.roles import DEFAULT_ROLE, is_valid_role
+from app.core.roles import DEFAULT_ROLE
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

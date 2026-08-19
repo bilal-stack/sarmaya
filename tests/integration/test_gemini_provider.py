@@ -11,7 +11,6 @@ The SDK is stubbed throughout. A real call needs a paid key, and what matters
 here is the translation between the app's provider-agnostic shapes and
 Gemini's, which is exactly what a stub can assert.
 """
-import json
 from types import SimpleNamespace
 
 import pytest

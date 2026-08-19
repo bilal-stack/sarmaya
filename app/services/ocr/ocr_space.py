@@ -1,7 +1,7 @@
 import requests
 import logging
 import re
-from datetime import date, datetime
+from datetime import datetime
 from typing import Dict, Any
 
 from app.core.config import settings

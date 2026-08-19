@@ -9,7 +9,6 @@ from datetime import date
 import pytest
 
 from app.core.enums import UserRole, VendorStatus
-from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from app.models.audit_log import AuditLog
 from app.models.policy_eval import PolicyEval

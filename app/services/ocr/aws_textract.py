@@ -1,5 +1,4 @@
 import logging
-from datetime import date
 from typing import Dict, Any
 
 from app.services.ocr.base import OCRProvider

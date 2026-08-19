@@ -7,7 +7,6 @@ from uuid import UUID
 
 from app.api.deps import get_current_user, get_db_session
 from app.models.audit_log import AuditLog
-from app.models.user import User
 from app.core.enums import UserRole
 from app.schemas.audit import AuditTimeline, AuditChainVerification
 from app.schemas.ai import AIActionLogResponse

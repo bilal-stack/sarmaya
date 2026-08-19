@@ -6,7 +6,6 @@ from typing import List, Optional, Dict
 from uuid import UUID
 
 from app.models.conversation import Conversation, ConversationMessage
-from app.schemas.conversation import ConversationCreate, ConversationMessageCreate
 from app.utils.datetime_helpers import utc_now
 
 logger = logging.getLogger(__name__)

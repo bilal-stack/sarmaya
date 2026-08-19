@@ -1,0 +1,12 @@
+# Development-only tooling. Deliberately separate from requirements.txt, which
+# the Dockerfile installs — a linter has no business in a production image.
+#
+#   pip install -r requirements-dev.txt
+#   ruff check .            # what would fail
+#   ruff check . --fix      # fix the safe ones
+#
+# The rule set is narrow on purpose; see [tool.ruff] in pyproject.toml for what
+# is enabled, what is ignored, and why.
+-r requirements.txt
+
+ruff>=0.6,<1

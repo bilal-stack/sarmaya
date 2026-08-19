@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import Dict, Any
 from uuid import UUID
 import logging
 
@@ -11,13 +11,9 @@ from app.services.conversation_service import ConversationService
 from app.schemas.conversation import (
     ChatRequest, 
     ChatResponse, 
-    ConversationOut, 
     ConversationDetail,
     PaginatedConversationsOut
 )
-from app.models.invoice import Invoice
-from app.models.vendor import Vendor
-from datetime import date
 from app.agents.duplicate_agent import DuplicateDetectionAgent
 from app.agents.query_agent import QueryAgent
 

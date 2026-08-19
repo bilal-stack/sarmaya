@@ -383,7 +383,6 @@ class TestEvidencePacksAreNotSealedOverNothing:
     def test_generating_over_an_invisible_chain_is_refused(
         self, client, insider, outsider
     ):
-        from app.models.payment import Payment
 
         their_chain = uuid.uuid4()
         response = client.post(f"/api/v1/audit/evidence-pack/{their_chain}")

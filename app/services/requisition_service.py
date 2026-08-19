@@ -33,7 +33,6 @@ from app.services.workflow import transition_state
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
 from app.services.notification_service import NotificationService
-from app.core.roles import PERM_APPROVE_REQUISITION
 from app.services import sod
 from app.services.delegation import resolve_permission
 from app.utils.datetime_helpers import utc_now

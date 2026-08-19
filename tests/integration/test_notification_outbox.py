@@ -65,7 +65,7 @@ class TestTheRequestDoesNotWaitOnMail:
             NotificationService, "_deliver",
             lambda self, *a, **k: delivered.append(a),
         )
-        admin = make_user(UserRole.ADMIN)
+        make_user(UserRole.ADMIN)   # the tenant needs a user; the binding is not used
 
         NotificationService(db)._send(
             tenant.id, ["cfo@test.com"], "Subject", "Body", category="test"

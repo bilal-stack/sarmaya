@@ -9,7 +9,6 @@ Pure functions, no database required.
 """
 import pytest
 
-from app.core import roles
 from app.core.roles import (
     ADMIN, AP_CLERK, MANAGER, CFO, APPROVER, AUDITOR, SYSTEM,
     has_permission,

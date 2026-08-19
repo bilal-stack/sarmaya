@@ -20,8 +20,7 @@ while a discrepancy is resolved.
 """
 import logging
 from decimal import Decimal
-from typing import Dict, List, Optional
-from uuid import UUID
+from typing import Dict, List
 
 from sqlalchemy.orm import Session
 

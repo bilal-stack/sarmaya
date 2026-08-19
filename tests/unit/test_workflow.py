@@ -8,7 +8,6 @@ workflow_states rows are configured. Pure logic, no real database.
 """
 import pytest
 
-from app.services import workflow
 from app.services.workflow import change_state, get_allowed_transitions
 from app.core.enums import InvoiceState
 

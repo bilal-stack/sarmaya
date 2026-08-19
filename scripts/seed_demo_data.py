@@ -31,9 +31,8 @@ import logging
 import random
 import sys
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
-from sqlalchemy import text
 
 from app.core.database import SessionLocal, set_tenant_context
 from app.core.enums import (

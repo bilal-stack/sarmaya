@@ -15,14 +15,13 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.enums import RequisitionState, UserRole, VendorStatus
+from app.core.enums import RequisitionState, UserRole
 from app.models.audit_log import AuditLog
 from app.models.notification_outbox import (
     NotificationOutbox, CHANNEL_EMAIL, CHANNEL_IN_APP,
-    STATUS_PENDING, STATUS_SENT,
+    STATUS_SENT,
 )
 from app.models.requisition import PurchaseRequisition, PurchaseRequisitionLine
-from app.models.workflow_state import WorkflowState
 from app.services.config_provisioning import ConfigProvisioningService
 from app.services.notification_dispatcher import NotificationDispatcher
 from app.services.notification_feed import NotificationFeedService

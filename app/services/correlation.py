@@ -15,7 +15,6 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.invoice import Invoice
 from app.models.audit_log import AuditLog
 from app.models.policy_eval import PolicyEval
 from app.models.ai_action_log import AIActionLog

@@ -14,7 +14,6 @@ import pytest
 from app.core.enums import UserRole, PurchaseOrderState, VendorStatus
 from app.models.audit_log import AuditLog
 from app.models.policy_eval import PolicyEval
-from app.models.purchase_order import PurchaseOrder
 from app.models.vendor import Vendor
 from app.schemas.purchase_order import (
     PurchaseOrderCreate, PurchaseOrderLineCreate, PurchaseOrderUpdate,

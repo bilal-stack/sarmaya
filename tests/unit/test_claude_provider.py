@@ -3,7 +3,6 @@
 These cover the OpenAI->Anthropic shape conversions and tenant scoping without
 any network call or API key (the network methods are exercised live, not here).
 """
-import pytest
 
 from app.services.ai.claude_provider import (
     _split_system,

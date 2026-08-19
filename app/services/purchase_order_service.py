@@ -19,17 +19,16 @@ Two things are specific to buying rather than paying:
 """
 import logging
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
-from app.models.vendor import Vendor
 from app.repositories.purchase_order_repository import PurchaseOrderRepository
 from app.repositories.vendor_repository import VendorRepository
 from app.schemas.purchase_order import PurchaseOrderCreate, PurchaseOrderUpdate
-from app.core.enums import PurchaseOrderState, VendorStatus
+from app.core.enums import PurchaseOrderState
 from app.core.roles import (
     has_permission, PERM_CREATE_PO, PERM_VIEW_PO, PERM_UPDATE_PO, PERM_APPROVE_PO,
 )

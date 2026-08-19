@@ -210,7 +210,7 @@ Return ONLY valid JSON (no markdown, no code blocks):
             result["strategy"] = "fuzzy_ai"
             return result
         
-        except Exception as e:
+        except Exception:
             logger.exception("AI duplicate comparison failed")
             return {
                 "is_duplicate": False,

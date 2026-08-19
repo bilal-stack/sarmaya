@@ -11,7 +11,6 @@ and it matters here: ``state_entered_at`` prices SLA deadlines against
 application-written timestamps. These tests fail if a new table reintroduces
 the local-time default.
 """
-import pytest
 from sqlalchemy import text
 
 from app.utils.datetime_helpers import utc_now

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from typing import Dict, Optional
+from typing import Dict
 from uuid import UUID
 import logging
 

@@ -17,7 +17,6 @@ import pytest
 from app.core.enums import UserRole, InvoiceState, PaymentState, VendorStatus
 from app.models.audit_log import AuditLog
 from app.models.invoice import Invoice
-from app.models.payment import Payment
 from app.models.vendor import Vendor
 from app.schemas.payment import PaymentCreate
 from app.services.bank_export import BankExportService
