@@ -389,7 +389,7 @@ class DecisionInboxService:
                 **self._base(
                     "vendor_bank_change", change.id, vendor_name,
                     "bank details", 0.0, change.current_state,
-                    None, False, f"/ai-tools/vendors",
+                    None, False, "/ai-tools/vendors/bank-changes",
                 ),
                 "work_item_type": WORK_ADMIN,
                 "category": CAT_BANK_CHANGE,
