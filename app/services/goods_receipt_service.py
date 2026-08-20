@@ -19,7 +19,9 @@ from app.models.goods_receipt import GoodsReceipt, GoodsReceiptLine
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
 from app.core.enums import PurchaseOrderState
 from app.core.roles import has_permission, PERM_RECEIVE_GOODS, PERM_VIEW_PO
+from app.models.inventory import Item, StockLocation, MOVE_RECEIPT
 from app.services.audit import log_audit
+from app.services.stock_service import StockService
 from app.utils.datetime_helpers import utc_now
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,7 @@ class GoodsReceiptService:
             purchase_order_id=order.id,
             grn_number=self._next_grn_number(),
             received_date=data.received_date or utc_now().date(),
+            location_id=getattr(data, "location_id", None) or self._default_location(),
             delivery_note=data.delivery_note,
             notes=data.notes,
             # Inherited, so the receipt lands in the order's story rather than
@@ -114,6 +117,12 @@ class GoodsReceiptService:
             # it never has to replay every receipt.
             line.received_quantity = Decimal(line.received_quantity or 0) + quantity
             self.db.add(line)
+
+            # Goods that are actually held now land on a shelf. A line with no
+            # item, a non-stocked item, or a receipt with nowhere to put it
+            # moves nothing — which is the ordinary case for services and for
+            # every receipt recorded before inventory existed.
+            self._post_to_stock(receipt, line, quantity, current_user)
             recorded.append({
                 "po_line": line.line_number,
                 "description": line.description,
@@ -161,6 +170,53 @@ class GoodsReceiptService:
             raise PermissionError(
                 f"Role '{current_user['role']}' does not have permission to {action}"
             )
+
+    def _default_location(self):
+        """The tenant's receiving bay, if one is configured.
+
+        Not invented when missing: a receipt that silently lands stock in an
+        arbitrary location is worse than one that lands none, because the
+        first is wrong everywhere downstream and the second is visibly
+        incomplete.
+        """
+        bay = (
+            self.db.query(StockLocation)
+            .filter(
+                StockLocation.is_receiving_bay.is_(True),
+                StockLocation.is_active.is_(True),
+            )
+            .order_by(StockLocation.code)
+            .first()
+        )
+        return bay.id if bay else None
+
+    def _post_to_stock(self, receipt, po_line, quantity, current_user) -> None:
+        """Put the delivered quantity on the shelf.
+
+        Inside the caller's transaction on purpose: a receipt whose stock
+        movement rolled back would claim goods arrived that the ledger has
+        never heard of, and the two would disagree forever.
+        """
+        if receipt.location_id is None or po_line.item_id is None:
+            return
+
+        item = self.db.query(Item).filter(Item.id == po_line.item_id).first()
+        if item is None or not item.is_stocked:
+            return
+        if quantity == 0:
+            return
+
+        StockService(self.db).post_movement(
+            tenant_id=receipt.tenant_id,
+            item_id=item.id,
+            location_id=receipt.location_id,
+            quantity=quantity,
+            movement_type=MOVE_RECEIPT,
+            current_user=current_user,
+            source_type=OBJECT_TYPE,
+            source_id=receipt.id,
+            correlation_id=receipt.correlation_id,
+        )
 
     def _next_grn_number(self) -> str:
         existing = self.db.query(GoodsReceipt).count()

@@ -82,6 +82,47 @@ PERM_MANAGE_POLICIES = "policies.manage"
 
 PERM_MANAGE_WORKFLOW = "workflow.manage"
 
+# Inventory (Build Book Variant D1). Receiving already had its own permission
+# on the purchase order; these cover what happens to goods once they are here.
+#
+# `inventory.adjust` and `inventory.approve_adjustment` are deliberately
+# separate, and separately granted: an adjustment is the only way stock changes
+# with nothing physical behind it, which makes it how a theft is covered up.
+# The person who counts the shelf must not be the person who signs off the
+# write-off, and one permission covering both would make that impossible to
+# enforce however the roles were arranged.
+# HR (Build Book Variant C). The splits here are the Build Book's "SoD for HR
+# actions and payroll approvals", and each exists because the two halves must
+# be able to sit with different people:
+#
+#   * `view` vs `view_compensation` — most of HR is ordinary directory data.
+#     Salary, national ID and bank details are not, and an HR list that renders
+#     them to whoever opens it is a data breach with a UI.
+#   * `request_payroll_change` vs `approve_payroll_change` — raising your own
+#     rise is the obvious failure; a manager approving a rise for the person
+#     who approves theirs is the subtler one, and only separate permissions
+#     make either preventable.
+#   * `approve_expense` is separate again, because a claim is a payment
+#     request with a person attached and the claimant must never sign it.
+PERM_VIEW_HR = "hr.view"
+PERM_MANAGE_EMPLOYEES = "hr.manage_employees"
+PERM_VIEW_COMPENSATION = "hr.view_compensation"
+PERM_REQUEST_HEADCOUNT = "hr.request_headcount"
+PERM_APPROVE_HEADCOUNT = "hr.approve_headcount"
+PERM_REQUEST_PAYROLL_CHANGE = "hr.request_payroll_change"
+PERM_APPROVE_PAYROLL_CHANGE = "hr.approve_payroll_change"
+PERM_MANAGE_ONBOARDING = "hr.manage_onboarding"
+PERM_CLAIM_EXPENSE = "hr.claim_expense"
+PERM_APPROVE_EXPENSE = "hr.approve_expense"
+
+PERM_VIEW_INVENTORY = "inventory.view"
+PERM_MANAGE_ITEMS = "inventory.manage_items"
+PERM_ADJUST_INVENTORY = "inventory.adjust"
+PERM_APPROVE_ADJUSTMENT = "inventory.approve_adjustment"
+PERM_INSPECT_GOODS = "inventory.inspect"
+PERM_MANAGE_RETURNS = "inventory.manage_returns"
+PERM_APPROVE_RETURN = "inventory.approve_return"
+
 # Role -> permission keys (admin has ALL permissions)
 ROLE_PERMISSIONS = {
     ADMIN: [
@@ -105,6 +146,23 @@ ROLE_PERMISSIONS = {
         PERM_UPDATE_PO,
         PERM_APPROVE_PO,
         PERM_RECEIVE_GOODS,
+        PERM_VIEW_HR,
+        PERM_MANAGE_EMPLOYEES,
+        PERM_VIEW_COMPENSATION,
+        PERM_REQUEST_HEADCOUNT,
+        PERM_APPROVE_HEADCOUNT,
+        PERM_REQUEST_PAYROLL_CHANGE,
+        PERM_APPROVE_PAYROLL_CHANGE,
+        PERM_MANAGE_ONBOARDING,
+        PERM_CLAIM_EXPENSE,
+        PERM_APPROVE_EXPENSE,
+        PERM_VIEW_INVENTORY,
+        PERM_MANAGE_ITEMS,
+        PERM_ADJUST_INVENTORY,
+        PERM_APPROVE_ADJUSTMENT,
+        PERM_INSPECT_GOODS,
+        PERM_MANAGE_RETURNS,
+        PERM_APPROVE_RETURN,
         # Payments - ALL (self-release is still refused by SoD)
         PERM_VIEW_PAYMENT,
         PERM_PREPARE_PAYMENT,
@@ -156,6 +214,17 @@ ROLE_PERMISSIONS = {
         PERM_MANAGE_VENDORS,
         PERM_VIEW_VENDORS,
         PERM_VIEW_BANK_DETAILS,
+        # Does the physical work and records it. Notably absent:
+        # approve_adjustment and approve_return. The person who counts the
+        # shelf must not be the person who signs off the write-off.
+        PERM_VIEW_INVENTORY,
+        PERM_MANAGE_ITEMS,
+        PERM_ADJUST_INVENTORY,
+        PERM_INSPECT_GOODS,
+        PERM_MANAGE_RETURNS,
+        # Claims expenses like any employee. Deliberately no hr.view: an AP
+        # clerk has no business reading the staff directory to do their job.
+        PERM_CLAIM_EXPENSE,
     ],
     MANAGER: [
         PERM_VIEW_INVOICE,
@@ -172,6 +241,22 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_VENDORS,
         PERM_APPROVE_BANK_CHANGE,
         PERM_VIEW_BANK_DETAILS,
+        # The checker side of inventory: approves what the clerk raised, and
+        # cannot raise it themselves without also being able to approve it,
+        # which is what the SoD rule catches at the moment of approval.
+        PERM_VIEW_INVENTORY,
+        PERM_APPROVE_ADJUSTMENT,
+        PERM_APPROVE_RETURN,
+        # Runs a team: asks for people and for their pay to change, and
+        # signs off their expenses. Cannot approve a pay change — that is
+        # the separation the Build Book asks for, and a manager approving
+        # a rise for whoever approves theirs is exactly what it prevents.
+        PERM_VIEW_HR,
+        PERM_REQUEST_HEADCOUNT,
+        PERM_REQUEST_PAYROLL_CHANGE,
+        PERM_MANAGE_ONBOARDING,
+        PERM_CLAIM_EXPENSE,
+        PERM_APPROVE_EXPENSE,
     ],
     CFO: [
         PERM_VIEW_INVOICE,
@@ -194,6 +279,18 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_AUDIT,
         PERM_RECEIVE_WATCHLIST,
         PERM_VIEW_WATCHLIST,
+        # Second approval on a large write-off.
+        PERM_VIEW_INVENTORY,
+        PERM_APPROVE_ADJUSTMENT,
+        PERM_APPROVE_RETURN,
+        # The money side of HR: approves what a hire and a rise cost, and
+        # is one of the two roles trusted with compensation figures.
+        PERM_VIEW_HR,
+        PERM_VIEW_COMPENSATION,
+        PERM_APPROVE_HEADCOUNT,
+        PERM_APPROVE_PAYROLL_CHANGE,
+        PERM_APPROVE_EXPENSE,
+        PERM_CLAIM_EXPENSE,
     ],
     APPROVER: [
         PERM_VIEW_INVOICE,
@@ -215,6 +312,12 @@ ROLE_PERMISSIONS = {
         PERM_VIEW_AUDIT,
         PERM_RECEIVE_WATCHLIST,
         PERM_VIEW_WATCHLIST,
+        PERM_VIEW_INVENTORY,
+        # Reads everything, changes nothing. Compensation included, because
+        # payroll variance and ghost-employee checks are audit questions
+        # that cannot be asked against masked figures.
+        PERM_VIEW_HR,
+        PERM_VIEW_COMPENSATION,
     ],
     SYSTEM: [
         PERM_VIEW_INVOICE,

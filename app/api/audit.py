@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 from typing import Optional, List
@@ -18,6 +18,7 @@ from app.schemas.correlation import TransactionChain
 from app.services.correlation import CorrelationService
 from app.schemas.evidence import EvidencePackResponse, EvidencePackRecord
 from app.services.evidence_pack import EvidencePackService
+from app.services.export_service import canonical_json, to_html
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
 
@@ -341,3 +342,103 @@ def get_audit_stats(
         "by_role": {r[0]: r[1] for r in roles},
         "ai_assisted_actions": ai_assisted_count,
     }
+
+
+@router.get("/evidence-pack/{correlation_id}/export")
+def export_evidence_pack(
+    correlation_id: UUID,
+    format: str = Query("html", pattern="^(html|json)$"),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """The evidence pack as a file an auditor can keep.
+
+    The pack has always existed; until now it only came back as JSON over the
+    API, which is not something anybody files.
+
+    **What the hash seals.** The `pack_hash` is computed over the canonical
+    JSON bundle, not over this document. Re-hashing a rendered page gives a
+    different number, so a page with a hash printed on it that cannot be
+    recomputed from what you are holding is decoration rather than evidence.
+    The HTML export therefore embeds the exact canonical bundle it was
+    rendered from, in a script block, and says how to check it. Extract that
+    block, SHA-256 it, and it equals the printed hash.
+
+    This is a *preview* export — it does not seal a new pack. Sealing is a
+    POST, because recording that a pack was produced is a write; downloading
+    a view of one is not, and a GET that quietly created records would make
+    every refresh a new audit event.
+    """
+    try:
+        pack = EvidencePackService(db).build(correlation_id, current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+    if not pack["counts"]["objects"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No records found for this correlation id, so there is "
+                   "nothing to evidence.",
+        )
+
+    bundle = canonical_json(pack["content"])
+    filename = f"evidence-pack-{correlation_id}.{'json' if format == 'json' else 'html'}"
+
+    if format == "json":
+        return Response(
+            content=canonical_json(pack),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                # The seal, in the response itself, so a client that stores the
+                # file does not have to parse it to know what it should hash to.
+                "X-Pack-SHA256": pack["pack_hash"],
+            },
+        )
+
+    content = pack["content"]
+    sections = [
+        ("Objects in this chain", ["object_type", "reference", "state", "created_at"],
+         content.get("objects", [])),
+        ("Integrity", ["object_type", "object_id", "verified", "events", "detail"],
+         content.get("integrity", [])),
+        ("Audit trail", ["timestamp", "object_type", "action", "user", "comment"],
+         content.get("audit_trail", [])),
+        ("Policy evaluations", ["evaluated_at", "policy", "version", "outcome", "reason"],
+         content.get("policy_evaluations", [])),
+        ("AI actions", ["created_at", "action", "status", "ai_model", "prompt_version",
+                        "confidence"],
+         content.get("ai_actions", [])),
+        ("Attachments", ["file_id", "filename", "sha256", "size_bytes"],
+         content.get("attachments", [])),
+    ]
+
+    document = to_html(
+        title="Evidence pack",
+        subtitle="Every record behind one transaction chain, with the trail "
+                 "that produced it and the result of verifying that trail.",
+        sections=sections,
+        meta={
+            "correlation_id": str(correlation_id),
+            "generated_at": pack["generated_at"],
+            "generated_by": current_user.get("email") or current_user.get("id"),
+            "all_chains_verified": pack["all_chains_verified"],
+            "pack_hash": pack["pack_hash"],
+        },
+        embedded_json=bundle,
+        embedded_note=(
+            "The pack hash above seals the canonical JSON bundle, not this "
+            "page. The bundle is embedded below verbatim: extract the contents "
+            "of the script element with id 'canonical-bundle' and take its "
+            "SHA-256 to reproduce the hash. Re-generating the pack later and "
+            "comparing hashes shows whether anything underneath has changed."
+        ),
+    )
+    return Response(
+        content=document,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Pack-SHA256": pack["pack_hash"],
+        },
+    )

@@ -420,3 +420,145 @@ Owner:
 - Not verified: actual SMTP transmission. There is no mail server in this environment, so delivery is exercised at the `_deliver` boundary. Everything above it — queueing, draining, retry, backoff, giving up, holding — is tested and was run end to end against the live API, where a vendor edit returned in 89ms with three messages queued and nothing contacted.
 - Impact: `NotificationOutbox` + migration `032` (RLS as usual); `notification_dispatcher.py`; `_send` signature now takes tenant and category; four endpoints; `scripts/dispatch_notifications.py`; three invoice call sites moved inside their transaction. 15 tests.
 - Owner: bilal (dev)
+
+---
+
+**DR-039 — a role says what you may do; a scope says what you may do it to**
+- Date: 2026-08-19
+- Decision: org units (`business_unit | location | department | cost_center | project`) in one self-referencing table, assigned to users through `user_org_scopes`, and applied as a global query filter alongside the tenant filter rather than per service.
+- Context: the Build Book asks for "RBAC with scopes: tenant, business unit, location, cost center, project". Permissions were tenant-wide, so a manager who ran one warehouse approved invoices for every site and an auditor attached to one business unit read the whole company. Every control in the system said what a role could *do* and nothing said what it could do it *to*.
+- Two defaults decided the design, and both are the safe direction of a choice that is silent when wrong:
+  - **No scope means no restriction.** A user with no rows resolves to `None`, not `[]`. `None` leaves the session unrestricted; `[]` would mean "nothing at all". Creating these tables therefore changes nothing until somebody configures them — the alternative is a migration that silently hides every record from every user, which is a change discovered by a CFO rather than by a test.
+  - **A null `org_unit_id` stays visible.** Otherwise every invoice raised before scopes existed disappears the moment one person is given one.
+- A scope grants a unit *and everything beneath it*, resolved per request rather than stored. That is what people mean by "she runs the north region", and a stored closure would need a data migration every time a site opened — with the user it missed silently losing sight of it.
+- Payments are deliberately not scoped: a payment run settles invoices across units, so scoping it would break the run rather than restrict it.
+- Applied through `do_orm_execute` + `with_loader_criteria`, like the tenant and soft-delete filters, so a query written next month in a module that has never heard of scopes is still scoped.
+- Found while building it: the test client's `get_db_session` override bound the tenant but not the scope — the same bug the fixture's own docstring records happening once already with tenant isolation. Every API test would have run with scopes switched off, so an API test asking "can this caller see another unit's invoices?" would have passed just as happily against a server that scopes nothing. The override now resolves scopes exactly as the real dependency does, and the request-path test fails without it.
+- Verified live: an auditor scoped to NORTH sees the NORTH invoice and not the SOUTH one through `GET /invoices`, while an unscoped admin sees both.
+- Impact: `org_unit.py`, `org_unit_service.py`, `api/org_units.py`, migration `036` (RLS as usual, plus `org_unit_id` on invoices/requisitions/POs), scope binding in `deps.py`, org-scope filter in `database.py`, frontend `/ai-tools/org-units`. 17 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-040 — the error monitor watches for silence, not for errors**
+- Date: 2026-08-19
+- Decision: every scheduled run writes a `job_runs` heartbeat, and the admin console's health screen leads with how long it has been since each job last ran.
+- Context: the Definition of Done asks for an admin console with config screens, a job monitor, an audit viewer and an error monitor. The first three existed as their own screens. The fourth was missing, and the obvious version of it — count the failures — would have caught the least dangerous failure available.
+- The failure that matters here is a job that *stopped*. It raises nothing: no exception, no log line, no growing queue if the system happens to be idle. An outbox with nothing pending looks identical whether the dispatcher ran a second ago or died last Tuesday, and the difference only becomes visible when somebody is waiting on a message that will never arrive. Staleness cannot be inferred from the work queues, so it has to be recorded.
+- A job that has never run reads as `down`, not `unknown`. On a fresh deployment that is briefly a false alarm; the alternative is a console that stays quiet about a cron nobody remembered to install, which is the exact failure the screen exists to catch.
+- Disabled SMTP is reported as configuration, not as a fault. It is the documented default until mail is set up, and a monitor that shows red for a setting somebody chose is a monitor people learn to ignore.
+- Found while building it: the first version had `record_job_run` roll the session back before writing, because a run that fails inside the database leaves the transaction poisoned and unwritable — without clearing it the console goes quiet exactly when the job starts failing, which reads identically to the job having stopped. But rolling back inside a monitoring helper silently discards whatever else the caller was holding, which is a trap for the first person to call it from inside a request. The rollback moved to the scheduled scripts, which own a disposable per-tenant session whose work is already committed; a test now pins that the recorder leaves a caller's uncommitted rows alone.
+- Verified live: both scripts write heartbeats, and ageing the dispatcher's row by three hours turns the page's headline to "Something has stopped" while the hourly job correctly stays green — per-job cadence, end to end.
+- Impact: `job_run.py`, `system_health_service.py`, `api/system.py`, migration `037` (RLS as usual), heartbeats in both cron scripts, frontend `/ai-tools/system`. 20 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-041 — an export is evidence only if its hash can be recomputed from it**
+- Date: 2026-08-20
+- Decision: CSV, self-contained HTML, and canonical JSON. The HTML evidence pack embeds the exact canonical bundle it was rendered from, so the seal printed on the page can be reproduced from the file.
+- Context: the evidence pack has existed since the Build Book's "one-click audit-ready bundle" item — assembly, hashing, sealing, the register of packs, all built and tested. It only ever came back as JSON over the API, which is not something anybody files. The obvious fix is to render a nice PDF with the hash printed on it; that fix is wrong.
+- **The hash seals the canonical JSON, not the document.** Re-hashing a rendered page gives a different number, so a page carrying a hash nobody can recompute from what they are holding is decoration — and it looks exactly like one that can. So the document embeds the bundle verbatim in a script block and says how to check it. A test downloads the file from the endpoint, extracts the block, hashes it and compares against the `X-Pack-SHA256` header; adding a single byte to the embedded copy fails it.
+- **No PDF library.** HTML prints to PDF from any browser, and adding a third-party renderer to the path that produces audit evidence buys a file format at the cost of a dependency in exactly the wrong place. Nothing in the document is fetched from outside either: an archive that phones home renders differently in five years, or not at all, on a machine with no network.
+- **CSV injection.** Any cell opening `=`, `+`, `-` or `@` is prefixed with an apostrophe. A vendor named `=HYPERLINK(...)` is a live formula in Excel, and the person opening the file is an accountant who trusts it because it came from their own finance system. The guard is in the writer rather than only in a helper, so a table assembled elsewhere cannot bypass it.
+- **One table per CSV.** A sectioned CSV with blank lines between blocks looks tidy in Excel and is unparseable by everything else. The whole report goes in the HTML instead.
+- Exports are gated by the report's own permission, tested by asserting the export and the screen return the *same* status for the same role rather than that an admin may export — a second gate would drift.
+- Found while building it: `_canonical_hash` in the evidence pack service and the exporter each had their own `json.dumps` arguments. Two copies of `sort_keys`/`separators` drift, and the day they do, every exported pack claims a hash that cannot be reproduced from it with nothing failing to say so. They now share one function, and a test pins that they agree.
+- Impact: `export_service.py`, `api/dashboard_export.py`, evidence pack export in `api/audit.py`, `lib/download.ts`, export controls on the control room and audit screens. 39 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-042 — performance is guarded by query counts, not by a stopwatch**
+- Date: 2026-08-20
+- Decision: smoke tests that count SQL statements per dashboard and assert the count does not change when the data quadruples. Wall-clock is asserted too, but only as a loose ceiling.
+- Context: the dashboards are deliberately not cached, and that decision was made on measurements — ~350ms sequential against a year of volume, 188ms in parallel, most panels under 50ms — with migration 035 adding the indexes that hold it up. A decision justified by numbers, with volume expected to grow, and nothing that re-measures it, quietly stops being true. The first sign would be a user saying a page got slow.
+- A timing threshold on a shared runner either flakes or is set so loose it catches nothing. A query count is deterministic, machine-independent, and catches the regression that actually turns 200ms into 20 seconds: an N+1 from iterating rows in Python instead of aggregating in SQL.
+- The strongest assertion is that the count is *identical* at 40 rows and 160. That is what "aggregates in SQL" means, stated directly, and it holds at any data size.
+- Confirmed by injecting an N+1 into `control_room`: the query-count tests failed immediately (47 queries at 40 invoices, 167 at 160) — and the wall-clock test **passed**, which is precisely the argument for not relying on it.
+- Impact: `tests/integration/test_performance_smoke.py`, `performance` marker. 23 tests, 3.5s, kept in the default suite.
+- Owner: bilal (dev)
+
+---
+
+**DR-043 — the acceptance item is traceability, not prose**
+- Date: 2026-08-20
+- Decision: an executable spec-to-test map (`tests/acceptance/requirements.py`) checked by the suite, rendered to `docs/ACCEPTANCE_COVERAGE.md`.
+- Context: the Definition of Done asks for "acceptance tests (Given/When/Then)". Read literally that means rewriting 900-odd tests into Given/When/Then prose, which changes nothing about what is verified — they already describe behaviour. What the item is *for* is being able to point at a line of the Build Book and say which tests hold it up, and to see the lines where the answer is "none".
+- A traceability matrix maintained by hand is worthless after the second refactor, so this one is executable: every test it names must collect, a requirement marked covered must name tests, and a gap must carry a reason. Pointing a requirement at a renamed test fails the build.
+- Current reading: 24 covered, 5 partial, 1 not covered out of 30 tracked requirements. The single uncovered one is the Integration Hub.
+- Impact: `tests/acceptance/`, `scripts/generate_coverage_map.py`, `docs/ACCEPTANCE_COVERAGE.md`. 6 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-044 — stock is a ledger, not a number**
+- Date: 2026-08-20
+- Decision: `stock_movements` is append-only and signed; `stock_balances` is a maintained aggregate over it, rebuildable and checkable. Every change — receipt, adjustment, return, transfer — goes through one writer, `StockService.post_movement`.
+- Context: the Build Book's Variant D1 is "Inventory **and Receiving**". Receiving already existed, because three-way matching needs to ask "did this turn up" — but there was nowhere for anything to arrive *to*. No item master, no locations, no balances, and no governed way to change stock without a delivery behind it. Searching the codebase for `inventory`, `stock`, `warehouse`, `sku` returned three hits, all false positives.
+- **A quantity column that gets updated cannot answer the question people actually ask.** Not "what is the stock" but "why is it 37 when it should be 40, and who changed it". The ledger answers both, and it is the same principle the audit trail and the soft-delete guard already enforce: in this system nothing is edited away. The balance is kept because summing a forever-growing ledger on every receipt gets slower every day — and `reconcile_balances` exists because a cached total that can drift from its source without anybody noticing is worse than no cache.
+- **Stock cannot go negative.** A shelf cannot hold minus five things, so a movement that would drive a balance below zero is a data error in every case. Allowed through it does not fail — it poisons every valuation, reorder calculation and accuracy figure downstream and is discovered during a stock count months later.
+- **The balance row is locked before it is changed**, and the unique constraint on (item, location) is the other half: without it, two concurrent receipts create two rows that each hold part of the stock and every later read silently picks one.
+- Receiving now posts to the ledger, but only when the order line names a stocked item and the receipt names a location. Both columns are nullable and stay that way: services and one-off spend are ordered and received without ever being held, and every receipt recorded before this existed happened somewhere nobody wrote down. Nothing is backfilled, so no historical goods retroactively appear on a shelf.
+- Found while building it: three of the codebase's own guard tests failed — new chain owners with no `REFERENCE_FIELD` (a timeline would have shown raw UUIDs), no timeline permission mapped (only auditors could have read inventory history), and an audit entry written by a helper that never commits (the trail would have been discarded when the session closed). All three are exactly what those meta-tests exist for.
+- Impact: `inventory.py`, `stock_service.py`, migrations `038`/`039`, receiving wired to the ledger, `/inventory` API, frontend `/ai-tools/inventory`. 35 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-045 — an adjustment is the fraud surface, so it gets the invoice treatment**
+- Date: 2026-08-20
+- Decision: inventory adjustments carry a full workflow, a value threshold, dual approval above the limit, an SoD rule with no admin exemption, and mandatory reason codes.
+- Context: every other stock movement has a physical event behind it — a lorry arrived, goods went back. An adjustment has nothing but somebody's word, which makes writing stock off the way a theft is covered up. Build Book D1: "adjustment thresholds with dual approval above limit", "SoD separation between receiver and approver".
+- **`inventory.adjust` and `inventory.approve_adjustment` are separate permissions, separately granted.** The clerk who counts the shelf holds the first and not the second; the manager holds the second and not the first. One permission covering both would make the separation impossible to enforce however the roles were arranged.
+- **No admin exemption**, unlike the invoice approval rules, which carve one out so a one-person demo tenant still functions. This control exists precisely for the person with the most access.
+- **The second approver must be a different person.** Otherwise dual approval is one person clicking twice — the control failing while appearing to work.
+- **The threshold is evaluated once at submission and stored.** Recomputing at approval time would let the required approver change if an item's standard cost were edited in between, which is a way to route a large write-off past the second signature without touching the adjustment itself. Measured on *absolute* value, because a write-on of 100k deserves the same scrutiny as a write-off, and netting them would let one adjustment move a fortune in both directions and score as zero.
+- **Approving and posting are separate.** Approval is a decision; posting moves the ledger. Collapsing them would mean an approval that failed to post leaves stock unchanged with the paperwork saying otherwise.
+- Reason codes are a fixed vocabulary, not free text, so "which vendor damages the most goods" is answerable at all. The same reasoning drives `vendor_attributable` on a return being decided at creation and stored: a scorecard that recomputed it would silently rewrite last quarter the moment the definition changed, and a supplier disputing their score is exactly when the number must not move.
+- Verified through the running UI: a 60,000 write-on was refused a second signature from the manager who gave the first (403), accepted from the CFO, and posted — stock value moved 31,675 → 91,675 and the reorder flag cleared. The screen now explains "you signed this, it needs someone else" rather than offering a button that always fails.
+- Impact: `inventory_control.py`, `inventory_adjustment_service.py`, `quality_check_service.py`, `vendor_return_service.py`, seven new permissions, two workflows with SLAs, two Decision Inbox collectors, three reports, an AI exception explainer. 89 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-046 — an employee is not a user, and pay never leaves the service in the clear**
+- Date: 2026-08-20
+- Decision: `employees` is a separate table from `users`, linked by a nullable `user_id`. Salary, national ID and bank account are stored in full and masked at the service boundary for callers without `hr.view_compensation`.
+- Context: Build Book Variant C, plus "field-level masking for sensitive fields where needed (bank accounts, national IDs)". The user confirmed the split before any of it was built: "employee, because they can be linked together easily if we want."
+- **Why not one record.** A user is a login; an employee is a person the company employs. Merging them means either issuing logins to people who should not have one — an access-control decision made accidentally by HR — or losing every employee who never signs in, which in a real workforce is most of them. A picker, a driver and a cleaner are employed, paid, and never sign in; a contractor's login exists for three months against an employment that never existed. Linking is a separate, audited action, and it grants nothing: the role on the account still decides what it may do.
+- **Why masking is at the boundary, not in the column.** Payroll variance, headcount cost and every budget check are arithmetic on real numbers, so the stored values must be real. What changes by permission is what *leaves* — the same pattern vendor bank details already use, reused rather than reinvented.
+- The withheld value is the string `"restricted"`, not zero and not null. Both of those read as "this person is unpaid", so a report built on a masked list would be quietly wrong rather than obviously unavailable. The masked and unmasked shapes carry identical keys, so no caller has to branch and none can render `undefined` next to somebody's name.
+- **Pay is kept out of the audit trail entirely.** `audit.view` is a wider audience than `hr.view_compensation`; writing a salary into an audit entry would route around the masking the module exists to enforce. The trail records that a salary was set and the *size* of a change, never the figure.
+- Verified over real HTTP: a manager's `/hr/employees` response contains `"restricted"` and `••••67-1`, and the raw figure appears nowhere in the body; the CFO's contains both in full.
+- Impact: `employee.py`, `employee_service.py`, migration `041`, `/hr` API, frontend `/ai-tools/hr`. 30 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-047 — the HR separations, and the one that needed three rules**
+- Date: 2026-08-20
+- Decision: requesting and approving are separate permissions for headcount, payroll changes and expenses; and payroll approval refuses three distinct conflicts rather than one.
+- Context: Build Book Variant C control, "SoD for HR actions and payroll approvals".
+- Payroll is the clearest separation-of-duties surface in the product, and one rule is not enough for it:
+  - **Raising your own.** Obvious, easy to stop.
+  - **Approving your own.** Also easy, and the shape every other module already uses.
+  - **Approving a rise for your own manager.** The one that needed thinking about. If I approve my manager's rise and my manager approves mine, both requests pass every check that looks at a single record, and each approval reads as correct on its own. The rule reaches one step up the reporting line to close the pair. It deliberately does not close a three-way ring: the rule people can predict is worth more than the one that catches every arrangement, and a ring shows up in the overrides report.
+- Resolved through the optional employee↔user link, which is the only connection between a login and a person. Somebody with no linked account can never be "self" — correct, because a person with no login is not the one making the request.
+- **The threshold on a pay change is the size of the change, measured absolutely.** A cut of 200k deserves the same scrutiny as a rise: both are large changes to somebody's pay and both can be a mistake.
+- Approving a change applies it in the same transaction. Approved-but-unapplied would be paperwork saying somebody got a rise that never reached their pay.
+- **Expenses get the same treatment with no admin exemption.** Self-approval on an expense claim is the version easiest to rationalise ("it was only lunch"), which is exactly what makes it worth making impossible — including for a claim somebody else keyed in on the claimant's behalf.
+- The role table now enforces the split structurally: a manager may *request* a pay change and never approve one; the CFO may approve and never request.
+- Impact: ten HR permissions, `payroll_change_service.py`, `expense_service.py`, `headcount_service.py`, `onboarding_service.py`, three Decision Inbox collectors, three reports. 82 tests.
+- Owner: bilal (dev)
+
+---
+
+**DR-048 — a workflow needs both halves of its clock, so the registries now check each other**
+- Date: 2026-08-20
+- Decision: registry-level tests asserting that every workflow model declares `WORKFLOW_TYPE`, has configured states, and carries `state_entered_at` — plus a written allowlist for waiting states that deliberately have no SLA.
+- Context: this gap has now appeared twice in one week. The inventory workflows shipped with SLA settings on their states but no `WORKFLOW_TYPE` on their models, so the escalation runner never scanned them. The HR workflows shipped with `WORKFLOW_TYPE` and no configured states, so the scan found nothing to measure. Both halves are needed; neither fails loudly on its own. In both cases the records sat outside every clock in the system, the Decision Inbox showed them as never overdue, and nothing would ever have escalated them — the exact failure DR-009 and DR-037 already record.
+- Written against the registries rather than a list of workflows, so the next module is covered without anybody remembering to add it.
+- The SLA check surfaced eight waiting states with no clock. Four are legitimate: two are passed through inside a single transaction (`inventory_adjustment.approved`, `payroll_change_request.approved`) and two are governed by a domain date instead (a tender's closing date, a PO's expected date). Four are arguable gaps — `requisition.approved`, `purchase_order.approved`, `invoice.approved`, `invoice.validated` — and nothing chases any of them today. They are recorded in `CLOCK_FREE` with that stated, rather than silently given escalations: whether they should be chased is a business decision. A second test fails if an allowlist entry outlives the state it excuses.
+- Impact: `tests/integration/test_hr_workflows.py::TestEveryWorkflowHasAClock`, migration `040`. 5 tests.
+- Owner: bilal (dev)

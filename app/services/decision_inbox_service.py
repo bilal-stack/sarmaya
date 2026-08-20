@@ -62,6 +62,11 @@ CAT_PO = "purchase_order_approval"
 CAT_PAYMENT = "payment_release"
 CAT_BANK_CHANGE = "vendor_bank_change"
 CAT_UNEXPLAINED_DEBIT = "unexplained_debit"
+CAT_STOCK_ADJUSTMENT = "stock_adjustment"
+CAT_VENDOR_RETURN = "vendor_return"
+CAT_PAYROLL_CHANGE = "payroll_change"
+CAT_HEADCOUNT = "headcount_request"
+CAT_EXPENSE = "expense_claim"
 
 #: Lower sorts first within the same overdue bucket. The ordering is a claim
 #: about what is most costly to leave: money that left without an instruction
@@ -73,9 +78,27 @@ _PRIORITY = {
     CAT_VENDOR: 3,
     CAT_PAYMENT: 4,
     CAT_APPROVAL: 5,
-    CAT_PO: 6,
-    CAT_AWARD: 7,
-    CAT_REQUISITION: 8,
+    # An adjustment writes stock off with nothing physical behind it, which is
+    # how a loss gets covered up. That places it above ordinary spend
+    # approvals — those commit money the company has decided to spend, while
+    # this can conceal money already gone — and below payments actually
+    # leaving.
+    # A pay change reaches a person's bank account and has a date it must
+    # land by; missing it means arrears and an apology, so it sits with the
+    # write-off rather than with ordinary spend.
+    CAT_PAYROLL_CHANGE: 5,
+    CAT_STOCK_ADJUSTMENT: 6,
+    CAT_PO: 7,
+    CAT_AWARD: 8,
+    CAT_REQUISITION: 9,
+    # Last: a return is value going out, but it is agreed with the vendor and
+    # the goods are already quarantined, so nothing gets worse while it waits.
+    CAT_VENDOR_RETURN: 10,
+    # An employee is out of pocket, so this outranks a hire — but nothing
+    # gets worse while a hiring decision waits, and something does while
+    # somebody is owed their own money.
+    CAT_EXPENSE: 11,
+    CAT_HEADCOUNT: 12,
 }
 
 
@@ -113,6 +136,11 @@ class DecisionInboxService:
             self._payments,
             self._bank_changes,
             self._reconciliation_breaks,
+            self._stock_adjustments,
+            self._vendor_returns,
+            self._payroll_changes,
+            self._headcount_requests,
+            self._expense_claims,
         ]
 
         items: List[Dict] = []
@@ -445,6 +473,261 @@ class DecisionInboxService:
         return items
 
     # --- helpers -------------------------------------------------------------
+
+    def _stock_adjustments(self, current_user: dict) -> List[Dict]:
+        """Write-offs waiting on a signature.
+
+        Build Book: the Decision Inbox covers every work item type in the
+        variant, and this is the one that matters most in Variant D — an
+        adjustment is the only way stock moves with nothing physical behind it.
+
+        An adjustment already carrying this person's first signature still
+        appears: it is waiting on a *second* person, and hiding it from the
+        first approver is right, but it must stay visible to everyone else.
+        """
+        from app.core.roles import PERM_APPROVE_ADJUSTMENT
+        from app.models.inventory_control import (
+            InventoryAdjustment, ADJ_PENDING_APPROVAL,
+        )
+
+        if not has_permission(current_user["role"], PERM_APPROVE_ADJUSTMENT):
+            return []
+
+        sla_map = self._sla_map("inventory_adjustment")
+        items = []
+        for adjustment in (
+            self.db.query(InventoryAdjustment)
+            .filter(InventoryAdjustment.current_state == ADJ_PENDING_APPROVAL)
+            .limit(200).all()
+        ):
+            # The raiser cannot approve it, so it is not their decision to make.
+            if sod._same_person(adjustment.created_by, current_user.get("id")):
+                continue
+            # Nor can the first approver provide the second signature.
+            if sod._same_person(adjustment.approved_by, current_user.get("id")):
+                continue
+
+            sla_due_at, overdue, _ = sla_status(adjustment, sla_map)
+            awaiting_second = adjustment.approved_by is not None
+            items.append({
+                **self._base(
+                    "inventory_adjustment", adjustment.id,
+                    adjustment.adjustment_number,
+                    f"{adjustment.reason_code.replace('_', ' ')}"
+                    + (" — second signature" if awaiting_second else ""),
+                    money_to_float(adjustment.total_value),
+                    adjustment.current_state, sla_due_at, overdue,
+                    f"/ai-tools/inventory/adjustments/{adjustment.id}",
+                ),
+                "work_item_type": WORK_APPROVAL,
+                "category": CAT_STOCK_ADJUSTMENT,
+                "priority": _PRIORITY[CAT_STOCK_ADJUSTMENT],
+                "action": (
+                    "Provide the second approval" if awaiting_second
+                    else "Approve or reject the adjustment"
+                ),
+                "reason": (
+                    "Stock is being written off or on with no delivery behind "
+                    "it, which is how a loss gets covered up."
+                ),
+            })
+        return items
+
+    def _vendor_returns(self, current_user: dict) -> List[Dict]:
+        """Goods going back, waiting on approval."""
+        from app.core.roles import PERM_APPROVE_RETURN
+        from app.models.inventory_control import VendorReturn, RET_PENDING_APPROVAL
+
+        if not has_permission(current_user["role"], PERM_APPROVE_RETURN):
+            return []
+
+        sla_map = self._sla_map("vendor_return")
+        items = []
+        for vendor_return in (
+            self.db.query(VendorReturn)
+            .filter(VendorReturn.current_state == RET_PENDING_APPROVAL)
+            .limit(200).all()
+        ):
+            if sod._same_person(vendor_return.created_by, current_user.get("id")):
+                continue
+
+            sla_due_at, overdue, _ = sla_status(vendor_return, sla_map)
+            items.append({
+                **self._base(
+                    "vendor_return", vendor_return.id, vendor_return.return_number,
+                    vendor_return.reason_code.replace("_", " "),
+                    money_to_float(vendor_return.total_value),
+                    vendor_return.current_state, sla_due_at, overdue,
+                    f"/ai-tools/inventory/returns/{vendor_return.id}",
+                ),
+                "work_item_type": WORK_APPROVAL,
+                "category": CAT_VENDOR_RETURN,
+                "priority": _PRIORITY[CAT_VENDOR_RETURN],
+                "action": "Approve or reject the return",
+                "reason": (
+                    "Sending goods back writes value off the balance sheet and "
+                    "starts a credit the vendor owes."
+                ),
+            })
+        return items
+
+    def _payroll_changes(self, current_user: dict) -> List[Dict]:
+        """Pay changes waiting on a signature.
+
+        Placed above ordinary spend approvals: a pay change has an effective
+        date, and missing it means somebody is paid the wrong amount for a
+        month and then owed arrears — a mistake that reaches a person's bank
+        account rather than a ledger.
+
+        The amount shown is the *size of the change*, never the salary. An
+        approver needs to know whether they are signing 2% or 40%; the
+        inbox is not where compensation figures leak.
+        """
+        from app.core.roles import PERM_APPROVE_PAYROLL_CHANGE
+        from app.models.employee import Employee
+        from app.models.hr import PayrollChangeRequest, PAY_PENDING_APPROVAL
+
+        if not has_permission(current_user["role"], PERM_APPROVE_PAYROLL_CHANGE):
+            return []
+
+        sla_map = self._sla_map("payroll_change_request")
+        items = []
+        for change in (
+            self.db.query(PayrollChangeRequest)
+            .filter(PayrollChangeRequest.current_state == PAY_PENDING_APPROVAL)
+            .limit(200).all()
+        ):
+            if sod._same_person(change.created_by, current_user.get("id")):
+                continue
+
+            # Nor the person it is for, nor their direct report — the same
+            # conflicts the service refuses at approval. An item somebody
+            # cannot action is noise that teaches people to skim the queue.
+            subject = (
+                self.db.query(Employee)
+                .filter(Employee.id == change.employee_id)
+                .first()
+            )
+            if subject is None:
+                continue
+            if subject.user_id is not None and sod._same_person(
+                subject.user_id, current_user.get("id")
+            ):
+                continue
+            approver = (
+                self.db.query(Employee)
+                .filter(Employee.user_id == current_user.get("id"))
+                .first()
+            )
+            if approver is not None and approver.manager_id == subject.id:
+                continue
+
+            sla_due_at, overdue, _ = sla_status(change, sla_map)
+            items.append({
+                **self._base(
+                    "payroll_change_request", change.id, change.request_number,
+                    f"{subject.full_name} — {change.reason_code.replace('_', ' ')}",
+                    money_to_float(change.total_amount),
+                    change.current_state, sla_due_at, overdue,
+                    f"/ai-tools/hr/payroll/{change.id}",
+                ),
+                "work_item_type": WORK_APPROVAL,
+                "category": CAT_PAYROLL_CHANGE,
+                "priority": _PRIORITY[CAT_PAYROLL_CHANGE],
+                "action": "Approve or reject the pay change",
+                "reason": (
+                    "It has an effective date. Missing it means somebody is "
+                    "paid the wrong amount and then owed arrears."
+                ),
+            })
+        return items
+
+    def _headcount_requests(self, current_user: dict) -> List[Dict]:
+        """Hires waiting on a budget holder."""
+        from app.core.roles import PERM_APPROVE_HEADCOUNT
+        from app.models.hr import HeadcountRequest, HC_PENDING_APPROVAL
+
+        if not has_permission(current_user["role"], PERM_APPROVE_HEADCOUNT):
+            return []
+
+        sla_map = self._sla_map("headcount_request")
+        items = []
+        for request in (
+            self.db.query(HeadcountRequest)
+            .filter(HeadcountRequest.current_state == HC_PENDING_APPROVAL)
+            .limit(200).all()
+        ):
+            if sod._same_person(request.created_by, current_user.get("id")):
+                continue
+
+            sla_due_at, overdue, _ = sla_status(request, sla_map)
+            items.append({
+                **self._base(
+                    "headcount_request", request.id, request.request_number,
+                    f"{request.job_title} × {request.positions}",
+                    money_to_float(request.total_amount),
+                    request.current_state, sla_due_at, overdue,
+                    f"/ai-tools/hr/headcount/{request.id}",
+                ),
+                "work_item_type": WORK_APPROVAL,
+                "category": CAT_HEADCOUNT,
+                "priority": _PRIORITY[CAT_HEADCOUNT],
+                "action": "Approve or reject the hire",
+                "reason": (
+                    "A hire is agreed once and paid for years, which is why "
+                    "the request states what it costs."
+                ),
+            })
+        return items
+
+    def _expense_claims(self, current_user: dict) -> List[Dict]:
+        """Employees waiting to be paid back their own money."""
+        from app.core.roles import PERM_APPROVE_EXPENSE
+        from app.models.employee import Employee
+        from app.models.hr import ExpenseReimbursement, EXP_PENDING_APPROVAL
+
+        if not has_permission(current_user["role"], PERM_APPROVE_EXPENSE):
+            return []
+
+        sla_map = self._sla_map("expense_reimbursement")
+        items = []
+        for claim in (
+            self.db.query(ExpenseReimbursement)
+            .filter(ExpenseReimbursement.current_state == EXP_PENDING_APPROVAL)
+            .limit(200).all()
+        ):
+            if sod._same_person(claim.created_by, current_user.get("id")):
+                continue
+
+            claimant = (
+                self.db.query(Employee)
+                .filter(Employee.id == claim.employee_id)
+                .first()
+            )
+            if claimant is not None and claimant.user_id is not None and sod._same_person(
+                claimant.user_id, current_user.get("id")
+            ):
+                continue
+
+            sla_due_at, overdue, _ = sla_status(claim, sla_map)
+            items.append({
+                **self._base(
+                    "expense_reimbursement", claim.id, claim.claim_number,
+                    f"{claimant.full_name if claimant else 'Employee'} — {claim.category}",
+                    money_to_float(claim.total_amount),
+                    claim.current_state, sla_due_at, overdue,
+                    f"/ai-tools/hr/expenses/{claim.id}",
+                ),
+                "work_item_type": WORK_APPROVAL,
+                "category": CAT_EXPENSE,
+                "priority": _PRIORITY[CAT_EXPENSE],
+                "action": "Approve or reject the claim",
+                "reason": (
+                    "This is an employee's own money that the company is "
+                    "holding."
+                ),
+            })
+        return items
 
     @staticmethod
     def _base(

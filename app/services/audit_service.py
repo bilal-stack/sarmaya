@@ -7,6 +7,8 @@ from app.models.invoice import Invoice
 from app.services.audit_integrity import verify_object_chain
 from app.services.policy import explain_approval_routing
 from app.core.roles import (
+    PERM_VIEW_INVENTORY,
+    PERM_VIEW_HR,
     has_permission,
     PERM_VIEW_INVOICE,
     PERM_VIEW_VENDORS,
@@ -35,6 +37,23 @@ _VIEW_PERMISSION = {
     # A tender is part of the requisition's story.
     "rfq": PERM_VIEW_REQUISITION,
     "quote": PERM_VIEW_REQUISITION,
+    # Inventory. A stock movement and a quality check are part of the delivery's
+    # story, so they read with the same permission as the stock itself rather
+    # than falling back to audit.view — which would mean only auditors could
+    # see why a balance changed.
+    "item": PERM_VIEW_INVENTORY,
+    "stock_movement": PERM_VIEW_INVENTORY,
+    "inventory_adjustment": PERM_VIEW_INVENTORY,
+    "quality_check": PERM_VIEW_INVENTORY,
+    "vendor_return": PERM_VIEW_INVENTORY,
+    # HR. An expense claim reads with hr.view like the rest of the module —
+    # claimants see their own through the service, which filters by employee
+    # rather than by timeline permission.
+    "employee": PERM_VIEW_HR,
+    "headcount_request": PERM_VIEW_HR,
+    "onboarding_task": PERM_VIEW_HR,
+    "payroll_change_request": PERM_VIEW_HR,
+    "expense_reimbursement": PERM_VIEW_HR,
 }
 
 

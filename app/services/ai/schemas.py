@@ -12,7 +12,7 @@ response rather than a clamped one, because a model that returns 87 when asked
 for 0.87 has misunderstood the question and its other fields deserve no trust
 either.
 """
-from typing import Any, Dict, Optional
+from typing import List, Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,6 +43,25 @@ class InvoiceNextAction(AIOutput):
 class DuplicateAssessment(AIOutput):
     is_duplicate: bool
     matched_invoice_number: Optional[str] = None
+
+
+class ReceivingExceptionExplanation(AIOutput):
+    """Why a delivery went wrong, and what to do about it.
+
+    Build Book, Variant D1 AI assists: "exception explanations for shortages,
+    damages, delays" and "suggest likely root causes and required follow-up
+    tasks".
+
+    `likely_cause` is prose for a human to read; `suggested_reason_code` is the
+    machine half, and it is validated against the fixed vocabulary by the
+    caller rather than trusted. That split matters: a model inventing a new
+    reason code would quietly create a category nothing counts, which is the
+    exact failure reason codes exist to prevent.
+    """
+    likely_cause: str = Field(min_length=1)
+    suggested_reason_code: Optional[str] = None
+    follow_up_actions: List[str] = Field(default_factory=list)
+    vendor_attributable: bool = False
 
 
 class NaturalLanguageQuery(AIOutput):

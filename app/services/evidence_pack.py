@@ -15,8 +15,6 @@ everything an auditor needs to reconstruct and trust the story:
 The bundle is sealed with a SHA-256 `pack_hash`. Re-generating later and
 comparing hashes shows whether anything underlying the export has changed.
 """
-import hashlib
-import json
 import logging
 from typing import Dict, List, Optional
 from uuid import UUID
@@ -31,16 +29,22 @@ from app.models.ai_action_log import AIActionLog
 from app.models.evidence_pack import EvidencePack
 from app.services.audit_integrity import verify_object_chain
 from app.core.roles import has_permission, PERM_VIEW_AUDIT
+from app.services.export_service import canonical_json, sha256_of
 from app.utils.datetime_helpers import utc_now
 
 logger = logging.getLogger(__name__)
 
 
 def _canonical_hash(payload: dict) -> str:
-    """Stable SHA-256 over the bundle: the pack's integrity seal."""
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    ).hexdigest()
+    """Stable SHA-256 over the bundle: the pack's integrity seal.
+
+    Serialised by `export_service.canonical_json` rather than inline, because
+    the exported document embeds that same serialisation for the reader to
+    re-hash. Two copies of these arguments would drift — a changed separator
+    in one place, and every exported pack claims a hash that cannot be
+    reproduced from it, with nothing failing to say so.
+    """
+    return sha256_of(canonical_json(payload))
 
 
 class EvidencePackService:

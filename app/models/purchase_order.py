@@ -40,6 +40,13 @@ class PurchaseOrder(BaseModel):
         nullable=False, index=True,
     )
 
+    #: Which part of the organisation this belongs to. Null means it belongs to
+    #: the tenant at large and stays visible to everybody — an unscoped record
+    #: must not vanish the moment somebody is given a scope. See models/org_unit.
+    org_unit_id = Column(
+        UUID(as_uuid=True), ForeignKey("org_units.id"), nullable=True, index=True
+    )
+
     po_number = Column(String(100), nullable=False, index=True)
     vendor_id = Column(UUID(as_uuid=True), ForeignKey("vendors.id"), nullable=True)
     vendor_name = Column(String(255), nullable=False)
@@ -99,6 +106,13 @@ class PurchaseOrderLine(BaseModel):
     line_number = Column(Integer, nullable=False)
     description = Column(String, nullable=False)
     product_code = Column(String(100), nullable=True)
+
+    #: The item master entry this line buys, when it has one. Nullable
+    #: permanently: services and one-off spend are ordered and received without
+    #: ever being held, and a receipt against such a line moves no stock.
+    item_id = Column(
+        UUID(as_uuid=True), ForeignKey("items.id"), nullable=True, index=True,
+    )
 
     quantity = Column(Numeric(15, 3), nullable=False)
     unit_price = Column(Numeric(15, 2), nullable=False)

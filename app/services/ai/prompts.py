@@ -25,6 +25,7 @@ from typing import Dict, Type
 from pydantic import BaseModel
 
 from app.services.ai.schemas import (
+    ReceivingExceptionExplanation,
     DuplicateAssessment, InvoiceNextAction, NaturalLanguageQuery,
 )
 
@@ -115,12 +116,36 @@ NATURAL_LANGUAGE_QUERY = Prompt(
     ),
 )
 
+RECEIVING_EXCEPTION = Prompt(
+    name="receiving_exception",
+    version="v1",
+    task=TASK_REASONING,
+    output_schema=ReceivingExceptionExplanation,
+    template=(
+        "A goods delivery did not match its purchase order. Explain the most "
+        "likely cause and what should happen next.\n\n"
+        "Ordered: {ordered} {uom} of {item}\n"
+        "Received: {received} {uom}\n"
+        "Promised: {expected_date}. Arrived: {received_date}.\n"
+        "Vendor: {vendor}\n"
+        "Inspection notes: {notes}\n\n"
+        "Choose suggested_reason_code from exactly this list, or null if none "
+        "fits: {reason_codes}\n"
+        "Set vendor_attributable true only if the vendor is at fault.\n\n"
+        "Return ONLY a JSON object:\n"
+        '{{"likely_cause": "one sentence", "suggested_reason_code": null, '
+        '"follow_up_actions": ["..."], "vendor_attributable": false, '
+        '"confidence": 0.0, "reasoning": "what in the figures led you there"}}\n'
+    ),
+)
+
 #: Every prompt in the system, by name.
 PROMPTS: Dict[str, Prompt] = {
     p.name: p for p in (
         INVOICE_NEXT_ACTION,
         DUPLICATE_ASSESSMENT,
         NATURAL_LANGUAGE_QUERY,
+        RECEIVING_EXCEPTION,
     )
 }
 

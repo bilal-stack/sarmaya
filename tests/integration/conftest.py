@@ -125,8 +125,9 @@ def client(db):
     from fastapi.testclient import TestClient
 
     from app.main import app
-    from app.core.database import get_db, set_tenant_context
+    from app.core.database import get_db, set_tenant_context, set_org_scope
     from app.api.deps import get_current_user, get_db_session
+    from app.services.org_unit_service import OrgUnitService
 
     def _scoped_session():
         """Stand in for get_db_session, tenant binding included.
@@ -141,11 +142,19 @@ def client(db):
 
         The tenant is read from whatever `as_user` authenticated, mirroring the
         real dependency rather than a fixed value.
+
+        Org scope is bound here for the same reason, and it is the same bug a
+        second time: the real dependency resolves the caller's org units and
+        binds them to the session, so an override that skipped it would run
+        every API test with RBAC scopes switched off — and an API test asking
+        "can this caller see another unit's invoices?" would pass just as
+        happily against a server that scopes nothing.
         """
         resolver = app.dependency_overrides.get(get_current_user)
         current_user = resolver() if resolver else None
         if current_user and current_user.get("tenant_id"):
             set_tenant_context(db, str(current_user["tenant_id"]))
+            set_org_scope(db, OrgUnitService(db).effective_scope(current_user["id"]))
         return db
 
     app.dependency_overrides[get_db] = lambda: db
@@ -153,6 +162,9 @@ def client(db):
     try:
         yield TestClient(app)
     finally:
+        # The session outlives the request here, unlike production. Leaving a
+        # scope bound would silently narrow assertions made after the call.
+        set_org_scope(db, None)
         app.dependency_overrides.clear()
 
 

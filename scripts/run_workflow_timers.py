@@ -49,6 +49,8 @@ def main() -> int:
     args = parser.parse_args()
 
     from app.services.sla_service import SlaService
+    from app.services.system_health_service import record_job_run, job_clock
+    from app.models.job_run import JOB_WORKFLOW_TIMERS
 
     session = SessionLocal()
     failures = 0
@@ -64,6 +66,11 @@ def main() -> int:
         # the session, so reusing one would carry the first tenant's binding
         # into the next.
         tenant_session = SessionLocal()
+        # Recorded whether the run succeeds or not - the console's question is
+        # "did this job run at all", which a success-only record cannot answer.
+        started_at = job_clock()
+        run_error = None
+        reminded = escalated = 0
         try:
             set_tenant_context(tenant_session, str(tenant_id))
             # The scheduler, not a person. Given the admin role for the tenant
@@ -71,7 +78,6 @@ def main() -> int:
             actor = {"id": None, "tenant_id": tenant_id, "role": ADMIN}
             service = SlaService(tenant_session)
 
-            reminded = 0
             if not args.skip_reminders:
                 reminded = service.run_reminders(actor)["reminded_count"]
             escalated = service.run_escalations(actor)["escalated_count"]
@@ -80,10 +86,24 @@ def main() -> int:
                 logger.info(
                     "%s: reminded=%s escalated=%s", name, reminded, escalated
                 )
-        except Exception:
+        except Exception as exc:
             failures += 1
+            run_error = f"{type(exc).__name__}: {exc}"
             logger.exception("Workflow timers failed for tenant %s", name)
         finally:
+            # A run that failed inside the database leaves the session in
+            # an aborted transaction, where every further write is refused.
+            # Clearing it here - where this session is owned and its work is
+            # already committed - is what makes the failure recordable at
+            # all. Without it the console goes quiet exactly when the job
+            # starts failing, which reads identically to the job having
+            # stopped, and the two need opposite responses.
+            if run_error:
+                tenant_session.rollback()
+            record_job_run(
+                tenant_session, tenant_id, JOB_WORKFLOW_TIMERS, started_at,
+                items_processed=reminded + escalated, error=run_error,
+            )
             tenant_session.close()
 
     return 1 if failures else 0

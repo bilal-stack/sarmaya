@@ -41,6 +41,14 @@ class GoodsReceipt(BaseModel):
 
     grn_number = Column(String(100), nullable=False, index=True)
     received_date = Column(Date, nullable=False)
+    #: Where the delivery landed — normally the receiving bay, before quality
+    #: checks and putaway. Nullable because receipts recorded before inventory
+    #: existed happened somewhere nobody wrote down.
+    location_id = Column(
+        UUID(as_uuid=True), ForeignKey("stock_locations.id"),
+        nullable=True, index=True,
+    )
+
     delivery_note = Column(String(255), nullable=True)
     notes = Column(String, nullable=True)
 

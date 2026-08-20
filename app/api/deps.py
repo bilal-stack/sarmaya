@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import Generator
 
-from app.core.database import get_db, set_tenant_context
+from app.core.database import get_db, set_tenant_context, set_org_scope
 from app.core.security import decode_access_token
 from app.models.user import User
 
@@ -79,6 +79,15 @@ def get_db_session(
     # get_current_user already bound the tenant on this same (per-request) session;
     # set it again defensively in case this dependency is used on its own.
     set_tenant_context(db, str(tenant_id))
+
+    # And the org-unit scope, if this user has one. Resolved here rather than in
+    # each service for the same reason the tenant is: a filter that every query
+    # has to remember is a filter that some query will not. Users with no scope
+    # assigned resolve to None, which leaves the session unrestricted — exactly
+    # how it behaved before scopes existed.
+    from app.services.org_unit_service import OrgUnitService
+
+    set_org_scope(db, OrgUnitService(db).effective_scope(current_user["id"]))
 
     try:
         yield db

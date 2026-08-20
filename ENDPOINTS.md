@@ -845,6 +845,109 @@ PATCH /api/v1/users/{id}/role      # requires users.manage; never self-service; 
                                    # target's existing tokens
 ```
 
+### Org units and scopes (`/org-units`) — what a role may act *on*
+
+A role says what somebody may do. A scope says what they may do it to. Assign a
+unit and they see that unit **and everything beneath it**.
+
+Two defaults matter more than the endpoints:
+
+* **No scope means no restriction.** A user with nothing assigned sees the whole
+  tenant. So `GET .../scopes` returning `[]` means *unrestricted*, not "nothing" —
+  and removing somebody's last scope **widens** their access rather than
+  narrowing it. The revoke audit entry says so explicitly.
+* **A record with no `org_unit_id` stays visible to everyone**, so existing data
+  does not vanish the moment one person is scoped.
+
+Scoping is applied as a global query filter next to the tenant filter, so it
+holds for queries written in modules that know nothing about it. Invoices,
+requisitions and purchase orders carry a unit. Payments deliberately do not — a
+payment run settles invoices across units.
+
+```bash
+GET    /api/v1/org-units                              # the org chart; requires users.view
+POST   /api/v1/org-units                              # {code, name, unit_type, parent_id?}
+                                                      # unit_type: business_unit | location |
+                                                      # department | cost_center | project
+                                                      # requires users.manage; code unique per tenant
+GET    /api/v1/org-units/users/{id}/scopes            # [] means unrestricted, not "none"
+POST   /api/v1/org-units/users/{id}/scopes            # {org_unit_id} — grants the unit and its
+                                                      # descendants; audited under the administrator
+DELETE /api/v1/org-units/users/{id}/scopes/{unit_id}  # removing the last one widens access
+```
+
+### Exports - getting it out as a file
+
+Until this existed the only thing that left the system as a file was the bank
+payment instruction, which is an odd gap in a product whose argument is
+evidence.
+
+Three formats, for three readers. **CSV** carries one table, because a CSV
+holding several tables separated by blank lines opens tidily in Excel and is
+unparseable by everything else. **HTML** carries the whole report, is
+self-contained (nothing is fetched - an archive that phones home is not an
+archive), and prints to PDF from any browser; that is how you get a PDF without
+putting a rendering library in the path that produces audit evidence. **JSON**
+is the canonical bundle.
+
+Two details that matter more than the formats:
+
+* **Spreadsheet safety.** Any cell opening `=`, `+`, `-` or `@` is prefixed
+  with an apostrophe. A vendor named `=HYPERLINK("http://...")` is a live
+  formula in Excel, in a file the finance team opened precisely because it came
+  from their own finance system. Excel strips the apostrophe on display, so the
+  cell still reads correctly.
+* **The seal covers the JSON, not the page.** An evidence pack's `pack_hash` is
+  computed over the canonical bundle. Re-hashing a rendered document gives a
+  different number, so the HTML export embeds the exact bundle it was rendered
+  from in a `<script type="application/json" id="canonical-bundle">` block.
+  Extract it, SHA-256 it, and it equals the printed hash - which is the
+  difference between evidence and decoration.
+
+```bash
+GET /api/v1/dashboard/{report}/export?format=csv&table=&days=
+    # report: control-room | bottlenecks | exceptions | policy-overrides |
+    #         evidence | reconciliation-health | autopilot-health
+    # format: csv (one table) | html (whole report) | json
+    # table:  which table for csv; defaults to the report's largest
+    # Gated exactly like the report's own endpoint - the file can never be a
+    # way around the permission on the screen.
+
+GET /api/v1/audit/evidence-pack/{correlation_id}/export?format=html|json
+    # requires audit.view. Returns X-Pack-SHA256 alongside the file.
+    # A GET, and deliberately a *preview* - it does not seal a new pack, so
+    # refreshing a download never adds to the register of generated packs.
+```
+
+### System health (`/system`) — the admin console's error monitor
+
+Answers "is anything silently not running". A background job that throws is
+already in the logs; a background job that **stopped** produces nothing at all,
+so every scheduled run writes a heartbeat and this reads the age of the last one.
+
+`status` is `ok | degraded | down`, and the top-level value is the worst of the
+components — an average would hide an outage behind three greens. A job that has
+never run reads `down` rather than `unknown`, deliberately. Email delivery being
+off appears under `notes` as configuration, not as a fault.
+
+```bash
+GET /api/v1/system/health   # requires audit.view
+                            # { status, checked_at,
+                            #   jobs: [{job, status, last_run_at, minutes_since,
+                            #           expected_every_minutes, last_error, detail}],
+                            #   notifications: {pending, failed, stuck, delivery_enabled, ...},
+                            #   ai: {total, errors, schema_rejections, ...},
+                            #   notes: [...] }
+```
+
+Both jobs need a scheduler in production, and this screen is where a missing one
+becomes visible:
+
+```bash
+python -m scripts.dispatch_notifications   # every minute
+python -m scripts.run_workflow_timers      # hourly
+```
+
 ## Procure-to-Pay (added 2026-08)
 
 The full chain: order → receive → match → approve → pay → reconcile. Each step
@@ -974,3 +1077,282 @@ POST /api/v1/bank-statements/lines/{id}/unmatch       # {reason} — a wrong mat
 > hides the unexplained debit beside it by consuming it.
 
 **Last Updated:** 2026-08-11
+## Supply Chain (Variant D, added 2026-08)
+
+Receiving existed to serve three-way matching. This is the other half: an item
+master, locations, and a balance for goods to arrive into.
+
+**Stock is a ledger, not a number.** `stock_movements` is append-only and
+signed; the balance is its sum, kept as an aggregate for speed and checkable
+against the ledger at any time. That is what lets the system answer "why is it
+37 when it should be 40" — a question a stored quantity cannot answer.
+
+Two rules are enforced at the single writer, and both are silent when missing:
+**stock cannot go negative** (a shelf cannot hold less than nothing, so this is
+always a data error), and the balance row is **locked before it is changed**
+(two concurrent receipts would otherwise each read the same number and one
+would vanish).
+
+### Items, locations and stock (`/inventory`)
+
+```bash
+GET   /api/v1/inventory/items?active_only=&category=   # requires inventory.view
+POST  /api/v1/inventory/items                          # requires inventory.manage_items
+                                                       # {sku, name, uom?, is_stocked?,
+                                                       #  reorder_point?, standard_cost?}
+                                                       # A non-stocked item is bought but
+                                                       # never held; it can be ordered and
+                                                       # received and never touches a balance.
+PATCH /api/v1/inventory/items/{id}                     # standard_cost changes are audited
+                                                       # with before/after: it decides which
+                                                       # adjustments need two approvers
+GET   /api/v1/inventory/locations
+POST  /api/v1/inventory/locations                      # {code, name, is_receiving_bay?,
+                                                       #  is_quarantine?} — never both
+GET   /api/v1/inventory/stock?location_id=&include_zero=
+                                                       # on hand, valued, with reorder flags
+GET   /api/v1/inventory/movements?item_id=&location_id=&limit=
+                                                       # the ledger: why a balance is what it is
+GET   /api/v1/inventory/reconcile                      # where the stored balance disagrees with
+                                                       # the ledger. Should always be empty; a
+                                                       # non-empty answer is a bug, so the
+                                                       # discrepancies are reported and never
+                                                       # silently corrected
+```
+
+### Adjustments — the governed record
+
+The only way stock changes with nothing physical behind it, which makes writing
+stock off how a theft gets covered up. So it carries the same shape an invoice
+does: a workflow, a value threshold, and two signatures above the limit.
+
+`inventory.adjust` and `inventory.approve_adjustment` are **separate
+permissions** so no arrangement of roles can collapse the separation. The SoD
+rule has **no admin exemption**, unlike the invoice rules — this control exists
+precisely for the person with the most access.
+
+```bash
+GET  /api/v1/inventory/adjustments?state=&location_id=
+GET  /api/v1/inventory/adjustments/{id}                # with lines
+POST /api/v1/inventory/adjustments                     # {location_id, reason_code, lines:[
+                                                       #  {item_id, quantity_change, note?}]}
+                                                       # signed: negative writes off, positive on
+POST /api/v1/inventory/adjustments/{id}/submit         # fixes the threshold decision here, and
+                                                       # stores it — recomputing at approval
+                                                       # would let an edited cost route a large
+                                                       # write-off past the second signature
+POST /api/v1/inventory/adjustments/{id}/approve        # ONE route for both signatures. The
+                                                       # server decides whether a call is the
+                                                       # first or the second; a client that
+                                                       # could choose would be able to supply
+                                                       # the second alone. Posts the ledger once
+                                                       # every required signature is present.
+                                                       # 409 if it would overdraw stock.
+POST /api/v1/inventory/adjustments/{id}/reject         # {reason} — required
+POST /api/v1/inventory/adjustments/{id}/cancel         # never once posted: reversing posted
+                                                       # stock means an opposing adjustment
+```
+
+### Quality checks, putaway and returns
+
+A failed check does **not** undo the receipt — what arrived still arrived. The
+rejected quantity moves to quarantine, where it cannot be picked while somebody
+decides whether it goes back.
+
+```bash
+POST /api/v1/inventory/receipt-lines/{id}/quality-check
+     # {quantity_accepted, quantity_rejected, reason_code?, notes?}
+     # A rejection REQUIRES a reason code and a note. "27 rejected" with no
+     # reason is unusable when somebody later asks which supplier keeps sending
+     # damaged goods — which is the whole point of reason codes.
+POST /api/v1/inventory/receipt-lines/{id}/putaway       # {destination_id, quantity}
+GET  /api/v1/inventory/receipt-lines/{id}/exception     # why a delivery did not match its
+                                                        # order. The computed half (short,
+                                                        # over, late, rejected) is always
+                                                        # present; the AI explanation is added
+                                                        # when available, and its absence is
+                                                        # stated rather than left blank.
+                                                        # A suggested reason code outside the
+                                                        # vocabulary is discarded, never stored.
+GET  /api/v1/inventory/uninspected                      # delivered but never checked
+
+GET  /api/v1/inventory/returns?state=&vendor_id=
+POST /api/v1/inventory/returns                          # {vendor_id, location_id, reason_code,
+                                                        #  lines:[{item_id, quantity}]}
+                                                        # vendor_attributable is derived from the
+                                                        # reason and then FIXED, so a scorecard
+                                                        # cannot rewrite last quarter
+POST /api/v1/inventory/returns/{id}/{action}
+     # submit | approve | dispatch | reject | cancel | credit
+     # Stock leaves on DISPATCH, not on approval — the goods are still on the
+     # premises until the lorry goes. `credit` requires the vendor's credit note
+     # reference, or there is nothing to reconcile against later.
+```
+
+### Supply chain reports
+
+```bash
+GET /api/v1/dashboard/stock-accuracy?days=          # write-offs and write-ons are NOT netted:
+                                                    # two adjustments that cancel out are two
+                                                    # discrepancies, not a tidy warehouse.
+                                                    # Loss and theft are called out separately.
+GET /api/v1/dashboard/supplier-performance?days=    # on time, in full, undamaged — three
+                                                    # questions, deliberately not averaged into
+                                                    # one score. A delivery with no promised
+                                                    # date is UNMEASURABLE, not punctual.
+GET /api/v1/dashboard/receipt-to-invoice?days=      # goods received with no invoice yet: a
+                                                    # liability the ledger does not show, and
+                                                    # the accrual an auditor asks about
+```
+
+All three export like every other report (`/export?format=csv|html|json`), and
+both new workflows (`inventory_adjustment`, `vendor_return`) reach the Decision
+Inbox with SLAs and escalation.
+
+## HR (Variant C, added 2026-08)
+
+**An employee is not a user.** A user is a login; an employee is a person the
+company employs. Creating an employee never creates an account, and linking one
+is a separate, audited action that grants nothing by itself — the role on the
+account still decides what it may do. Most of a real workforce has no login at
+all, which is why `user_id` is nullable and expected to stay that way.
+
+**Pay, national IDs and bank details are masked on the way out.** A caller
+without `hr.view_compensation` gets `"restricted"` for salary and `••••67-1`
+for identifiers. The keys are identical in both shapes, so nothing has to
+branch. The values are stored in full — payroll variance is arithmetic on real
+numbers — and the masking happens at the service boundary, the same place
+vendor bank details already do it. Pay is deliberately kept out of the audit
+trail too, because `audit.view` reaches a wider audience than
+`hr.view_compensation`.
+
+### People (`/hr/employees`)
+
+```bash
+GET  /api/v1/hr/employees?org_unit_id=&include_left=   # requires hr.view
+GET  /api/v1/hr/employees/{id}
+POST /api/v1/hr/employees                              # requires hr.manage_employees
+                                                       # base_salary is refused unless the
+                                                       # caller may see compensation
+POST /api/v1/hr/employees/{id}/user                    # {user_id} — or null to detach.
+                                                       # One account belongs to one employee,
+                                                       # or every approval it gives is ambiguous
+POST /api/v1/hr/employees/{id}/status                  # {status, end_date?}
+                                                       # `left` REQUIRES an end date: without one
+                                                       # "how many did we employ in March" has
+                                                       # no answer. Leaving is never a deletion
+```
+
+### Hiring (`/hr/headcount`)
+
+A hire is agreed once and paid for years, so a request states its annual cost
+before anybody approves it. `filled` is terminal and separate from `approved`:
+an approved request already hired against must not authorise a second hire.
+
+```bash
+GET  /api/v1/hr/headcount?state=&org_unit_id=
+POST /api/v1/hr/headcount            # {job_title, annual_cost, positions?, ...}
+                                     # requires hr.request_headcount; a cost of zero is refused
+POST /api/v1/hr/headcount/{id}/submit    # a justification is required here, not at creation
+POST /api/v1/hr/headcount/{id}/approve   # requires hr.approve_headcount — a SEPARATE grant,
+                                         # so a manager asks and the CFO decides the cost
+POST /api/v1/hr/headcount/{id}/reject    # {reason}
+POST /api/v1/hr/headcount/{id}/fill      # {employee_id}. A sensitive role refuses anyone
+                                         # whose background check is not cleared — checked
+                                         # here because vetting happens to a person, and at
+                                         # approval time there was no person yet
+POST /api/v1/hr/headcount/{id}/cancel
+GET  /api/v1/hr/headcount-plan           # plan vs actual. Approved-and-unfilled is the number
+                                         # that matters: committed cost the budget carries and
+                                         # the headcount does not show
+```
+
+### Onboarding and offboarding
+
+One engine for both, and the offboarding half is the one with teeth: an
+unfinished onboarding task is a starter waiting for a laptop, while an
+unfinished offboarding task is somebody who left and can still sign in.
+
+```bash
+GET  /api/v1/hr/employees/{id}/tasks?flow=
+POST /api/v1/hr/employees/{id}/checklist   # {flow: onboarding|offboarding, extra_tasks?}
+                                           # refuses a second checklist for the same flow
+POST /api/v1/hr/tasks/{task_id}/status     # {status, note?}
+                                           # 'not_applicable' and 'blocked' REQUIRE a note —
+                                           # without one they cannot be told apart from a task
+                                           # somebody quietly dropped
+GET  /api/v1/hr/outstanding-access         # who has left and can still sign in
+GET  /api/v1/hr/onboarding-completion?flow=   # by owning team, because "IT has four open
+                                              # tasks" is actionable and "60% done" is not
+```
+
+### Pay changes (`/hr/payroll-changes`)
+
+The clearest SoD surface in the product, and it refuses **three** conflicts:
+you cannot raise your own, you cannot approve your own, and you cannot approve
+a rise for **your own manager** — because two managers approving each other's
+rises pass every check that looks at one record at a time.
+
+```bash
+GET  /api/v1/hr/payroll-changes?state=&employee_id=
+     # the SIZE of each change is always shown — an approver has to know whether
+     # they are signing 2% or 40% — while the salaries need hr.view_compensation
+POST /api/v1/hr/payroll-changes          # {employee_id, new_salary, reason_code,
+                                         #  effective_date} — requires hr.request_payroll_change
+POST /api/v1/hr/payroll-changes/{id}/submit
+POST /api/v1/hr/payroll-changes/{id}/approve
+     # requires hr.approve_payroll_change, a separate grant: a manager requests
+     # and never approves; the CFO approves and never requests. Applies the new
+     # salary in the SAME transaction — approved-but-unapplied would be paperwork
+     # saying somebody got a rise that never reached their pay
+POST /api/v1/hr/payroll-changes/{id}/reject   # {reason}
+POST /api/v1/hr/payroll-changes/{id}/cancel   # never once applied: reverse it with another
+                                              # change, so the record shows both
+```
+
+### Expenses (`/hr/expenses`)
+
+A claim is a payment request with a person attached, so it is controlled like
+an invoice. A receipt is required for anything over 1,000 or in travel,
+accommodation, entertainment or equipment — checked at **submission**, so the
+claimant finds out while they still have the receipt.
+
+```bash
+GET  /api/v1/hr/expenses?state=&employee_id=
+     # somebody who can only claim sees their own: an expense list is a record of
+     # where people went and what they bought
+POST /api/v1/hr/expenses               # {employee_id, category, total_amount, incurred_date}
+POST /api/v1/hr/expenses/{id}/submit   # refused without a receipt where one is required
+POST /api/v1/hr/expenses/{id}/approve  # {override_reason?} — waiving the receipt rule needs a
+                                       # written reason, recorded in policy_override_reason and
+                                       # reported alongside every other override.
+                                       # NOBODY approves their own, admins included, and not a
+                                       # claim somebody else keyed in on their behalf
+POST /api/v1/hr/expenses/{id}/reject   # {reason}
+POST /api/v1/hr/expenses/{id}/pay
+POST /api/v1/hr/expenses/{id}/cancel
+```
+
+### HR reports
+
+Gated on `hr.view` rather than the dashboard permission: the other dashboards
+aggregate records anybody with `invoices.view` could open individually, while
+these aggregate people.
+
+```bash
+GET /api/v1/dashboard/hiring-pipeline?days=      # time to hire, measured from APPROVAL —
+                                                 # the wait before that is a budget decision.
+                                                 # Open roles are reported separately, because
+                                                 # an average over completed hires flatters
+                                                 # every pipeline
+GET /api/v1/dashboard/payroll-variance?days=     # movement and reasons, never a payroll total:
+                                                 # this is readable with hr.view while salaries
+                                                 # are not. Corrections are called out — a rise
+                                                 # is a decision, a correction is a mistake
+GET /api/v1/dashboard/expense-exceptions?days=   # waived rules, and employees still out of
+                                                 # pocket after approval
+```
+
+All three export like every other report (`/export?format=csv|html|json`), and
+all three HR workflows reach the Decision Inbox with SLAs and escalation.
+

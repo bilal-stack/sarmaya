@@ -44,6 +44,13 @@ class PurchaseRequisition(BaseModel):
         nullable=False, index=True,
     )
 
+    #: Which part of the organisation this belongs to. Null means it belongs to
+    #: the tenant at large and stays visible to everybody — an unscoped record
+    #: must not vanish the moment somebody is given a scope. See models/org_unit.
+    org_unit_id = Column(
+        UUID(as_uuid=True), ForeignKey("org_units.id"), nullable=True, index=True
+    )
+
     requisition_number = Column(String(100), nullable=False, index=True)
 
     #: What the requester needs and why they need it. `justification` is the

@@ -59,6 +59,8 @@ def main() -> int:
         )
 
     from app.services.notification_dispatcher import NotificationDispatcher
+    from app.services.system_health_service import record_job_run, job_clock
+    from app.models.job_run import JOB_NOTIFICATIONS
 
     session = SessionLocal()
     failures = 0
@@ -69,6 +71,12 @@ def main() -> int:
             # of the session, and reusing one would carry the first tenant's
             # binding into the next.
             tenant_session = SessionLocal()
+            # Recorded whether the run succeeds or not: the admin console's
+            # main question is "did this job run at all", and a run that only
+            # reports itself on success cannot answer it.
+            started_at = job_clock()
+            run_error = None
+            processed = 0
             try:
                 set_tenant_context(tenant_session, str(tenant_id))
                 # The dispatcher checks a permission, so it needs an actor. This
@@ -78,16 +86,31 @@ def main() -> int:
                 result = NotificationDispatcher(tenant_session).dispatch(
                     actor, limit=args.limit
                 )
+                processed = result["sent"]
                 if result["attempted"] or not args.quiet:
                     logger.info(
                         "%s: attempted=%s sent=%s retrying=%s failed=%s",
                         name, result["attempted"], result["sent"],
                         result["retrying"], result["failed"],
                     )
-            except Exception:
+            except Exception as exc:
                 failures += 1
+                run_error = f"{type(exc).__name__}: {exc}"
                 logger.exception("Dispatch failed for tenant %s", name)
             finally:
+                # A run that failed inside the database leaves the session in
+                # an aborted transaction, where every further write is refused.
+                # Clearing it here - where this session is owned and its work is
+                # already committed - is what makes the failure recordable at
+                # all. Without it the console goes quiet exactly when the job
+                # starts failing, which reads identically to the job having
+                # stopped, and the two need opposite responses.
+                if run_error:
+                    tenant_session.rollback()
+                record_job_run(
+                    tenant_session, tenant_id, JOB_NOTIFICATIONS,
+                    started_at, items_processed=processed, error=run_error,
+                )
                 tenant_session.close()
     finally:
         session.close()

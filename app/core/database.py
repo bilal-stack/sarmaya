@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event, or_, text
 from sqlalchemy.orm import sessionmaker, Session, with_loader_criteria
 from typing import Generator
 import logging
@@ -154,6 +154,89 @@ def _scope_query_to_tenant(execute_state):
             )
         )
 
+
+# ============================================
+# ORG-UNIT SCOPING
+# ============================================
+#
+# Build Book, Access Controls: "RBAC with scopes: tenant, business unit,
+# location, cost center, project." Permissions say what a role may *do*;
+# scopes say what it may do it *to*. Without them a manager who runs one
+# warehouse approves invoices for every site.
+#
+# Same mechanism as the tenant scoping above, and for the same reason: one
+# rule applied once beats every query remembering a filter. Two differences
+# that matter:
+#
+#   * **Absent means unrestricted.** A user with no scope rows sees the whole
+#     tenant, exactly as before this existed. A design where adding a table
+#     silently hides every record from everybody is one discovered by a CFO
+#     rather than by a test.
+#   * **A record with no unit stays visible.** Null org_unit_id means "belongs
+#     to the tenant at large". Filtering those out would make every existing
+#     record disappear the moment one person is given a scope.
+
+ORG_SCOPE_KEY = "org_unit_ids"
+
+_ORG_SCOPED_MAPPERS = None
+
+
+def _org_scoped_mappers():
+    """Mapped classes carrying org_unit_id, discovered once."""
+    global _ORG_SCOPED_MAPPERS
+    if _ORG_SCOPED_MAPPERS is None:
+        _ORG_SCOPED_MAPPERS = tuple(
+            mapper.class_
+            for mapper in mapper_registry.mappers
+            if "org_unit_id" in mapper.columns
+            # The table that *defines* scopes cannot be filtered by them: the
+            # query that resolves a user's scope reads it, so scoping it is
+            # circular — and an administrator with a scope of their own would
+            # be unable to see anybody else's assignments.
+            and not getattr(mapper.class_, "ORG_SCOPE_EXEMPT", False)
+        )
+    return _ORG_SCOPED_MAPPERS
+
+
+def set_org_scope(session: Session, org_unit_ids) -> None:
+    """Restrict this session to a set of org units.
+
+    Pass None (or never call it) to leave the session unrestricted, which is
+    what happens for every user who has not been given a scope.
+    """
+    if org_unit_ids:
+        session.info[ORG_SCOPE_KEY] = list(org_unit_ids)
+    else:
+        session.info.pop(ORG_SCOPE_KEY, None)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _scope_query_to_org_units(execute_state):
+    if (
+        not execute_state.is_select
+        or execute_state.is_column_load
+        or execute_state.is_relationship_load
+    ):
+        return
+
+    scope = execute_state.session.info.get(ORG_SCOPE_KEY)
+    if not scope:
+        return
+
+    for model in _org_scoped_mappers():
+        execute_state.statement = execute_state.statement.options(
+            with_loader_criteria(
+                # Eager expression, not a lambda: with_loader_criteria caches
+                # lambdas by code location, so a closed-over scope would be
+                # baked in from the first request and applied to everyone —
+                # the same trap documented on the tenant filter above, and
+                # worse here because the values differ per user rather than
+                # per tenant.
+                model,
+                or_(model.org_unit_id.is_(None), model.org_unit_id.in_(scope)),
+                include_aliases=True,
+            )
+        )
 
 class HardDeleteRefused(RuntimeError):
     """Something tried to destroy a record the audit trail still refers to."""

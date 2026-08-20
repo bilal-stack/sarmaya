@@ -18,6 +18,13 @@ class Invoice(BaseModel, SoftDeleteMixin):
     REFERENCE_FIELD = "invoice_number"
     
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    #: Which part of the organisation this belongs to. Null means it belongs to
+    #: the tenant at large and stays visible to everybody — an unscoped record
+    #: must not vanish the moment somebody is given a scope. See models/org_unit.
+    org_unit_id = Column(
+        UUID(as_uuid=True), ForeignKey("org_units.id"), nullable=True, index=True
+    )
     
     # Basic info
     invoice_number = Column(String(100), nullable=False)

@@ -86,6 +86,7 @@ class TestPromptsAreVersionedAndPinned:
             "invoice_next_action": "47a1f1f8195e",
             "duplicate_assessment": "cdd5eed9ddd2",
             "natural_language_query": "467a65eff6f4",
+            "receiving_exception": "1c249d241104",
         }
         actual = {name: p.content_hash for name, p in PROMPTS.items()}
         assert actual == expected, (

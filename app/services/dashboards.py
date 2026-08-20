@@ -615,3 +615,544 @@ class DashboardService:
             "reconciliation": self.reconciliation_health(current_user),
             "autopilot": self.autopilot_health(current_user),
         }
+
+    # --- Variant D: supply chain --------------------------------------------
+    #
+    # Build Book D1 asks for three: stock accuracy and adjustment rate,
+    # supplier delivery performance and lead time adherence, and GRN-to-invoice
+    # latency with its impact on AP. All three are computed from what the
+    # ledger and the receipts already record — this is reporting on existing
+    # truth, not new plumbing.
+
+    def stock_accuracy(self, current_user: dict, days: int = 90) -> Dict:
+        """How often the count disagrees with the system, and by how much.
+
+        The headline is the *write-off* rate rather than the net. Netting a
+        write-on against a write-off is how a loss disappears into an
+        arithmetic average: two adjustments that cancel out are not a warehouse
+        in good order, they are two discrepancies.
+        """
+        self._require(current_user)
+        from app.models.inventory import (
+            Item, StockBalance, StockMovement, MOVE_ADJUSTMENT,
+            REASON_THEFT_OR_LOSS, REASON_COUNT_CORRECTION,
+        )
+        from app.models.inventory_control import InventoryAdjustment, ADJ_POSTED
+
+        since = _now() - timedelta(days=days)
+
+        adjustments = (
+            self.db.query(InventoryAdjustment)
+            .filter(
+                InventoryAdjustment.current_state == ADJ_POSTED,
+                InventoryAdjustment.posted_at >= since,
+            )
+            .all()
+        )
+
+        by_reason: Dict[str, Dict] = {}
+        written_off = written_on = 0.0
+        for adjustment in adjustments:
+            value = money_to_float(adjustment.total_value or 0)
+            direction = sum(
+                float(line.quantity_change) for line in adjustment.lines
+            )
+            bucket = by_reason.setdefault(
+                adjustment.reason_code,
+                {"reason": adjustment.reason_code, "count": 0, "value": 0.0},
+            )
+            bucket["count"] += 1
+            bucket["value"] = round(bucket["value"] + value, 2)
+            if direction < 0:
+                written_off += value
+            else:
+                written_on += value
+
+        # The denominator: what is on hand, valued. An adjustment rate needs
+        # something to be a rate *of*, and "adjustments per month" says nothing
+        # about a warehouse that doubled in size.
+        holding = (
+            self.db.query(
+                func.coalesce(
+                    func.sum(StockBalance.quantity * Item.standard_cost), 0
+                )
+            )
+            .join(Item, Item.id == StockBalance.item_id)
+            .scalar()
+        ) or 0
+        holding_value = money_to_float(holding)
+
+        movement_count = (
+            self.db.query(func.count(StockMovement.id))
+            .filter(StockMovement.created_at >= since)
+            .scalar()
+        ) or 0
+        adjustment_movements = (
+            self.db.query(func.count(StockMovement.id))
+            .filter(
+                StockMovement.created_at >= since,
+                StockMovement.movement_type == MOVE_ADJUSTMENT,
+            )
+            .scalar()
+        ) or 0
+
+        # Loss and theft called out separately: these are the reasons that mean
+        # something left without anybody selling it, and burying them in a
+        # total is how they stop being noticed.
+        unexplained = round(sum(
+            row["value"] for code, row in by_reason.items()
+            if code == REASON_THEFT_OR_LOSS
+        ), 2)
+
+        return {
+            "window_days": days,
+            "adjustments_posted": len(adjustments),
+            "value_written_off": round(written_off, 2),
+            "value_written_on": round(written_on, 2),
+            "unexplained_loss_value": unexplained,
+            "holding_value": holding_value,
+            "write_off_rate_percent": (
+                round(written_off / holding_value * 100, 2)
+                if holding_value else 0.0
+            ),
+            "adjustment_share_of_movements_percent": (
+                round(adjustment_movements / movement_count * 100, 2)
+                if movement_count else 0.0
+            ),
+            "count_corrections": sum(
+                row["count"] for code, row in by_reason.items()
+                if code == REASON_COUNT_CORRECTION
+            ),
+            "by_reason": sorted(by_reason.values(), key=lambda r: -r["value"]),
+        }
+
+    def supplier_delivery_performance(
+        self, current_user: dict, days: int = 180
+    ) -> Dict:
+        """Who delivers on time, in full, and undamaged.
+
+        Three separate questions, deliberately not averaged into one score. A
+        supplier who is always late but never wrong needs a different
+        conversation from one who is punctual and sends damaged goods, and a
+        single number hides which of them you have.
+        """
+        self._require(current_user)
+        from app.models.goods_receipt import GoodsReceipt
+        from app.models.inventory_control import VendorReturn
+        from app.models.purchase_order import PurchaseOrder
+        from app.models.vendor import Vendor
+
+        since = (_now() - timedelta(days=days)).date()
+
+        rows = (
+            self.db.query(
+                PurchaseOrder.vendor_name,
+                PurchaseOrder.expected_date,
+                GoodsReceipt.received_date,
+                GoodsReceipt.id,
+            )
+            .join(GoodsReceipt, GoodsReceipt.purchase_order_id == PurchaseOrder.id)
+            .filter(GoodsReceipt.received_date >= since)
+            .all()
+        )
+
+        by_vendor: Dict[str, Dict] = {}
+        for vendor_name, expected, received, _receipt_id in rows:
+            bucket = by_vendor.setdefault(vendor_name, {
+                "vendor": vendor_name, "deliveries": 0, "on_time": 0,
+                "late": 0, "unknown_due_date": 0, "total_days_late": 0,
+                "returns_their_fault": 0,
+            })
+            bucket["deliveries"] += 1
+
+            if expected is None:
+                # No promised date means on-time is unanswerable. Counted
+                # separately rather than assumed on time, which would flatter
+                # every vendor whose orders never carried a date.
+                bucket["unknown_due_date"] += 1
+            elif received and received > expected:
+                bucket["late"] += 1
+                bucket["total_days_late"] += (received - expected).days
+            else:
+                bucket["on_time"] += 1
+
+        attributable = dict(
+            self.db.query(VendorReturn.vendor_id, func.count(VendorReturn.id))
+            .filter(VendorReturn.vendor_attributable.is_(True))
+            .group_by(VendorReturn.vendor_id)
+            .all()
+        )
+        if attributable:
+            for vendor in (
+                self.db.query(Vendor)
+                .filter(Vendor.id.in_(list(attributable)))
+                .all()
+            ):
+                if vendor.legal_name in by_vendor:
+                    by_vendor[vendor.legal_name]["returns_their_fault"] = (
+                        attributable[vendor.id]
+                    )
+
+        vendors = []
+        for row in by_vendor.values():
+            measurable = row["on_time"] + row["late"]
+            vendors.append({
+                **row,
+                "on_time_percent": (
+                    round(row["on_time"] / measurable * 100, 1)
+                    if measurable else None
+                ),
+                "average_days_late": (
+                    round(row["total_days_late"] / row["late"], 1)
+                    if row["late"] else 0.0
+                ),
+            })
+
+        # Worst first, with the unmeasurable ones last: a vendor nobody can
+        # score is a data problem, not a performance problem, and putting them
+        # at the top would bury the suppliers actually failing.
+        vendors.sort(
+            key=lambda v: (v["on_time_percent"] is None, v["on_time_percent"] or 0)
+        )
+
+        return {
+            "window_days": days,
+            "vendors": vendors,
+            "deliveries": sum(v["deliveries"] for v in vendors),
+            "late_deliveries": sum(v["late"] for v in vendors),
+            "deliveries_with_no_promised_date": sum(
+                v["unknown_due_date"] for v in vendors
+            ),
+        }
+
+    def receipt_to_invoice_latency(self, current_user: dict, days: int = 90) -> Dict:
+        """How long goods sit received but uninvoiced, and what it is worth.
+
+        The Build Book calls this "GRN to invoice latency and impact on AP",
+        and the impact is the point: goods received without an invoice are a
+        liability the ledger does not show yet. A month-end that misses them
+        understates what is owed, which is the accrual an auditor asks about.
+        """
+        self._require(current_user)
+        from app.models.goods_receipt import GoodsReceipt, GoodsReceiptLine
+        from app.models.invoice import Invoice
+        from app.models.purchase_order import PurchaseOrder, PurchaseOrderLine
+
+        since = (_now() - timedelta(days=days)).date()
+        today = _now().date()
+
+        invoiced_orders = {
+            row[0] for row in
+            self.db.query(Invoice.purchase_order_id)
+            .filter(Invoice.purchase_order_id.isnot(None))
+            .all()
+        }
+
+        rows = (
+            self.db.query(
+                GoodsReceipt.grn_number,
+                GoodsReceipt.received_date,
+                PurchaseOrder.id,
+                PurchaseOrder.vendor_name,
+                func.sum(
+                    GoodsReceiptLine.quantity_received * PurchaseOrderLine.unit_price
+                ),
+            )
+            .join(PurchaseOrder, PurchaseOrder.id == GoodsReceipt.purchase_order_id)
+            .join(
+                GoodsReceiptLine,
+                GoodsReceiptLine.goods_receipt_id == GoodsReceipt.id,
+            )
+            .join(
+                PurchaseOrderLine,
+                PurchaseOrderLine.id == GoodsReceiptLine.purchase_order_line_id,
+            )
+            .filter(GoodsReceipt.received_date >= since)
+            .group_by(
+                GoodsReceipt.id, GoodsReceipt.grn_number,
+                GoodsReceipt.received_date, PurchaseOrder.id,
+                PurchaseOrder.vendor_name,
+            )
+            .all()
+        )
+
+        waiting, buckets, total_value = [], {}, 0.0
+        for grn, received_date, order_id, vendor, value in rows:
+            if order_id in invoiced_orders:
+                continue
+            age = (today - received_date).days if received_date else 0
+            amount = money_to_float(value or 0)
+            total_value += amount
+            bucket = _bucket(age)
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+            waiting.append({
+                "grn_number": grn,
+                "vendor": vendor,
+                "received_date": received_date,
+                "days_waiting": age,
+                "value": amount,
+                "link": f"/ai-tools/purchase-orders/{order_id}",
+            })
+
+        waiting.sort(key=lambda r: -r["days_waiting"])
+
+        return {
+            "window_days": days,
+            "receipts_awaiting_invoice": len(waiting),
+            "value_awaiting_invoice": round(total_value, 2),
+            "by_age": [
+                {"bucket": name, "count": count} for name, count in buckets.items()
+            ],
+            "oldest": waiting[:20],
+        }
+
+    # --- Variant C: HR ------------------------------------------------------
+    #
+    # Build Book C1/C2 reports: time to hire and onboarding SLA completion,
+    # headcount plan vs actual, payroll variance and exception trends.
+    # `headcount_plan` lives on HeadcountService, which owns that question;
+    # these are the two that read across HR rather than within one record.
+
+    def hiring_pipeline(self, current_user: dict, days: int = 365) -> Dict:
+        """Time to hire, and where requests are stuck.
+
+        Measured from **approval** to filled, not from when the request was
+        raised. The gap before approval is a budget decision and belongs to
+        whoever is sitting on it; time-to-hire is a recruiting number, and
+        mixing the two produces a figure neither team can act on.
+
+        Requests still open are reported separately from those filled. An
+        average computed only over completed hires flatters every pipeline —
+        the roles that never get filled are exactly the ones missing from it.
+        """
+        self._require_hr(current_user)
+        from app.models.hr import (
+            HeadcountRequest, HC_APPROVED, HC_FILLED, HC_PENDING_APPROVAL,
+        )
+
+        since = _now() - timedelta(days=days)
+        today = _now().date()
+
+        filled = (
+            self.db.query(HeadcountRequest)
+            .filter(
+                HeadcountRequest.current_state == HC_FILLED,
+                HeadcountRequest.filled_at >= since,
+            )
+            .all()
+        )
+        still_open = (
+            self.db.query(HeadcountRequest)
+            .filter(HeadcountRequest.current_state == HC_APPROVED)
+            .all()
+        )
+        awaiting = (
+            self.db.query(HeadcountRequest)
+            .filter(HeadcountRequest.current_state == HC_PENDING_APPROVAL)
+            .count()
+        )
+
+        days_to_fill = [
+            (row.filled_at - row.approved_at).days
+            for row in filled
+            if row.filled_at and row.approved_at
+        ]
+
+        return {
+            "window_days": days,
+            "filled": len(filled),
+            "average_days_to_fill": (
+                round(sum(days_to_fill) / len(days_to_fill), 1)
+                if days_to_fill else None
+            ),
+            "longest_days_to_fill": max(days_to_fill) if days_to_fill else None,
+            "awaiting_approval": awaiting,
+            "approved_still_open": len(still_open),
+            # The number an average hides: roles approved long ago that nobody
+            # has hired. They are committed cost and an unstaffed team.
+            "open_positions_ageing": [
+                {
+                    "request_number": row.request_number,
+                    "job_title": row.job_title,
+                    "positions": row.positions,
+                    "days_open": (
+                        (today - row.approved_at.date()).days
+                        if row.approved_at else None
+                    ),
+                    "annual_cost": float(row.annual_cost or 0),
+                }
+                for row in sorted(
+                    still_open,
+                    key=lambda r: r.approved_at or _now(),
+                )
+            ],
+        }
+
+    def payroll_variance(self, current_user: dict, days: int = 365) -> Dict:
+        """What pay changed, why, and how unusually.
+
+        Build Book: "payroll variance and exception trends". Reported as
+        *movement* — the total of every applied change and the reasons behind
+        them — rather than as a payroll total, because this report is readable
+        by anyone with hr.view while salaries are not. A variance report that
+        leaked the payroll would defeat the masking the rest of the module
+        enforces.
+
+        Corrections are called out separately. A rise is a decision; a
+        correction is a mistake somebody made earlier, and a rising number of
+        them says something about the process rather than about pay.
+        """
+        self._require_hr(current_user)
+        from app.models.hr import (
+            PayrollChangeRequest, PAY_APPLIED, PAY_REJECTED,
+            PAY_REASON_CORRECTION,
+        )
+
+        since = _now() - timedelta(days=days)
+
+        applied = (
+            self.db.query(PayrollChangeRequest)
+            .filter(
+                PayrollChangeRequest.current_state == PAY_APPLIED,
+                PayrollChangeRequest.applied_at >= since,
+            )
+            .all()
+        )
+        rejected = (
+            self.db.query(PayrollChangeRequest)
+            .filter(
+                PayrollChangeRequest.current_state == PAY_REJECTED,
+                PayrollChangeRequest.created_at >= since,
+            )
+            .count()
+        )
+
+        by_reason: Dict[str, Dict] = {}
+        increases = decreases = 0
+        total_movement = 0.0
+        for change in applied:
+            amount = money_to_float(change.total_amount or 0)
+            total_movement += amount
+            bucket = by_reason.setdefault(
+                change.reason_code,
+                {"reason": change.reason_code, "count": 0, "movement": 0.0},
+            )
+            bucket["count"] += 1
+            bucket["movement"] = round(bucket["movement"] + amount, 2)
+
+            if change.current_salary is not None and change.new_salary is not None:
+                if change.new_salary > change.current_salary:
+                    increases += 1
+                elif change.new_salary < change.current_salary:
+                    decreases += 1
+
+        corrections = sum(
+            row["count"] for code, row in by_reason.items()
+            if code == PAY_REASON_CORRECTION
+        )
+
+        return {
+            "window_days": days,
+            "changes_applied": len(applied),
+            "total_movement": round(total_movement, 2),
+            "increases": increases,
+            "decreases": decreases,
+            "corrections": corrections,
+            "rejected": rejected,
+            "by_reason": sorted(by_reason.values(), key=lambda r: -r["movement"]),
+        }
+
+    def expense_exceptions(self, current_user: dict, days: int = 90) -> Dict:
+        """Claims that needed a rule waived, and claims waiting to be paid.
+
+        Two different failures in one report because they are read by the same
+        person. An override is a control being set aside; an approved claim
+        that has not been paid is an employee out of pocket, and nothing else
+        in the system chases it.
+        """
+        self._require_hr(current_user)
+        from app.models.employee import Employee
+        from app.models.hr import (
+            ExpenseReimbursement, EXP_APPROVED, EXP_PENDING_APPROVAL, EXP_PAID,
+        )
+
+        since = _now() - timedelta(days=days)
+        today = _now().date()
+
+        claims = (
+            self.db.query(ExpenseReimbursement, Employee)
+            .join(Employee, Employee.id == ExpenseReimbursement.employee_id)
+            .filter(ExpenseReimbursement.created_at >= since)
+            .all()
+        )
+
+        overrides, awaiting_payment = [], []
+        paid = pending = 0
+        by_category: Dict[str, Dict] = {}
+
+        for claim, employee in claims:
+            amount = money_to_float(claim.total_amount or 0)
+            bucket = by_category.setdefault(
+                claim.category,
+                {"category": claim.category, "count": 0, "amount": 0.0},
+            )
+            bucket["count"] += 1
+            bucket["amount"] = round(bucket["amount"] + amount, 2)
+
+            if claim.policy_override_reason:
+                overrides.append({
+                    "claim_number": claim.claim_number,
+                    "employee": employee.full_name,
+                    "category": claim.category,
+                    "amount": amount,
+                    "reason": claim.policy_override_reason,
+                    "approved_by": claim.approved_by,
+                })
+            if claim.current_state == EXP_PAID:
+                paid += 1
+            elif claim.current_state == EXP_PENDING_APPROVAL:
+                pending += 1
+            elif claim.current_state == EXP_APPROVED:
+                awaiting_payment.append({
+                    "claim_number": claim.claim_number,
+                    "employee": employee.full_name,
+                    "amount": amount,
+                    "days_since_approval": (
+                        (today - claim.approved_at.date()).days
+                        if claim.approved_at else None
+                    ),
+                })
+
+        awaiting_payment.sort(key=lambda r: -(r["days_since_approval"] or 0))
+
+        return {
+            "window_days": days,
+            "claims": len(claims),
+            "pending_approval": pending,
+            "paid": paid,
+            "policy_overrides": len(overrides),
+            "approved_awaiting_payment": len(awaiting_payment),
+            "value_awaiting_payment": round(
+                sum(r["amount"] for r in awaiting_payment), 2
+            ),
+            "by_category": sorted(
+                by_category.values(), key=lambda r: -r["amount"]
+            ),
+            "overrides": overrides,
+            "awaiting_payment": awaiting_payment[:20],
+        }
+
+    def _require_hr(self, current_user: dict) -> None:
+        """HR reports read with hr.view rather than the dashboard permission.
+
+        Deliberately not the same gate: the other dashboards aggregate records
+        anybody with invoices.view could open individually, while these
+        aggregate people. Nothing here exposes a salary, but "who was hired,
+        who left, whose pay moved" is still not company-readable.
+        """
+        from app.core.roles import PERM_VIEW_HR
+
+        if not has_permission(current_user["role"], PERM_VIEW_HR):
+            raise PermissionError(
+                f"Role '{current_user['role']}' cannot view HR reports"
+            )

@@ -23,6 +23,19 @@ from app.models.bank_statement import BankStatement, BankStatementLine
 from app.models.watchlist_alert import WatchlistAlert
 from app.models.notification_outbox import NotificationOutbox
 from app.models.mfa_recovery_code import MfaRecoveryCode
+from app.models.org_unit import OrgUnit, UserOrgScope
+from app.models.job_run import JobRun
+from app.models.inventory import (
+    Item, StockLocation, StockMovement, StockBalance,
+)
+from app.models.employee import Employee
+from app.models.hr import (
+    HeadcountRequest, OnboardingTask, PayrollChangeRequest, ExpenseReimbursement,
+)
+from app.models.inventory_control import (
+    InventoryAdjustment, InventoryAdjustmentLine, QualityCheck,
+    VendorReturn, VendorReturnLine,
+)
 
 __all__ = [
     "Base",
@@ -60,4 +73,21 @@ __all__ = [
     "WatchlistAlert",
     "NotificationOutbox",
     "MfaRecoveryCode",
+    "OrgUnit",
+    "JobRun",
+    "Employee",
+    "HeadcountRequest",
+    "OnboardingTask",
+    "PayrollChangeRequest",
+    "ExpenseReimbursement",
+    "Item",
+    "StockLocation",
+    "StockMovement",
+    "StockBalance",
+    "InventoryAdjustment",
+    "InventoryAdjustmentLine",
+    "QualityCheck",
+    "VendorReturn",
+    "VendorReturnLine",
+    "UserOrgScope",
 ]

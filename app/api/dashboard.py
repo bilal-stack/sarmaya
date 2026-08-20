@@ -157,6 +157,90 @@ def reconciliation_health(
         _raise_for(e)
 
 
+@router.get("/stock-accuracy")
+def stock_accuracy(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """How often the count disagrees with the system, and what it cost."""
+    try:
+        return DashboardService(db).stock_accuracy(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/supplier-performance")
+def supplier_delivery_performance(
+    days: int = Query(180, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Who delivers on time, in full, and undamaged."""
+    try:
+        return DashboardService(db).supplier_delivery_performance(
+            current_user, days=days
+        )
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/receipt-to-invoice")
+def receipt_to_invoice_latency(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Goods received with no invoice yet — a liability the ledger does not
+    show, and the accrual an auditor asks about."""
+    try:
+        return DashboardService(db).receipt_to_invoice_latency(
+            current_user, days=days
+        )
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/hiring-pipeline")
+def hiring_pipeline(
+    days: int = Query(365, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Time to hire, measured from approval, plus the roles nobody filled."""
+    try:
+        return DashboardService(db).hiring_pipeline(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/payroll-variance")
+def payroll_variance(
+    days: int = Query(365, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What pay changed and why. Movement, never a payroll total — this is
+    readable with hr.view while salaries are not."""
+    try:
+        return DashboardService(db).payroll_variance(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/expense-exceptions")
+def expense_exceptions(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Waived rules, and employees still out of pocket."""
+    try:
+        return DashboardService(db).expense_exceptions(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 @router.get("/autopilot-health")
 def autopilot_health(
     days: int = Query(90, ge=1, le=365),

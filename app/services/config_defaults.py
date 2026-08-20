@@ -138,6 +138,113 @@ DEFAULT_PAYMENT_STATES = [
     (PAY_CANCELLED, "Cancelled", 5, False, True, [], "#orange", {}, {}),
 ]
 
+# --- Variant D: inventory ---------------------------------------------------
+from app.models.inventory_control import (  # noqa: E402
+    ADJ_DRAFT, ADJ_PENDING_APPROVAL, ADJ_APPROVED, ADJ_POSTED, ADJ_REJECTED,
+    ADJ_CANCELLED, RET_DRAFT, RET_PENDING_APPROVAL, RET_APPROVED,
+    RET_DISPATCHED, RET_CREDITED, RET_REJECTED, RET_CANCELLED,
+)
+
+# `posted` is where an adjustment ends, and it is separate from `approved`
+# because approving is a decision while posting is what moves the ledger. An
+# approval that failed to post shows up as a record stuck in `approved` rather
+# than as stock that silently never changed.
+#
+# The SLA sits on `pending_approval` at 24 hours: an unapproved write-off is a
+# discrepancy nobody has accounted for, and the longer it waits the harder the
+# count is to reconstruct.
+DEFAULT_INVENTORY_ADJUSTMENT_STATES = [
+    (ADJ_DRAFT, "Draft", 1, True, False, [ADJ_PENDING_APPROVAL, ADJ_CANCELLED],
+        "#gray", {}, {}),
+    (ADJ_PENDING_APPROVAL, "Pending Approval", 2, False, False,
+        [ADJ_APPROVED, ADJ_REJECTED], "#yellow", {},
+        {"hours": 24, "escalate_to": "manager"}),
+    (ADJ_APPROVED, "Approved", 3, False, False, [ADJ_POSTED], "#blue", {}, {}),
+    (ADJ_POSTED, "Posted", 4, False, True, [], "#green", {}, {}),
+    (ADJ_REJECTED, "Rejected", 5, False, True, [ADJ_DRAFT], "#red", {}, {}),
+    (ADJ_CANCELLED, "Cancelled", 6, False, True, [], "#orange", {}, {}),
+]
+
+# The clock that matters here is on `dispatched`, not on approval: once goods
+# have gone back, the vendor owes a credit, and a return that is never credited
+# is money quietly written off. Nothing else in the system chases it, which is
+# exactly the gap DR-009 found for tenders.
+DEFAULT_VENDOR_RETURN_STATES = [
+    (RET_DRAFT, "Draft", 1, True, False, [RET_PENDING_APPROVAL, RET_CANCELLED],
+        "#gray", {}, {}),
+    (RET_PENDING_APPROVAL, "Pending Approval", 2, False, False,
+        [RET_APPROVED, RET_REJECTED], "#yellow", {},
+        {"hours": 24, "escalate_to": "manager"}),
+    (RET_APPROVED, "Approved", 3, False, False, [RET_DISPATCHED, RET_CANCELLED],
+        "#blue", {}, {"hours": 72, "escalate_to": "manager"}),
+    (RET_DISPATCHED, "Dispatched", 4, False, False, [RET_CREDITED], "#purple",
+        {}, {"hours": 720, "escalate_to": "manager"}),
+    (RET_CREDITED, "Credited", 5, False, True, [], "#green", {}, {}),
+    (RET_REJECTED, "Rejected", 6, False, True, [RET_DRAFT], "#red", {}, {}),
+    (RET_CANCELLED, "Cancelled", 7, False, True, [], "#orange", {}, {}),
+]
+
+
+
+# --- Variant C: HR ----------------------------------------------------------
+from app.models.hr import (  # noqa: E402
+    HC_DRAFT, HC_PENDING_APPROVAL, HC_APPROVED, HC_FILLED, HC_REJECTED,
+    HC_CANCELLED, PAY_DRAFT, PAY_PENDING_APPROVAL, PAY_APPROVED, PAY_APPLIED,
+    PAY_REJECTED, PAY_CANCELLED, EXP_DRAFT, EXP_PENDING_APPROVAL, EXP_APPROVED,
+    EXP_PAID, EXP_REJECTED, EXP_CANCELLED,
+)
+
+# A hire waits on a budget holder, so 48 hours rather than 24: this is a
+# decision somebody should think about, and chasing it the next morning trains
+# people to approve without reading. `approved` carries a clock of its own —
+# an approved role nobody fills is committed cost sitting on the budget, and
+# two weeks is long enough to notice the recruitment never started.
+DEFAULT_HEADCOUNT_STATES = [
+    (HC_DRAFT, "Draft", 1, True, False, [HC_PENDING_APPROVAL, HC_CANCELLED],
+        "#gray", {}, {}),
+    (HC_PENDING_APPROVAL, "Pending Approval", 2, False, False,
+        [HC_APPROVED, HC_REJECTED], "#yellow", {},
+        {"hours": 48, "escalate_to": "cfo"}),
+    (HC_APPROVED, "Approved", 3, False, False, [HC_FILLED, HC_CANCELLED],
+        "#blue", {}, {"hours": 336, "escalate_to": "manager"}),
+    (HC_FILLED, "Filled", 4, False, True, [], "#green", {}, {}),
+    (HC_REJECTED, "Rejected", 5, False, True, [HC_DRAFT], "#red", {}, {}),
+    (HC_CANCELLED, "Cancelled", 6, False, True, [], "#orange", {}, {}),
+]
+
+# Pay changes have a date they take effect from, and missing it means somebody
+# is paid the wrong amount for a month and then owed arrears. 24 hours.
+# `applied` is terminal: reversing a change means raising another, so the
+# record shows both what happened and what undid it.
+DEFAULT_PAYROLL_CHANGE_STATES = [
+    (PAY_DRAFT, "Draft", 1, True, False, [PAY_PENDING_APPROVAL, PAY_CANCELLED],
+        "#gray", {}, {}),
+    (PAY_PENDING_APPROVAL, "Pending Approval", 2, False, False,
+        [PAY_APPROVED, PAY_REJECTED], "#yellow", {},
+        {"hours": 24, "escalate_to": "cfo"}),
+    (PAY_APPROVED, "Approved", 3, False, False, [PAY_APPLIED], "#blue", {}, {}),
+    (PAY_APPLIED, "Applied", 4, False, True, [], "#green", {}, {}),
+    (PAY_REJECTED, "Rejected", 5, False, True, [PAY_DRAFT], "#red", {}, {}),
+    (PAY_CANCELLED, "Cancelled", 6, False, True, [], "#orange", {}, {}),
+]
+
+# An expense claim is somebody's own money that the company is holding. The
+# clock on `approved` matters as much as the one on approval: a claim approved
+# and never paid is the version of this that quietly damages trust, and nothing
+# else in the system would chase it.
+DEFAULT_EXPENSE_STATES = [
+    (EXP_DRAFT, "Draft", 1, True, False, [EXP_PENDING_APPROVAL, EXP_CANCELLED],
+        "#gray", {}, {}),
+    (EXP_PENDING_APPROVAL, "Pending Approval", 2, False, False,
+        [EXP_APPROVED, EXP_REJECTED], "#yellow", {},
+        {"hours": 72, "escalate_to": "manager"}),
+    (EXP_APPROVED, "Approved", 3, False, False, [EXP_PAID], "#blue", {},
+        {"hours": 168, "escalate_to": "cfo"}),
+    (EXP_PAID, "Paid", 4, False, True, [], "#green", {}, {}),
+    (EXP_REJECTED, "Rejected", 5, False, True, [EXP_DRAFT], "#red", {}, {}),
+    (EXP_CANCELLED, "Cancelled", 6, False, True, [], "#orange", {}, {}),
+]
+
 #: {workflow_type: states} — provisioning seeds each independently, so a tenant
 #: created before a workflow existed gains it on the next run.
 DEFAULT_WORKFLOWS = {
@@ -146,6 +253,11 @@ DEFAULT_WORKFLOWS = {
     "invoice": DEFAULT_INVOICE_STATES,
     "purchase_order": DEFAULT_PURCHASE_ORDER_STATES,
     "payment": DEFAULT_PAYMENT_STATES,
+    "inventory_adjustment": DEFAULT_INVENTORY_ADJUSTMENT_STATES,
+    "vendor_return": DEFAULT_VENDOR_RETURN_STATES,
+    "headcount_request": DEFAULT_HEADCOUNT_STATES,
+    "payroll_change_request": DEFAULT_PAYROLL_CHANGE_STATES,
+    "expense_reimbursement": DEFAULT_EXPENSE_STATES,
 }
 
 # (policy_name, priority, rule_config) — highest priority matching rule wins.
