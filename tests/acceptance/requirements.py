@@ -169,9 +169,16 @@ REQUIREMENTS: List[Requirement] = [
         text="Test pack: regression checklist.",
         status=PARTIAL,
         tests=[],
-        note="No checklist document. Largely served by the suite running in "
-             "full plus scripts/verify_deployment.py, which fails on the "
-             "conditions a checklist would ask a human to eyeball.",
+        note="The document now exists: docs/REGRESSION_CHECKLIST.md. It "
+             "deliberately contains nothing CI or verify_deployment.py already "
+             "checks — only what needs a real third party, a real browser or a "
+             "person: SMTP actually delivering, QuickBooks against real Intuit, "
+             "the crons being installed at all, console errors tsc cannot see, "
+             "and a restore having been performed once. Still partial, and "
+             "permanently so: every item on it is un-automatable by "
+             "construction, so nothing can prove it was followed. A checklist "
+             "is evidence that somebody thought about what the suite cannot "
+             "reach, never evidence that anybody looked.",
     ),
     Requirement(
         id="DOD-6c", line=21,
