@@ -13,7 +13,7 @@ psycopg2-binary>=2.9.10,<3
 alembic>=1.14,<2
 
 # Authentication & security
-python-jose[cryptography]>=3.3,<4
+python-jose[cryptography]>=3.5.0,<4
 passlib[bcrypt]>=1.7.4,<2
 # TOTP for multi-factor auth. A standard implementation on purpose —
 # hand-rolled crypto in an authentication path is not a saving.
