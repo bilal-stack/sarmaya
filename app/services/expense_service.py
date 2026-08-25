@@ -40,6 +40,8 @@ from app.models.hr import (
 from app.services import sod
 from app.services.audit import log_audit
 from app.services.notification_service import NotificationService
+from app.services.integration_posting_service import JournalPostingService
+from app.models.integration import SOURCE_EXPENSE_REIMBURSEMENT
 from app.services.workflow import _enter_state
 from app.utils.datetime_helpers import utc_now, to_utc, make_naive
 
@@ -291,6 +293,14 @@ class ExpenseService:
             object_id=claim.id, action="paid",
             workflow_type=WORKFLOW_TYPE, workflow_step=EXP_PAID,
         )
+
+        # Opportunistic, same as the payment call site — a no-op for every
+        # tenant with no accounting system connected. See
+        # JournalPostingService.enqueue.
+        JournalPostingService(self.db).enqueue(
+            SOURCE_EXPENSE_REIMBURSEMENT, claim, current_user
+        )
+
         self.db.commit()
         self.db.refresh(claim)
         return claim

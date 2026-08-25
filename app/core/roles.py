@@ -123,6 +123,14 @@ PERM_INSPECT_GOODS = "inventory.inspect"
 PERM_MANAGE_RETURNS = "inventory.manage_returns"
 PERM_APPROVE_RETURN = "inventory.approve_return"
 
+# Integration Hub. Connecting or disconnecting touches OAuth credentials for
+# the tenant's own external accounting system, so this stays admin-only —
+# view is a separate, wider grant for the roles that already read financial
+# reconciliation (CFO, Auditor), matching how bank-statement reconciliation
+# and hr.view_compensation are already split between "reads" and "acts".
+PERM_VIEW_INTEGRATIONS = "integrations.view"
+PERM_MANAGE_INTEGRATIONS = "integrations.manage"
+
 # Role -> permission keys (admin has ALL permissions)
 ROLE_PERMISSIONS = {
     ADMIN: [
@@ -163,6 +171,8 @@ ROLE_PERMISSIONS = {
         PERM_INSPECT_GOODS,
         PERM_MANAGE_RETURNS,
         PERM_APPROVE_RETURN,
+        PERM_VIEW_INTEGRATIONS,
+        PERM_MANAGE_INTEGRATIONS,
         # Payments - ALL (self-release is still refused by SoD)
         PERM_VIEW_PAYMENT,
         PERM_PREPARE_PAYMENT,
@@ -291,6 +301,9 @@ ROLE_PERMISSIONS = {
         PERM_APPROVE_PAYROLL_CHANGE,
         PERM_APPROVE_EXPENSE,
         PERM_CLAIM_EXPENSE,
+        # Sees whether the connected accounting system is actually receiving
+        # postings; does not connect or disconnect it.
+        PERM_VIEW_INTEGRATIONS,
     ],
     APPROVER: [
         PERM_VIEW_INVOICE,
@@ -318,6 +331,9 @@ ROLE_PERMISSIONS = {
         # that cannot be asked against masked figures.
         PERM_VIEW_HR,
         PERM_VIEW_COMPENSATION,
+        # Whether the client's own ledger is actually receiving postings is
+        # an audit-relevant question.
+        PERM_VIEW_INTEGRATIONS,
     ],
     SYSTEM: [
         PERM_VIEW_INVOICE,

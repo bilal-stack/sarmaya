@@ -10,7 +10,7 @@ than leaving a document that claims coverage it lost two refactors ago.
 
 Line numbers refer to `build-book.txt`.
 
-**40 covered · 7 partial · 1 not covered** out of 48 tracked requirements.
+**40 covered · 8 partial · 0 not covered** out of 48 tracked requirements.
 
 | ID | Requirement | Line | Status | Proven by |
 | --- | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ Line numbers refer to `build-book.txt`.
 | DOD-2 | All policy checks implemented with a versioned rules schema and deterministic outputs. | 17 | covered | `tests/integration/test_policy_eval.py`<br>`tests/integration/test_policy_simulator.py`<br>`tests/integration/test_config_versioning.py` |
 | DOD-3 | Decision Inbox supports every work item type in that variant. | 18 | covered | `tests/integration/test_decision_inbox.py` |
 | DOD-4 | Reports and dashboards shipped and validated against a seed dataset. | 19 | covered | `tests/integration/test_dashboards.py` |
-| DOD-5 | Integration connectors implemented with retries, idempotency, dead-letter queues and reconciliation records. | 20 | **none** | — |
+| DOD-5 | Integration connectors implemented with retries, idempotency, dead-letter queues and reconciliation records. | 20 | partial | `tests/integration/test_integration_hub.py` |
 | DOD-6a | Test pack: acceptance tests (Given/When/Then). | 21 | partial | `tests/acceptance/test_requirements_map.py` |
 | DOD-6b | Test pack: regression checklist. | 21 | partial | — |
 | DOD-6c | Test pack: performance smoke tests. | 21 | covered | `tests/integration/test_performance_smoke.py` |
@@ -66,9 +66,9 @@ Line numbers refer to `build-book.txt`.
 ## Where it is not covered
 
 **DOD-5 — Integration connectors implemented with retries, idempotency, dead-letter queues and reconciliation records.**  
-***none** (build-book.txt line 20)*
+*partial (build-book.txt line 20)*
 
-Integration Hub is not built. The notification outbox already has the retry/backoff/give-up shape a webhook sender would reuse, but nothing is connected to anything.
+Built for QuickBooks Online: retries with backoff, idempotency in three layers (a unique constraint, the connector's DocNumber check, and a savepoint on enqueue), and failed posts held as dead letters that a human retries without losing the attempt history. Partial on two counts, both deliberate. 'Connectors' is plural and only one exists — Xero and SAP are deferred until the interface has been shaped by a second real integration (DR-049). And 'reconciliation records' is met only as far as the anchor: every posted entry stores the provider's own transaction id, but nothing yet reports Sarmaya's posts against the client's books side by side.
 
 **DOD-6a — Test pack: acceptance tests (Given/When/Then).**  
 *partial (build-book.txt line 21)*

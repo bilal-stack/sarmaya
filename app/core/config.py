@@ -175,7 +175,25 @@ class Settings(BaseSettings):
     GOOGLE_CLOUD_LOCATION: str = "us"  # 'us', 'eu', etc.
     GOOGLE_DOCUMENT_AI_PROCESSOR_ID: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Path to service account JSON
-    
+
+    # Integration Hub — QuickBooks Online.
+    # Sarmaya's own app credentials (the one app registered in Intuit's
+    # developer portal), not a tenant's — the same shape as OPENAI_API_KEY
+    # being Sarmaya's key rather than the caller's. A tenant's own connection
+    # is per-row state in IntegrationConnection, not a setting here.
+    QBO_CLIENT_ID: str = ""
+    QBO_CLIENT_SECRET: str = ""
+    QBO_ENVIRONMENT: str = "sandbox"  # 'sandbox' | 'production' — picks the API host
+    #: Where Intuit redirects the browser after consent. Must exactly match
+    #: what is registered in the Intuit developer portal for this app, or the
+    #: authorization step is refused before Sarmaya ever sees a code.
+    QBO_REDIRECT_URI: str = ""
+
+    #: Where the browser lands after the OAuth callback finishes — the
+    #: callback route redirects here rather than returning JSON, since its
+    #: caller at that point is a browser mid-navigation, not a fetch client.
+    FRONTEND_URL: str = "http://localhost:9002"
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _parse_origins(cls, v):

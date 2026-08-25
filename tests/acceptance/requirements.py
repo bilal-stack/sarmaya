@@ -141,11 +141,19 @@ REQUIREMENTS: List[Requirement] = [
         id="DOD-5", line=20,
         text="Integration connectors implemented with retries, idempotency, "
              "dead-letter queues and reconciliation records.",
-        status=NONE,
-        tests=[],
-        note="Integration Hub is not built. The notification outbox already "
-             "has the retry/backoff/give-up shape a webhook sender would "
-             "reuse, but nothing is connected to anything.",
+        status=PARTIAL,
+        tests=["tests/integration/test_integration_hub.py"],
+        note="Built for QuickBooks Online: retries with backoff, idempotency "
+             "in three layers (a unique constraint, the connector's DocNumber "
+             "check, and a savepoint on enqueue), and failed posts held as "
+             "dead letters that a human retries without losing the attempt "
+             "history. Partial on two counts, both deliberate. 'Connectors' is "
+             "plural and only one exists — Xero and SAP are deferred until the "
+             "interface has been shaped by a second real integration (DR-049). "
+             "And 'reconciliation records' is met only as far as the anchor: "
+             "every posted entry stores the provider's own transaction id, but "
+             "nothing yet reports Sarmaya's posts against the client's books "
+             "side by side.",
     ),
     Requirement(
         id="DOD-6a", line=21,

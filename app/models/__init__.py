@@ -32,6 +32,10 @@ from app.models.employee import Employee
 from app.models.hr import (
     HeadcountRequest, OnboardingTask, PayrollChangeRequest, ExpenseReimbursement,
 )
+from app.models.integration import (
+    IntegrationConnection, IntegrationAccountSnapshot, IntegrationPartySnapshot,
+    IntegrationVendorMapping, IntegrationJournalPost,
+)
 from app.models.inventory_control import (
     InventoryAdjustment, InventoryAdjustmentLine, QualityCheck,
     VendorReturn, VendorReturnLine,
@@ -80,6 +84,11 @@ __all__ = [
     "OnboardingTask",
     "PayrollChangeRequest",
     "ExpenseReimbursement",
+    "IntegrationConnection",
+    "IntegrationAccountSnapshot",
+    "IntegrationPartySnapshot",
+    "IntegrationVendorMapping",
+    "IntegrationJournalPost",
     "Item",
     "StockLocation",
     "StockMovement",

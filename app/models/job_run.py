@@ -23,6 +23,7 @@ from app.models.base import BaseModel
 #: need a migration to become visible to the monitor.
 JOB_NOTIFICATIONS = "dispatch_notifications"
 JOB_WORKFLOW_TIMERS = "run_workflow_timers"
+JOB_INTEGRATION_POSTS = "dispatch_integration_posts"
 
 #: How often each job is expected to run, in minutes. The monitor compares the
 #: last run against this to decide whether a job is late, so the cadence in the
@@ -32,6 +33,10 @@ JOB_WORKFLOW_TIMERS = "run_workflow_timers"
 EXPECTED_INTERVAL_MINUTES = {
     JOB_NOTIFICATIONS: 1,
     JOB_WORKFLOW_TIMERS: 60,
+    #: Not an SLA escalation racing a clock like the two above, but "notify
+    #: the external ledger" implies soon rather than eventually — 5 minutes
+    #: is short enough that a stalled queue is caught the same working day.
+    JOB_INTEGRATION_POSTS: 5,
 }
 
 STATUS_OK = "ok"
