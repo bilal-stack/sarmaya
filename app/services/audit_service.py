@@ -17,6 +17,7 @@ from app.core.roles import (
     PERM_VIEW_PAYMENT,
     PERM_VIEW_BANK_STATEMENT,
     PERM_VIEW_REQUISITION,
+    PERM_VIEW_INTEGRATIONS,
 )
 
 # object_type -> permission required to view its timeline. Live Audit Mode is
@@ -54,6 +55,9 @@ _VIEW_PERMISSION = {
     "onboarding_task": PERM_VIEW_HR,
     "payroll_change_request": PERM_VIEW_HR,
     "expense_reimbursement": PERM_VIEW_HR,
+    # A posted journal entry's history reads with the same permission as the
+    # connection it posts through, not audit.view.
+    "integration_journal_post": PERM_VIEW_INTEGRATIONS,
 }
 
 

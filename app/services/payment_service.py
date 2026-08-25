@@ -40,6 +40,8 @@ from app.services.workflow import transition_state
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
 from app.services.notification_service import NotificationService
+from app.services.integration_posting_service import JournalPostingService
+from app.models.integration import SOURCE_PAYMENT
 from app.services import sod
 from app.services.delegation import resolve_permission
 from app.utils.datetime_helpers import utc_now
@@ -320,6 +322,14 @@ class PaymentService:
                 "invoices_settled": settled,
             },
         )
+
+        # Opportunistic: a no-op for every tenant that has not connected an
+        # accounting system, which today is all of them. See
+        # JournalPostingService.enqueue for why this can never block or delay
+        # a release — queued in this same transaction, so it commits with the
+        # release or not at all.
+        JournalPostingService(self.db).enqueue(SOURCE_PAYMENT, payment, current_user)
+
         self.db.commit()
         self.db.refresh(payment)
         return self._with_names(payment)

@@ -126,3 +126,36 @@ services:
         sync: false
       - key: DEBUG
         value: "false"
+
+  # Drains the outbound queue to each tenant's own accounting system.
+  # Without it, a released payment queues a journal entry that never reaches
+  # the client's books — and nothing in Sarmaya looks wrong, because the
+  # payment itself released fine. That is the failure mode the whole outbox
+  # exists to make visible rather than silent.
+  #
+  # Five minutes, not the notification job's one: this is not an SLA racing a
+  # clock, but "tell the ledger" implies soon rather than eventually, and five
+  # minutes catches a stalled queue the same working day. QBO_* are unset on a
+  # deployment with nothing connected, where every run is a no-op by design.
+  - type: cron
+    name: sarmaya-integration-posts
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    schedule: "*/5 * * * *"
+    dockerCommand: python -m scripts.dispatch_integration_posts --quiet
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: QBO_CLIENT_ID
+        sync: false
+      - key: QBO_CLIENT_SECRET
+        sync: false
+      - key: QBO_ENVIRONMENT
+        sync: false
+      - key: QBO_REDIRECT_URI
+        sync: false
+      - key: DEBUG
+        value: "false"

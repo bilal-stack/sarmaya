@@ -62,6 +62,14 @@ CALLER_COMMITS = {
     "app/services/mfa_service.py::_spend_recovery_code",
     "app/services/soft_delete.py::withdraw",
     "app/services/soft_delete.py::restore",
+    # drain() sweeps every due post and commits once for the whole run,
+    # exactly as run_escalations/run_reminders do above — _attempt,
+    # _reschedule and _mark_expired each write an audit entry but rely on
+    # drain()'s single end-of-loop commit. Checked: drain() commits after
+    # the loop that calls all three.
+    "app/services/integration_posting_service.py::_attempt",
+    "app/services/integration_posting_service.py::_reschedule",
+    "app/services/integration_posting_service.py::_mark_expired",
 }
 
 

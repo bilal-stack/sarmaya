@@ -1,0 +1,120 @@
+name: CI
+
+# Ruff and the test suite already existed and enforced nothing: a change could
+# land breaking either and nobody would know until somebody ran them by hand.
+# This is the thing that makes "1167 tests passing" a fact about the branch
+# rather than a fact about whoever last remembered to run them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The suite is Postgres-only by design — the models use Postgres column
+  # types and the isolation tests need real RLS, so there is no SQLite path
+  # to fall back to. See tests/integration/conftest.py.
+  POSTGRES_PASSWORD: ci-not-a-secret
+  APP_ROLE_PASSWORD: ci-not-a-secret
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-not-a-secret
+          POSTGRES_DB: os
+        ports:
+          - 5432:5432
+        # Without this the first connection races the container's own startup.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the version the dependency ranges were widened for — see
+          # the note at the top of requirements.txt.
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Create the test database and the least-privilege role
+        # Two roles, because the suite genuinely needs both. Tests connect as
+        # the owner to run create_all and to seed across tenants; the RLS
+        # tests connect as os_app (NOSUPERUSER, NOBYPASSRLS) precisely so the
+        # policies are enforced rather than bypassed. A CI database with only
+        # a superuser would let every isolation test pass vacuously.
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 <<SQL
+          CREATE DATABASE os_test;
+          CREATE ROLE os_app LOGIN PASSWORD '${{ env.APP_ROLE_PASSWORD }}';
+          SQL
+          psql -h localhost -U postgres -d os_test -v ON_ERROR_STOP=1 <<SQL
+          GRANT CONNECT ON DATABASE os_test TO os_app;
+          GRANT USAGE ON SCHEMA public TO os_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO os_app;
+          -- create_all builds the tables after this step runs, so the grant
+          -- above catches nothing on its own. This is the one that matters.
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO os_app;
+          SQL
+
+      - name: Lint
+        # Before the tests: a lint failure is seconds, the suite is minutes,
+        # and there is no reason to wait for the slow answer to get the fast one.
+        run: ruff check .
+
+      - name: Check the migrations apply to an empty database
+        # The suite builds its schema with create_all, not Alembic, so a broken
+        # migration passes every test and fails on deploy instead. This is the
+        # only thing that exercises the migration chain, and it runs against
+        # its own database so it cannot disturb the one the tests use.
+        env:
+          PGPASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          ADMIN_DATABASE_URL: postgresql://postgres:${{ env.POSTGRES_PASSWORD }}@localhost:5432/os_migrations
+          DATABASE_URL: postgresql://os_app:${{ env.APP_ROLE_PASSWORD }}@localhost:5432/os_migrations
+          SECRET_KEY: ci-only-not-a-real-key-0123456789abcdef
+          DEBUG: 'true'
+        run: |
+          psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE DATABASE os_migrations;"
+          alembic upgrade head
+
+      - name: Test
+        env:
+          # The owner connection: conftest runs create_all through this.
+          ADMIN_DATABASE_URL: postgresql://postgres:${{ env.POSTGRES_PASSWORD }}@localhost:5432/os
+          TEST_DATABASE_URL: postgresql://postgres:${{ env.POSTGRES_PASSWORD }}@localhost:5432/os_test
+          # The app connection. The RLS tests read the credentials from here and
+          # swap in the test database's name, so this must be os_app — pointing
+          # it at the superuser would silently disable the isolation checks.
+          DATABASE_URL: postgresql://os_app:${{ env.APP_ROLE_PASSWORD }}@localhost:5432/os
+          SECRET_KEY: ci-only-not-a-real-key-0123456789abcdef
+          # Matches how the suite runs locally, and it has to: with DEBUG off,
+          # _refuse_insecure_production rejects the default CORS_ORIGINS for
+          # still listing localhost, and settings fail to import — which would
+          # fail every test in the suite for a reason that has nothing to do
+          # with the code under test. That validator guards a deploy, and CI
+          # is not one.
+          DEBUG: 'true'
+        run: pytest -q -p no:warnings

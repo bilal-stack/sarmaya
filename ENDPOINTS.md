@@ -1356,3 +1356,69 @@ GET /api/v1/dashboard/expense-exceptions?days=   # waived rules, and employees s
 All three export like every other report (`/export?format=csv|html|json`), and
 all three HR workflows reach the Decision Inbox with SLAs and escalation.
 
+
+---
+
+## Integration Hub (added 2026-08)
+
+**Sarmaya pushes facts, and pulls only configuration.** A journal entry is
+posted *after* money has already moved — a payment released, an expense claim
+paid — so the client's ledger is told what happened, never asked to approve
+anything. The only thing pulled back is reference data (chart of accounts,
+vendor and customer list), on demand, as a wholesale replace. There is no
+continuous two-way sync and nothing to reconcile: Sarmaya never edits a record
+in the client's books, so the two copies cannot disagree about who changed what.
+
+**QuickBooks Online is the only provider today.** The interface
+(`FinanceConnector`) is provider-neutral and resolved per connection from
+`connection.provider`, not from a global setting — two tenants can be on
+different providers, or none. Xero and SAP are deliberately unbuilt; see DR-049.
+
+**Posting is opportunistic and can never block a payment.** A tenant with no
+connection, a connection that is not `connected`, or one whose posting accounts
+have not been chosen yet queues nothing and is not warned. Today that is every
+tenant.
+
+```bash
+POST /api/v1/integrations/{provider}/connect      # {redirect_uri?}
+     # -> { "authorization_url" } — navigate the browser there with
+     #    window.location.href, NOT fetch: the browser has to leave the SPA
+GET  /api/v1/integrations/{provider}/callback     # ?state=&code=&realmId=
+     # NO Authorization header — the caller is Intuit's redirect, not the
+     # frontend. The tenant comes entirely from `state`. Answers with a 302
+     # back to /ai-tools/system/integrations?connected= or ?error=, because a
+     # browser mid-navigation cannot read a JSON body
+POST /api/v1/integrations/{provider}/disconnect   # revokes upstream, wipes both tokens
+POST /api/v1/integrations/{provider}/refresh      # re-pull accounts + parties (replace)
+GET  /api/v1/integrations/{provider}/status       # -> includes ready_to_post
+POST /api/v1/integrations/{provider}/default-accounts
+     # {liability_account_external_id, bank_account_external_id}
+     # Required before anything can post. Validated against the last pull —
+     # guessing "Accounts Payable" by name posts to the wrong account in a
+     # chart that spells it differently
+GET  /api/v1/integrations/{provider}/accounts
+GET  /api/v1/integrations/{provider}/parties?type=vendor|customer
+POST /api/v1/integrations/{provider}/vendors/{vendor_id}/map   # {external_party_id}
+     # Optional. An unmapped vendor still posts, just without an Entity tag
+GET  /api/v1/integrations/{provider}/posts?status=pending|posted|failed
+POST /api/v1/integrations/{provider}/posts/{post_id}/retry
+     # Only a failed post. `attempts` is NOT reset — the failure history
+     # survives for whoever asks how long this went unnoticed
+```
+
+Status codes beyond the usual: **424** the provider's own auth failed (the
+connection needs reconnecting), **502** the provider could not be reached.
+
+`integrations.view` reads; `integrations.manage` connects, disconnects, maps and
+retries. Admin holds both; CFO and Auditor view only — connecting touches OAuth
+credentials for the tenant's external accounting system.
+
+**The queue drains on a schedule**, not in the request:
+
+```bash
+python -m scripts.dispatch_integration_posts   # every 5 minutes
+```
+
+It reports on the System Health page like the other scheduled jobs
+(`JOB_INTEGRATION_POSTS`). Without it running, entries queue and never reach the
+client's books.
