@@ -10,3 +10,13 @@
 -r requirements.txt
 
 ruff>=0.6,<1
+
+# Regenerates requirements.lock from requirements.txt:
+#
+#   pip-compile --strip-extras --output-file=requirements.lock requirements.txt
+#
+# The lock is what the Dockerfile installs, so the image is built from exact
+# versions rather than from whatever the ranges resolved to that morning. CI
+# re-runs the command and fails if the result differs, which is what stops the
+# two files drifting apart silently.
+pip-tools>=7.4,<8

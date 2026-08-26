@@ -15,8 +15,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Requirements first, so a code change does not reinstall the world.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+#
+# The lock, not requirements.txt: the ranges there are deliberately wide (see
+# the note at the top of that file), which means two builds a month apart can
+# resolve different transitive versions with nothing recording what changed.
+# requirements.lock pins all of it, and CI fails if the two have drifted apart.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 

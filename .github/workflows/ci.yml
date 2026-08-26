@@ -84,6 +84,22 @@ jobs:
         # and there is no reason to wait for the slow answer to get the fast one.
         run: ruff check .
 
+      - name: Check the lockfile matches requirements.txt
+        # The Dockerfile installs requirements.lock, so a change to
+        # requirements.txt that never reached the lock would not affect the
+        # image at all — the dependency would appear to be added and quietly
+        # not be. Regenerating and diffing is the only thing that catches it.
+        run: |
+          cp requirements.lock requirements.lock.committed
+          pip-compile --quiet --strip-extras \
+            --output-file=requirements.lock requirements.txt
+          if ! diff -u requirements.lock.committed requirements.lock; then
+            echo
+            echo "requirements.lock is out of date. Regenerate it with:"
+            echo "  pip-compile --strip-extras --output-file=requirements.lock requirements.txt"
+            exit 1
+          fi
+
       - name: Check the migrations apply to an empty database
         # The suite builds its schema with create_all, not Alembic, so a broken
         # migration passes every test and fails on deploy instead. This is the
