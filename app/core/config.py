@@ -156,6 +156,46 @@ class Settings(BaseSettings):
     GOOGLE_AI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"  # override in .env (e.g. gemini-2.5-pro)
 
+    # --- Neon ----------------------------------------------------------------
+    # Written by `neon env pull`, which `neon link` and `neon checkout` run for
+    # you. Declared here because this model forbids extra keys, and refusing to
+    # start over a variable the platform's own tooling wrote is a bad trade —
+    # but declared explicitly rather than by loosening the model, because
+    # "forbid" is what catches a typo'd setting name instead of silently
+    # ignoring it.
+    #
+    # Neon serves two endpoints per branch. The pooled one (`-pooler`, PgBouncer
+    # in transaction mode) is what the app should use; this codebase is already
+    # built for it, because `set_tenant_context` sets the GUC transaction-locally
+    # and re-applies it at each transaction start rather than once per session.
+    # The unpooled one is the direct endpoint, which is what DDL needs — so
+    # ADMIN_DATABASE_URL, used only by Alembic, points there.
+    #
+    # NOTE: Neon's own DATABASE_URL is the *owner* role. This app must not run
+    # as an owner — see the comment on DATABASE_URL above and the `os_app` role
+    # in the README. After `neon env pull`, DATABASE_URL has to be repointed at
+    # the least-privilege role, or RLS is enforced against nobody.
+    NEON_BRANCH: str = ""
+    DATABASE_URL_UNPOOLED: str = ""
+
+    #: Which database the test suite runs against. The app itself never reads
+    #: this — tests/integration/conftest.py takes it straight from the
+    #: environment — but it is declared here because this model forbids extra
+    #: keys, so putting it in `.env` (rather than exporting it per shell) would
+    #: otherwise stop the app booting. Worth having in `.env`: unset, the suite
+    #: derives its database from ADMIN_DATABASE_URL, which now points at a
+    #: hosted Neon branch.
+    TEST_DATABASE_URL: str = ""
+
+    #: The least-privilege role against the test database, for the RLS tests —
+    #: the ones that must connect as a role that cannot bypass RLS, or they
+    #: pass while proving nothing. Previously derived by taking DATABASE_URL's
+    #: credentials and swapping in the test database's name, which held only
+    #: while both were on the same server. Once DATABASE_URL points at a hosted
+    #: branch and the test database stays local, they are two different things
+    #: and have to be said separately.
+    TEST_APP_DATABASE_URL: str = ""
+
     # File Storage
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE_MB: int = 10
