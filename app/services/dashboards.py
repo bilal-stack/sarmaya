@@ -560,7 +560,9 @@ class DashboardService:
 
         # Rework: every time an invoice was sent back rather than forward.
         rework = (
-            self.db.query(AuditLog.action, AuditLog.comment, AuditLog.after_value)
+            self.db.query(
+                AuditLog.object_id, AuditLog.comment, AuditLog.after_value,
+            )
             .filter(
                 AuditLog.object_type == "invoice",
                 AuditLog.action.in_(["rejected", "approval_blocked"]),
@@ -569,9 +571,11 @@ class DashboardService:
             .all()
         )
         drivers: Dict[str, int] = {}
-        for _action, comment, after in rework:
+        reworked_invoices = set()
+        for object_id, comment, after in rework:
             reason = (after or {}).get("reason") or comment or "no reason given"
             drivers[reason[:120]] = drivers.get(reason[:120], 0) + 1
+            reworked_invoices.add(object_id)
 
         captured = self.db.query(func.count()).select_from(created).scalar() or 0
 
@@ -585,9 +589,16 @@ class DashboardService:
                 # drags an average somewhere no real invoice ever was.
                 "median": round(float(row.median), 1) if row.median is not None else None,
             },
+            # Two separate figures, because one invoice rejected three times is
+            # three events and one affected invoice. The rate is over affected
+            # invoices, so it stays a percentage somebody can read — counting
+            # events against invoices produced 200%, which is arithmetically
+            # true and not a rate of anything.
             "rework_events": len(rework),
+            "invoices_reworked": len(reworked_invoices),
             "rework_rate_pct": (
-                round(len(rework) * 100.0 / captured, 1) if captured else 0.0
+                round(len(reworked_invoices) * 100.0 / captured, 1)
+                if captured else 0.0
             ),
             "rework_drivers": sorted(
                 ({"reason": k, "count": v} for k, v in drivers.items()),
