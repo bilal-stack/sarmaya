@@ -6,19 +6,18 @@ import logging
 import uuid
 from app.utils.datetime_helpers import utc_now
 from app.core.config import settings
+from app.core.logging_config import (
+    configure_logging, new_request_id, request_id_var,
+)
 
 # Configure logging once, at import, so module-level `logger` calls actually
 # surface. Without this the root logger has no handler under uvicorn and
 # anything below WARNING is silently dropped — which is why parts of the code
 # had fallen back to print().
-logging.basicConfig(
-    level=logging.DEBUG if settings.DEBUG else logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
-# Third-party noise stays at WARNING regardless.
-for _noisy in ("httpx", "httpcore", "openai", "anthropic", "urllib3", "PIL"):
-    logging.getLogger(_noisy).setLevel(logging.WARNING)
+#
+# Readable lines in development, one JSON object per line in production, and
+# every record carries the request id. See app/core/logging_config.py.
+configure_logging(debug=settings.DEBUG)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +86,28 @@ async def root():
     return RedirectResponse(url="/api/v1")
 
 
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Give every request an id, and put it on every log line it produces.
+
+    Honours an inbound `X-Request-ID` so a caller that already has one — a
+    gateway, the frontend, another service — keeps the same thread through our
+    logs rather than starting a second one nobody can join up. Echoed on the
+    response so the client can quote it.
+    """
+    request_id = request.headers.get("X-Request-ID") or new_request_id()
+    token = request_id_var.set(request_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        # Reset rather than leave it set: the context is reused across
+        # requests, and a leaked id would label the next request's logs with
+        # the previous request's identity.
+        request_id_var.reset(token)
+
+
 # -----------------------
 # Global 500 Exception Handler
 # -----------------------
@@ -96,9 +117,12 @@ async def internal_exception_handler(request: Request, exc: Exception):
     Catch-all handler for unhandled exceptions to return a consistent JSON payload
     without leaking internals. Full traceback is logged server-side with a correlation id.
     """
-    # Prefer any incoming request id header so client/server can correlate logs
-    incoming_req_id = request.headers.get("X-Request-ID")
-    correlation_id = incoming_req_id or str(uuid.uuid4())
+    # The id the middleware already put on every log line this request
+    # produced. Previously this handler minted its own, which meant the id in
+    # the client's error payload matched exactly one log entry — this one —
+    # and nothing that led up to it. The fallback covers a failure early
+    # enough that the middleware never ran.
+    correlation_id = request_id_var.get() or str(uuid.uuid4())
 
     # Timestamp in UTC ISO format
     ts = utc_now().isoformat()
