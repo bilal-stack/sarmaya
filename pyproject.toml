@@ -2,7 +2,10 @@
 # Deliberately narrow. The point is to catch new mistakes mechanically, not to
 # reformat a working codebase — a first run that demands three hundred edits is
 # a linter people turn off.
-target-version = "py312"
+# Matches the Dockerfile, CI and the development venv. It said py312 while all
+# three had moved to 3.14, which quietly narrowed what ruff would flag — it
+# holds back rules and fixes that depend on the target being new enough.
+target-version = "py314"
 line-length = 100
 
 exclude = [

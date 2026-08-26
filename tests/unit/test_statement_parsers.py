@@ -112,6 +112,56 @@ class TestCamt053:
             parse_camt053("<Document><Something/></Document>")
 
 
+class TestAHostileStatementCannotExhaustTheParser:
+    """A statement is a file somebody uploaded, so it is untrusted input.
+
+    `xml.etree` expands internal entities. Measured: the payload below is 481
+    bytes and expands to 300,000 characters, and the upload size cap is no
+    defence because the point of the attack is that the file is tiny.
+
+    It is not unbounded — libexpat refuses past a certain amplification factor,
+    which stops the classic billion-laughs on its own. These tests exist
+    because that limit belongs to whichever libexpat the base image ships, and
+    a security property that depends on a version nobody tracks is one worth
+    holding down here as well.
+    """
+
+    #: Five levels, each ten copies of the last. Deliberately under the
+    #: amplification limit — a payload the runtime rejects on its own would
+    #: pass these tests whether or not the guard existed, which is the one
+    #: thing they must not do.
+    BILLION_LAUGHS = """<?xml version="1.0"?>
+<!DOCTYPE lolz [
+  <!ENTITY lol "lol">
+  <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+  <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
+  <!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">
+]>
+<Document>&lol5;</Document>"""
+
+    def test_an_entity_bomb_is_refused_rather_than_expanded(self):
+        with pytest.raises(StatementParseError, match="DOCTYPE"):
+            parse_camt053(self.BILLION_LAUGHS)
+
+    def test_it_is_refused_through_the_dispatcher_too(self):
+        """Not only when somebody names the format directly — the upload path
+        detects the format and routes it."""
+        with pytest.raises(StatementParseError):
+            parse_statement(self.BILLION_LAUGHS, "camt053")
+
+    def test_a_lowercase_doctype_is_refused_as_well(self):
+        """The declaration is `<!DOCTYPE` by the spec, and nothing stops a
+        hostile file writing it otherwise."""
+        with pytest.raises(StatementParseError, match="DOCTYPE"):
+            parse_camt053(self.BILLION_LAUGHS.replace("<!DOCTYPE", "<!doctype"))
+
+    def test_a_real_statement_still_parses(self):
+        """The guard must not cost anything a bank actually sends."""
+        assert parse_camt053(CAMT).lines
+
+
 class TestMt940:
 
     def test_it_reads_the_header_and_balances(self):
