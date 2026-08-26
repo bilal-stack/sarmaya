@@ -9,6 +9,20 @@ from app.services.ocr.base import OCRProvider
 
 logger = logging.getLogger(__name__)
 
+#: Connect and read timeouts, in seconds.
+#:
+#: `requests` has no default timeout at all — a call without one blocks until
+#: the peer closes, which may be never. That matters here more than anywhere
+#: else in this codebase: extraction runs *inside* the upload request, so a
+#: hung OCR call holds a worker for as long as the provider is unresponsive,
+#: and enough of them stop the API answering anything.
+#:
+#: Read is generous because OCR of a multi-page scan genuinely takes time; a
+#: 60-second wait is a slow upload, and a 600-second one is an outage nobody
+#: gets told about. Connect is short because failing to establish a connection
+#: at all is not something waiting fixes.
+_TIMEOUT_SECONDS = (5, 60)
+
 
 class OCRSpaceProvider(OCRProvider):
     """OCR.space API implementation"""
@@ -33,7 +47,8 @@ class OCRSpaceProvider(OCRProvider):
                         'detectOrientation': True,
                         'scale': True,
                         'OCREngine': 2,  # Engine 2 is better for invoices
-                    }
+                    },
+                    timeout=_TIMEOUT_SECONDS,
                 )
             
             response.raise_for_status()

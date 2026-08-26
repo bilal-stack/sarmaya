@@ -277,9 +277,22 @@ class PaymentService:
         self.db.add(payment)
         self.db.flush()
 
+        # One read for the whole run rather than one per line. This loop holds
+        # the release transaction open while it works, so a query per invoice
+        # is not only slow — it is lock duration on `invoices` and `payments`
+        # growing with the size of the run, and a treasury user settling two
+        # hundred invoices at month end is the ordinary case here.
+        invoice_ids = [line.invoice_id for line in payment.lines]
+        invoices_by_id = {
+            invoice.id: invoice
+            for invoice in self.db.query(Invoice)
+            .filter(Invoice.id.in_(invoice_ids))
+            .all()
+        } if invoice_ids else {}
+
         settled = []
         for line in payment.lines:
-            invoice = self.db.query(Invoice).filter(Invoice.id == line.invoice_id).first()
+            invoice = invoices_by_id.get(line.invoice_id)
             if not invoice:
                 continue
             transition_state(self.db, invoice, InvoiceState.PAID.value, current_user["id"])
