@@ -644,6 +644,22 @@ GET /api/v1/audit/chain/{correlation_id}               # whole transaction story
 POST /api/v1/audit/evidence-pack/{correlation_id}      # generate sealed audit bundle (SHA-256 pack_hash)
 GET  /api/v1/audit/evidence-pack/{correlation_id}      # preview the bundle without recording
 GET  /api/v1/audit/evidence-packs?correlation_id=      # packs generated: when, by whom, with what seal
+
+# The other kind of pack. The one above answers "what happened to this
+# invoice"; this answers "did this control operate", across every record it
+# touched in a window — which is the question an auditor opens with.
+GET  /api/v1/audit/controls                            # what can be evidenced, and what each control is
+POST /api/v1/audit/pack?period_start=&period_end=&control=
+     # control= narrows it to one; omit for all of them. Both dates inclusive.
+     # Reports three numbers per control — applied, blocked, overridden — with
+     # the blocks and overrides sampled and ordinary applications only counted:
+     # an auditor reads the exceptions, and a quarter of approvals would bury
+     # the five records that matter.
+     # An EMPTY result is sealed here rather than refused, the opposite of the
+     # chain pack above. "Nothing was refused this quarter" is a finding over a
+     # well-formed scope; an empty chain pack is a lookup that failed. See
+     # app/services/audit_pack.py.
+     # audit.view only.
 ```
 
 ### Decision Inbox
