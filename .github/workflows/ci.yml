@@ -89,14 +89,22 @@ jobs:
         # requirements.txt that never reached the lock would not affect the
         # image at all — the dependency would appear to be added and quietly
         # not be. Regenerating and diffing is the only thing that catches it.
+        #
+        # `--no-header` on both sides, and it is load-bearing. pip-compile
+        # otherwise records its own invocation in a comment at the top, and
+        # that line varies with how it was called — a run that resolved
+        # entirely from the existing pins writes `--no-index` into it. This
+        # check failed on exactly that once: every package pin identical, one
+        # comment different. A check that fails for a reason unrelated to what
+        # it is checking gets muted, and takes the real signal with it.
         run: |
           cp requirements.lock requirements.lock.committed
-          pip-compile --quiet --strip-extras \
+          pip-compile --quiet --strip-extras --no-header \
             --output-file=requirements.lock requirements.txt
           if ! diff -u requirements.lock.committed requirements.lock; then
             echo
             echo "requirements.lock is out of date. Regenerate it with:"
-            echo "  pip-compile --strip-extras --output-file=requirements.lock requirements.txt"
+            echo "  pip-compile --strip-extras --no-header --output-file=requirements.lock requirements.txt"
             exit 1
           fi
 
