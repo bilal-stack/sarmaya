@@ -23,6 +23,7 @@ from app.models.bank_statement import BankStatement, BankStatementLine
 from app.models.invoice import Invoice
 from app.models.payment import Payment
 from app.models.vendor import Vendor
+from app.models.watchlist_alert import WatchlistAlert
 from app.services.dashboards import DashboardService, _bucket
 from app.utils.datetime_helpers import utc_now, to_utc, make_naive
 
@@ -237,6 +238,197 @@ class TestPolicyOverrides:
         assert result["by_person"][0]["who"] == manager["email"]
         assert result["by_person"][0]["amount"] == 5000
         assert "corrected tax line" in result["recent"][0]["reason"]
+
+
+class TestInvoiceThroughput:
+    def test_it_measures_capture_to_paid_from_the_trail(self, db, tenant, make_user):
+        """Not from a stored duration: the trail is what happened, and a
+        duration column is only as right as the code that last wrote it."""
+        admin = make_user(UserRole.ADMIN)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 1000,
+                           InvoiceState.PAID, vendor=vendor)
+
+        start = _now() - timedelta(days=5)
+        _audit(db, tenant.id, admin, invoice.id, "created", start)
+        _audit(db, tenant.id, admin, invoice.id, "marked_paid",
+               start + timedelta(hours=48))
+
+        result = DashboardService(db).invoice_throughput(admin)
+
+        assert result["captured"] == 1
+        assert result["settled"] == 1
+        assert result["capture_to_paid_hours"]["median"] == pytest.approx(48, abs=0.5)
+
+    def test_rework_is_grouped_by_reason(self, db, tenant, make_user):
+        """A state count reports a re-approved invoice as one approval. The
+        reasons are the only form of this figure anybody can act on."""
+        admin = make_user(UserRole.ADMIN)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 1000,
+                           InvoiceState.APPROVED, vendor=vendor)
+        _audit(db, tenant.id, admin, invoice.id, "created", _now() - timedelta(days=2))
+        _audit(db, tenant.id, admin, invoice.id, "rejected", _now(),
+               comment="Wrong cost centre")
+        _audit(db, tenant.id, admin, invoice.id, "rejected", _now(),
+               comment="Wrong cost centre")
+        _audit(db, tenant.id, admin, invoice.id, "approval_blocked", _now(),
+               after_value={"reason": "sod_self_approval"})
+
+        result = DashboardService(db).invoice_throughput(admin)
+
+        assert result["rework_events"] == 3
+        top = result["rework_drivers"][0]
+        assert top["reason"] == "Wrong cost centre" and top["count"] == 2
+
+    def test_match_rate_is_null_rather_than_invented(self, db, tenant, make_user):
+        """Three-way match is computed on demand and never stored, so there is
+        no record of what an invoice matched when it was approved. A rate
+        recomputed today against goods receipts that have since changed would
+        be a different number wearing the same name."""
+        admin = make_user(UserRole.ADMIN)
+
+        assert DashboardService(db).invoice_throughput(admin)["match_rate_pct"] is None
+
+    def test_no_activity_does_not_divide_by_zero(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        result = DashboardService(db).invoice_throughput(admin)
+        assert result["captured"] == 0
+        assert result["rework_rate_pct"] == 0.0
+        assert result["capture_to_paid_hours"]["median"] is None
+
+
+class TestPaymentRunStatus:
+    def _payment(self, db, tenant, user, state, **kw):
+        payment = Payment(
+            id=uuid.uuid4(), tenant_id=tenant.id,
+            payment_number=f"PAY-{uuid.uuid4().hex[:6]}",
+            payment_date=date(2026, 8, 1), total_amount=Decimal("5000"),
+            current_state=state, prepared_by=user["id"], **kw,
+        )
+        db.add(payment)
+        db.flush()
+        return payment
+
+    def test_it_totals_each_state_with_its_value(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        self._payment(db, tenant, admin, PaymentState.DRAFT)
+        self._payment(db, tenant, admin, PaymentState.DRAFT)
+        self._payment(db, tenant, admin, PaymentState.RELEASED,
+                      released_at=_now(), bank_file_generated_at=_now())
+
+        result = DashboardService(db).payment_run_status(admin)
+
+        states = {r["state"]: r for r in result["by_state"]}
+        assert states["draft"]["count"] == 2
+        assert states["draft"]["value"] == 10000
+
+    def test_a_released_run_with_no_bank_file_is_surfaced(
+        self, db, tenant, make_user
+    ):
+        """Authorised, and nothing has been handed to the bank."""
+        admin = make_user(UserRole.ADMIN)
+        self._payment(db, tenant, admin, PaymentState.RELEASED,
+                      released_at=_now(), bank_file_generated_at=None)
+
+        result = DashboardService(db).payment_run_status(admin)
+
+        assert len(result["awaiting_bank_file"]) == 1
+        assert result["unreconciled_after_release"] == []
+
+    def test_a_released_run_never_seen_on_a_statement_is_aged(
+        self, db, tenant, make_user
+    ):
+        """The closest this system gets to "failed", named for what it
+        observed rather than what it infers."""
+        admin = make_user(UserRole.ADMIN)
+        self._payment(db, tenant, admin, PaymentState.RELEASED,
+                      released_at=_now() - timedelta(days=9),
+                      bank_file_generated_at=_now() - timedelta(days=9))
+
+        rows = DashboardService(db).payment_run_status(admin)["unreconciled_after_release"]
+
+        assert len(rows) == 1
+        assert rows[0]["age_days"] == pytest.approx(9, abs=0.5)
+
+    def test_failed_and_reissued_are_declared_absent_not_zero(
+        self, db, tenant, make_user
+    ):
+        """Reporting zero failures would be read as "none failed" rather than
+        "we cannot see" — Sarmaya never moves money."""
+        admin = make_user(UserRole.ADMIN)
+
+        absent = DashboardService(db).payment_run_status(admin)["not_reported"]
+
+        assert "failed" in absent and "reissued" in absent
+
+    def test_it_reads_with_payments_view_not_the_dashboard_permission(
+        self, db, tenant, make_user
+    ):
+        """A manager can open every invoice this touches and still cannot open
+        a payment run, so they must not read its value here either."""
+        manager = make_user(UserRole.MANAGER)
+        with pytest.raises(PermissionError):
+            DashboardService(db).payment_run_status(manager)
+
+    def test_a_clerk_can_read_it(self, db, tenant, make_user):
+        clerk = make_user(UserRole.AP_CLERK)
+        assert DashboardService(db).payment_run_status(clerk)["by_state"] == []
+
+
+class TestDuplicateAndAnomaly:
+    def test_it_separates_held_back_from_paid_anyway(self, db, tenant, make_user):
+        """"Prevented" is the number most easily overclaimed, so it counts what
+        the flag actually held back rather than what might have been lost."""
+        admin = make_user(UserRole.ADMIN)
+        vendor = _vendor(db, tenant.id)
+        original = _invoice(db, tenant.id, admin["id"], 1000,
+                            InvoiceState.PAID, vendor=vendor)
+
+        _invoice(db, tenant.id, admin["id"], 1000, InvoiceState.CANCELLED,
+                 vendor=vendor, potential_duplicate_id=original.id)
+        _invoice(db, tenant.id, admin["id"], 2000, InvoiceState.PAID,
+                 vendor=vendor, potential_duplicate_id=original.id,
+                 duplicate_acknowledged=True)
+        _invoice(db, tenant.id, admin["id"], 500, InvoiceState.PENDING_APPROVAL,
+                 vendor=vendor, potential_duplicate_id=original.id)
+
+        result = DashboardService(db).duplicate_and_anomaly(admin)
+
+        assert result["flagged"] == 3
+        assert result["stopped"] == 1
+        assert result["paid_anyway"] == 1
+        assert result["still_held"] == 1
+        assert result["value_held_back"] == 1500      # cancelled + still open
+        assert result["value_paid_anyway"] == 2000
+
+    def test_watchlist_hits_split_open_from_acknowledged(
+        self, db, tenant, make_user
+    ):
+        admin = make_user(UserRole.ADMIN)
+        for acknowledged in (True, False, False):
+            db.add(WatchlistAlert(
+                id=uuid.uuid4(), tenant_id=tenant.id,
+                category="vendor_bank_change", severity="high",
+                object_type="vendor", object_id=uuid.uuid4(),
+                summary="Bank details changed",
+                acknowledged_at=_now() if acknowledged else None,
+            ))
+        db.flush()
+
+        rows = DashboardService(db).duplicate_and_anomaly(admin)["watchlist"]
+
+        assert len(rows) == 1
+        assert rows[0]["count"] == 3
+        assert rows[0]["acknowledged"] == 1
+        assert rows[0]["open"] == 2
+
+    def test_an_unflagged_invoice_is_not_counted(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        vendor = _vendor(db, tenant.id)
+        _invoice(db, tenant.id, admin["id"], 1000, InvoiceState.PAID, vendor=vendor)
+
+        assert DashboardService(db).duplicate_and_anomaly(admin)["flagged"] == 0
 
 
 class TestSodViolations:

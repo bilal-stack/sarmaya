@@ -40,6 +40,14 @@ REPORTS: Dict[str, tuple] = {
     # audit.view like the report itself, so exporting cannot reach further
     # than reading.
     "sod-violations": ("sod_violations", True, "SoD violations blocked"),
+    # AP / Treasury. payment-run-status is gated inside the service on
+    # payments.view rather than the dashboard permission, so the export
+    # refuses whoever the screen refuses.
+    "invoice-throughput": ("invoice_throughput", True, "Invoice throughput"),
+    "payment-run-status": ("payment_run_status", True, "Payment run status"),
+    "duplicate-anomaly": (
+        "duplicate_and_anomaly", True, "Duplicates and anomalies",
+    ),
     "evidence": ("evidence_completeness", False, "Audit evidence completeness"),
     "reconciliation-health": ("reconciliation_health", False, "Reconciliation health"),
     "autopilot-health": ("autopilot_health", True, "Autopilot health"),
