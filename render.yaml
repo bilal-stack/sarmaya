@@ -20,10 +20,24 @@ services:
     # returns no data, which is what a health check should be.
     healthCheckPath: /api/v1/ping
 
-    # Migrations run once per deploy, before the new instance takes traffic —
-    # not on container start, where two instances would race and a failure
-    # would crash-loop instead of stopping the deploy.
-    preDeployCommand: alembic upgrade head
+    # NO preDeployCommand, and that is not a preference. Render's pre-deploy
+    # command is a paid feature: a blueprint declaring one alongside
+    # `plan: free` is a contradiction, and the dashboard asks for a card before
+    # it will deploy anything. Free instances also have no shell and no SSH, so
+    # there is no "just run it once by hand" either.
+    #
+    # Migrations therefore run from .github/workflows/database.yml, dispatched
+    # manually. The reasoning that kept them out of the container's start
+    # command still holds and is unchanged: two instances starting together
+    # would race, and a failed migration should stop a deploy rather than
+    # crash-loop a container.
+    #
+    # The ordering this loses is real and worth stating. A pre-deploy command
+    # runs after the build and before the new instance takes traffic; a
+    # manually dispatched workflow does not. Run the migrate job first, then
+    # let Render deploy. On a paid plan, put the line back:
+    #
+    #   preDeployCommand: alembic upgrade head
 
     envVars:
       # --- set these yourself -------------------------------------------------
