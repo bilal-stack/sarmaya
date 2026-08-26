@@ -25,7 +25,6 @@ is under test is Sarmaya's half of the contract, which is the half that can
 lose a client's money.
 """
 import json
-import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -63,6 +62,8 @@ from app.services.integration_posting_service import JournalPostingService
 from app.services.integration_service import IntegrationService
 from app.services.payment_service import PaymentService
 from app.utils.datetime_helpers import make_naive, to_utc, utc_now
+
+from tests.integration.conftest import app_role_url_for_test_db
 
 pytestmark = pytest.mark.integration
 
@@ -1165,16 +1166,6 @@ class TestPermissions:
 
 # --- tenant isolation, under the role that cannot bypass it -------------------
 
-def _swap_to_test_db(url: str) -> str:
-    """Point the least-privilege role's URL at whichever database the suite is
-    running against — same helper, same reasoning, as test_rls_isolation.py."""
-    head, _, db = url.rpartition("/")
-    override = os.getenv("TEST_DATABASE_URL")
-    if override:
-        db = override.rpartition("/")[2]
-    else:
-        db = f"{db}_test"
-    return f"{head}/{db}"
 
 
 def _ensure_integration_rls(admin_conn) -> None:
@@ -1211,7 +1202,7 @@ def rls(db_engine):
     """Two tenants, each with a connected accounting system, seeded through the
     admin connection; yields an os_app-bound session factory."""
     app_engine = create_engine(
-        _swap_to_test_db(settings.DATABASE_URL), pool_pre_ping=True
+        app_role_url_for_test_db(settings.DATABASE_URL), pool_pre_ping=True
     )
 
     tenant_a, tenant_b = uuid.uuid4(), uuid.uuid4()
