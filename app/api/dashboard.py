@@ -133,6 +133,52 @@ def policy_overrides(
         _raise_for(e)
 
 
+@router.get("/invoice-throughput")
+def invoice_throughput(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Capture to paid, and what sends work backwards.
+
+    `match_rate_pct` is deliberately null — see the service docstring.
+    """
+    try:
+        return DashboardService(db).invoice_throughput(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/payment-run-status")
+def payment_run_status(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Where every payment run is, and what is stuck behind it.
+
+    Gated on payments.view rather than the dashboard permission: a manager
+    can open every invoice this touches and still cannot see a payment run.
+    """
+    try:
+        return DashboardService(db).payment_run_status(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/duplicate-anomaly")
+def duplicate_and_anomaly(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Duplicates caught, what happened to them, and the watchlist."""
+    try:
+        return DashboardService(db).duplicate_and_anomaly(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 @router.get("/sod-violations")
 def sod_violations(
     days: int = Query(90, ge=1, le=365),
