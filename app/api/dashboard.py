@@ -133,6 +133,23 @@ def policy_overrides(
         _raise_for(e)
 
 
+@router.get("/sod-violations")
+def sod_violations(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Attempts the controls refused, and who made them.
+
+    Gated on audit.view rather than the dashboard permission — it names a
+    person and an action they were refused. See the service docstring.
+    """
+    try:
+        return DashboardService(db).sod_violations(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 @router.get("/evidence")
 def evidence_completeness(
     current_user: dict = Depends(get_current_user),

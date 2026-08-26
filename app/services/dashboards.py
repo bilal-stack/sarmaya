@@ -63,6 +63,55 @@ AGE_BUCKETS = [(0, 2, "0-2 days"), (2, 7, "3-7 days"),
                (7, 30, "8-30 days"), (30, None, "over 30 days")]
 
 
+#: Why a governance refusal fired, and whether it was a segregation-of-duties
+#: failure specifically. The audit action says *where* something was refused
+#: (approval_blocked, release_blocked, ...); the reason says *why*, and only
+#: some of those are SoD. An unrecognised reason is reported as itself rather
+#: than dropped or guessed at — a refusal nobody has classified yet is still a
+#: refusal somebody should see.
+BLOCK_REASONS = {
+    "sod_self_approval": {
+        "label": "Tried to approve their own record", "is_sod": True,
+    },
+    "self_approval": {
+        "label": "Tried to approve their own record", "is_sod": True,
+    },
+    "self_release": {
+        "label": "Tried to release a payment run they prepared", "is_sod": True,
+    },
+    "self_reconciliation": {
+        "label": "Tried to reconcile a payment they released", "is_sod": True,
+    },
+    "sod_self_activation": {
+        "label": "Tried to activate a vendor they created", "is_sod": True,
+    },
+    "first_payment_after_bank_change": {
+        # DR-032's other half: the second signature on a bank change means
+        # nothing if the same person then releases the first payment to it.
+        "label": "Tried to pay a vendor whose bank details they changed",
+        "is_sod": True,
+    },
+    "over_approval_limit": {
+        # Authority, not separation — one person acting beyond their own
+        # ceiling rather than two roles collapsing into one.
+        "label": "Acted beyond their approval limit", "is_sod": False,
+    },
+    "no_vendor_link": {
+        "label": "Record not linked to a vendor", "is_sod": False,
+    },
+    "vendor_missing": {
+        "label": "Linked vendor no longer exists", "is_sod": False,
+    },
+}
+
+
+def _reason_from_comment(comment) -> str:
+    """Older entries carry the reason only in "Blocked: <reason>"."""
+    if comment and comment.startswith("Blocked: "):
+        return comment[len("Blocked: "):].strip()
+    return (comment or "unspecified").strip()
+
+
 def _now():
     return make_naive(to_utc(utc_now()))
 
@@ -445,6 +494,120 @@ class DashboardService:
             "by_person": sorted(by_person.values(), key=lambda p: -p["count"]),
             "recent": items[:25],
         }
+
+    # --- Segregation of duties: what was refused -----------------------------
+
+    def sod_violations(self, current_user: dict, days: int = 90) -> Dict:
+        """Attempts the controls refused, and who made them.
+
+        Build Book, Audit/Compliance: "SoD violations blocked and attempted
+        actions (security posture)."
+
+        Every other report in this file counts things that happened. This one
+        counts things that were stopped, which is the only report here whose
+        empty state is genuinely good news — and the reason it is worth having
+        at all. A control that has never fired is indistinguishable, from the
+        outside, from a control that is not wired up; this is the difference,
+        and it is the single most direct answer to an auditor asking whether
+        segregation of duties is enforced rather than merely documented.
+
+        Read with audit.view rather than the dashboard gate. The other
+        dashboards aggregate records anybody with invoices.view could open
+        individually; this names a person and an action they were refused,
+        which is a different kind of fact about a colleague.
+        """
+        self._require_audit(current_user)
+        since = _now() - timedelta(days=days)
+
+        blocks = (
+            self.db.query(
+                AuditLog.action, AuditLog.user_email, AuditLog.comment,
+                AuditLog.object_type, AuditLog.object_id, AuditLog.after_value,
+                AuditLog.timestamp,
+            )
+            .filter(
+                AuditLog.timestamp >= since,
+                # Every governance refusal in this codebase writes an action
+                # ending "_blocked" — approval_blocked, release_blocked,
+                # reconciliation_blocked, vendor_activation_blocked,
+                # bank_change_approval_blocked. Matching the suffix rather than
+                # listing them means a refusal added later appears here without
+                # anybody remembering to register it, which is the failure this
+                # kind of report otherwise has.
+                AuditLog.action.like("%_blocked"),
+            )
+            .order_by(AuditLog.timestamp.desc())
+            .all()
+        )
+
+        by_reason: Dict[str, Dict] = {}
+        by_person: Dict[str, Dict] = {}
+        by_object: Dict[str, int] = {}
+        items = []
+
+        for action, email, comment, object_type, object_id, after, at in blocks:
+            reason = (after or {}).get("reason") or _reason_from_comment(comment)
+            meta = BLOCK_REASONS.get(reason, {})
+            is_sod = meta.get("is_sod", False)
+            who = email or "unknown"
+
+            bucket = by_reason.setdefault(reason, {
+                "reason": reason,
+                "label": meta.get("label", reason.replace("_", " ")),
+                "is_sod": is_sod,
+                "count": 0,
+            })
+            bucket["count"] += 1
+
+            person = by_person.setdefault(who, {
+                "who": who, "count": 0, "sod_count": 0,
+            })
+            person["count"] += 1
+            if is_sod:
+                person["sod_count"] += 1
+
+            by_object[object_type] = by_object.get(object_type, 0) + 1
+
+            items.append({
+                "action": action,
+                "reason": reason,
+                "label": bucket["label"],
+                "is_sod": is_sod,
+                "who": email,
+                "object_type": object_type,
+                "object_id": str(object_id) if object_id else None,
+                "at": at.isoformat() if at else None,
+            })
+
+        sod_total = sum(b["count"] for b in by_reason.values() if b["is_sod"])
+
+        return {
+            "window_days": days,
+            "total_blocked": len(items),
+            # Split, not merged. "Somebody tried to approve their own invoice"
+            # and "somebody tried to approve an invoice with no vendor linked"
+            # are both refusals and only one of them is a segregation failure;
+            # reporting a single number would let a rise in clerical mistakes
+            # read as a rise in attempted self-dealing.
+            "sod_blocked": sod_total,
+            "other_blocked": len(items) - sod_total,
+            "by_reason": sorted(by_reason.values(), key=lambda r: -r["count"]),
+            "by_person": sorted(by_person.values(), key=lambda p: -p["count"]),
+            "by_object_type": [
+                {"object_type": k, "count": v}
+                for k, v in sorted(by_object.items(), key=lambda kv: -kv[1])
+            ],
+            "recent": items[:25],
+        }
+
+    def _require_audit(self, current_user: dict) -> None:
+        from app.core.roles import PERM_VIEW_AUDIT
+
+        if not has_permission(current_user["role"], PERM_VIEW_AUDIT):
+            raise PermissionError(
+                f"Role '{current_user['role']}' cannot view the segregation-"
+                "of-duties report"
+            )
 
     # --- 5. Evidence Completeness -------------------------------------------
 
