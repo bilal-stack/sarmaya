@@ -11,12 +11,17 @@
 
 ruff>=0.6,<1
 
-# Regenerates requirements.lock from requirements.txt:
+# Regenerates requirements.lock. MUST be run on Linux, which is what the image
+# and CI actually use:
 #
-#   pip-compile --strip-extras --output-file=requirements.lock requirements.txt
+#   docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c \
+#     "pip install -q pip-tools && pip-compile --strip-extras \
+#      --output-file=requirements.lock requirements.txt"
 #
-# The lock is what the Dockerfile installs, so the image is built from exact
-# versions rather than from whatever the ranges resolved to that morning. CI
-# re-runs the command and fails if the result differs, which is what stops the
-# two files drifting apart silently.
+# Not on your own machine unless that machine is Linux. pip-compile resolves
+# for the platform it runs on, and the difference is not cosmetic: a lock built
+# on Windows omits uvloop, which uvicorn uses on Linux, and adds colorama,
+# which only exists there. The image would come up either way and quietly run
+# on the asyncio event loop instead. CI regenerates and diffs, so a lock built
+# on the wrong platform fails the run rather than shipping.
 pip-tools>=7.4,<8

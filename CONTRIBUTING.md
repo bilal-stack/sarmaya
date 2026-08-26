@@ -70,13 +70,23 @@ instead.
 
 `requirements.txt` carries deliberately wide ranges. `requirements.lock` pins
 what actually gets installed, and it is what the Dockerfile builds from. Change
-one and you must regenerate the other:
+one and you must regenerate the other — **on Linux**:
 
 ```bash
-pip-compile --strip-extras --output-file=requirements.lock requirements.txt
+docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c \
+  "pip install -q pip-tools && pip-compile --strip-extras \
+   --output-file=requirements.lock requirements.txt"
 ```
 
-CI regenerates it and fails if the result differs. Without that, a dependency
+Not on your own machine unless that machine is Linux. `pip-compile` resolves
+for the platform it runs on, and the difference is not cosmetic: a lock built
+on Windows omits `uvloop`, which uvicorn uses on Linux, and adds `colorama`,
+which only exists there. The image comes up either way and quietly runs on the
+asyncio event loop instead — which is exactly the class of difference a lock is
+supposed to eliminate.
+
+CI regenerates and diffs, so both a stale lock and one built on the wrong
+platform fail the run rather than shipping. Without that check, a dependency
 added to `requirements.txt` and never compiled into the lock would appear to be
 added and quietly not be.
 

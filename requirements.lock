@@ -46,10 +46,6 @@ click==8.4.2
     # via
     #   black
     #   uvicorn
-colorama==0.4.6
-    # via
-    #   click
-    #   pytest
 cryptography==50.0.1
     # via
     #   google-auth
@@ -273,6 +269,8 @@ urllib3==2.7.0
     #   requests
 uvicorn==0.52.4
     # via -r requirements.txt
+uvloop==0.22.1
+    # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
 websockets==16.1.1
