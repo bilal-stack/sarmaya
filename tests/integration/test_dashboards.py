@@ -281,6 +281,26 @@ class TestInvoiceThroughput:
         top = result["rework_drivers"][0]
         assert top["reason"] == "Wrong cost centre" and top["count"] == 2
 
+    def test_the_rate_counts_invoices_not_events(self, db, tenant, make_user):
+        """One invoice rejected three times is three events and one affected
+        invoice. Dividing events by invoices produced 200%, which is
+        arithmetically true and not a rate of anything."""
+        admin = make_user(UserRole.ADMIN)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 1000,
+                           InvoiceState.APPROVED, vendor=vendor)
+        _audit(db, tenant.id, admin, invoice.id, "created", _now() - timedelta(days=2))
+        for _ in range(3):
+            _audit(db, tenant.id, admin, invoice.id, "rejected", _now(),
+                   comment="Missing PO reference")
+
+        result = DashboardService(db).invoice_throughput(admin)
+
+        assert result["captured"] == 1
+        assert result["rework_events"] == 3
+        assert result["invoices_reworked"] == 1
+        assert result["rework_rate_pct"] == 100.0
+
     def test_match_rate_is_null_rather_than_invented(self, db, tenant, make_user):
         """Three-way match is computed on demand and never stored, so there is
         no record of what an invoice matched when it was approved. A rate
