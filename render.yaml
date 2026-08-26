@@ -56,106 +56,128 @@ services:
       # accounts through POST /users.
       - key: ALLOW_SELF_REGISTRATION
         value: "false"
+      # Inert for a Docker service — Render only reads this for its native
+      # Python runtime — but it said 3.12 while the Dockerfile, CI, the venv
+      # and requirements.lock had all moved to 3.14. A stale value that is
+      # currently ignored is still the wrong answer to somebody reading this
+      # file to find out which Python the API runs on.
       - key: PYTHON_VERSION
-        value: "3.12"
+        value: "3.14"
 
-  # The notification drain.
+  # --- the three schedulers, commented out ---------------------------------
   #
-  # Notifications are queued in the same transaction as the action that
-  # produced them, which means nothing is delivered until something empties the
-  # queue. This is that something. Without this service the app looks healthy
-  # and silently tells nobody anything — no approval requests, no SLA
-  # escalations, no watchlist alerts.
+  # Render's free tier does NOT include cron services. Web services, static
+  # sites and Postgres are free; cron is not, so a blueprint containing these
+  # asks for a card before it will deploy anything at all — including the web
+  # service, which is free-eligible on its own.
   #
-  # Every minute, and cheap when the queue is empty: one indexed query that
-  # returns no rows. It is safe to run alongside a manual
-  # POST /notifications/dispatch — a message already sent is never picked up
-  # twice.
+  # They now run in GitHub Actions instead: .github/workflows/schedulers.yml.
+  # That is free and adequate, with two honest caveats recorded there —
+  # GitHub's shortest interval is five minutes, and its scheduling is
+  # best-effort. Neither loses work; both cost latency.
   #
-  # It needs the same DATABASE_URL as the web service and the same SMTP
-  # settings. With SMTP_ENABLED=false it runs, finds messages, and holds them
-  # untouched rather than burning their retry attempts.
-  - type: cron
-    name: sarmaya-notifications
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    schedule: "* * * * *"
-    dockerCommand: python -m scripts.dispatch_notifications --quiet
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: SECRET_KEY
-        sync: false
-      # Set these to actually deliver. See .env.example for the full note.
-      - key: SMTP_ENABLED
-        value: "false"
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: SMTP_FROM_EMAIL
-        sync: false
-      - key: DEBUG
-        value: "false"
-
-  # The workflow clocks: reminders and SLA escalations.
+  # Kept here rather than deleted because moving back is worth being easy:
+  # uncomment the block below, set DATABASE_URL and SECRET_KEY on each service,
+  # and delete the Actions workflow. The cadences below are the ones the app
+  # actually wants (one minute for notifications), which Actions cannot give.
   #
-  # Escalation has existed since DR-009 with "admin button, cron, or a
-  # scheduler later" in its docstring, and the cron never arrived — so until
-  # now a breached SLA escalated only if an administrator happened to open the
-  # Decision Inbox and click. A deadline nobody is watching is not a deadline.
+  # # The notification drain.
+  # #
+  # # Notifications are queued in the same transaction as the action that
+  # # produced them, which means nothing is delivered until something empties the
+  # # queue. This is that something. Without this service the app looks healthy
+  # # and silently tells nobody anything — no approval requests, no SLA
+  # # escalations, no watchlist alerts.
+  # #
+  # # Every minute, and cheap when the queue is empty: one indexed query that
+  # # returns no rows. It is safe to run alongside a manual
+  # # POST /notifications/dispatch — a message already sent is never picked up
+  # # twice.
+  # #
+  # # It needs the same DATABASE_URL as the web service and the same SMTP
+  # # settings. With SMTP_ENABLED=false it runs, finds messages, and holds them
+  # # untouched rather than burning their retry attempts.
+  # - type: cron
+  # name: sarmaya-notifications
+  # runtime: docker
+  # plan: free
+  # dockerfilePath: ./Dockerfile
+  # schedule: "* * * * *"
+  # dockerCommand: python -m scripts.dispatch_notifications --quiet
+  # envVars:
+  # - key: DATABASE_URL
+  # sync: false
+  # - key: SECRET_KEY
+  # sync: false
+  # # Set these to actually deliver. See .env.example for the full note.
+  # - key: SMTP_ENABLED
+  # value: "false"
+  # - key: SMTP_HOST
+  # sync: false
+  # - key: SMTP_PORT
+  # value: "587"
+  # - key: SMTP_USER
+  # sync: false
+  # - key: SMTP_PASSWORD
+  # sync: false
+  # - key: SMTP_FROM_EMAIL
+  # sync: false
+  # - key: DEBUG
+  # value: "false"
   #
-  # Hourly is plenty: SLAs are measured in hours or days, and both jobs are
-  # idempotent — one escalation per state entry, one reminder per interval.
-  - type: cron
-    name: sarmaya-workflow-timers
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    schedule: "0 * * * *"
-    dockerCommand: python -m scripts.run_workflow_timers --quiet
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: SECRET_KEY
-        sync: false
-      - key: DEBUG
-        value: "false"
-
-  # Drains the outbound queue to each tenant's own accounting system.
-  # Without it, a released payment queues a journal entry that never reaches
-  # the client's books — and nothing in Sarmaya looks wrong, because the
-  # payment itself released fine. That is the failure mode the whole outbox
-  # exists to make visible rather than silent.
+  # # The workflow clocks: reminders and SLA escalations.
+  # #
+  # # Escalation has existed since DR-009 with "admin button, cron, or a
+  # # scheduler later" in its docstring, and the cron never arrived — so until
+  # # now a breached SLA escalated only if an administrator happened to open the
+  # # Decision Inbox and click. A deadline nobody is watching is not a deadline.
+  # #
+  # # Hourly is plenty: SLAs are measured in hours or days, and both jobs are
+  # # idempotent — one escalation per state entry, one reminder per interval.
+  # - type: cron
+  # name: sarmaya-workflow-timers
+  # runtime: docker
+  # plan: free
+  # dockerfilePath: ./Dockerfile
+  # schedule: "0 * * * *"
+  # dockerCommand: python -m scripts.run_workflow_timers --quiet
+  # envVars:
+  # - key: DATABASE_URL
+  # sync: false
+  # - key: SECRET_KEY
+  # sync: false
+  # - key: DEBUG
+  # value: "false"
   #
-  # Five minutes, not the notification job's one: this is not an SLA racing a
-  # clock, but "tell the ledger" implies soon rather than eventually, and five
-  # minutes catches a stalled queue the same working day. QBO_* are unset on a
-  # deployment with nothing connected, where every run is a no-op by design.
-  - type: cron
-    name: sarmaya-integration-posts
-    runtime: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    schedule: "*/5 * * * *"
-    dockerCommand: python -m scripts.dispatch_integration_posts --quiet
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: SECRET_KEY
-        sync: false
-      - key: QBO_CLIENT_ID
-        sync: false
-      - key: QBO_CLIENT_SECRET
-        sync: false
-      - key: QBO_ENVIRONMENT
-        sync: false
-      - key: QBO_REDIRECT_URI
-        sync: false
-      - key: DEBUG
-        value: "false"
+  # # Drains the outbound queue to each tenant's own accounting system.
+  # # Without it, a released payment queues a journal entry that never reaches
+  # # the client's books — and nothing in Sarmaya looks wrong, because the
+  # # payment itself released fine. That is the failure mode the whole outbox
+  # # exists to make visible rather than silent.
+  # #
+  # # Five minutes, not the notification job's one: this is not an SLA racing a
+  # # clock, but "tell the ledger" implies soon rather than eventually, and five
+  # # minutes catches a stalled queue the same working day. QBO_* are unset on a
+  # # deployment with nothing connected, where every run is a no-op by design.
+  # - type: cron
+  # name: sarmaya-integration-posts
+  # runtime: docker
+  # plan: free
+  # dockerfilePath: ./Dockerfile
+  # schedule: "*/5 * * * *"
+  # dockerCommand: python -m scripts.dispatch_integration_posts --quiet
+  # envVars:
+  # - key: DATABASE_URL
+  # sync: false
+  # - key: SECRET_KEY
+  # sync: false
+  # - key: QBO_CLIENT_ID
+  # sync: false
+  # - key: QBO_CLIENT_SECRET
+  # sync: false
+  # - key: QBO_ENVIRONMENT
+  # sync: false
+  # - key: QBO_REDIRECT_URI
+  # sync: false
+  # - key: DEBUG
+  # value: "false"

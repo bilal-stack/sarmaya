@@ -74,7 +74,7 @@ one and you must regenerate the other — **on Linux**:
 
 ```bash
 docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c \
-  "pip install -q pip-tools && pip-compile --strip-extras \
+  "pip install -q pip-tools && pip-compile --strip-extras --no-header \
    --output-file=requirements.lock requirements.txt"
 ```
 
