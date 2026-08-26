@@ -36,6 +36,10 @@ REPORTS: Dict[str, tuple] = {
     "bottlenecks": ("approval_bottlenecks", True, "Approval bottlenecks"),
     "exceptions": ("exceptions_heatmap", True, "Exceptions heatmap"),
     "policy-overrides": ("policy_overrides", True, "Policy overrides"),
+    # The one export an auditor asks for by name. Gated inside the service on
+    # audit.view like the report itself, so exporting cannot reach further
+    # than reading.
+    "sod-violations": ("sod_violations", True, "SoD violations blocked"),
     "evidence": ("evidence_completeness", False, "Audit evidence completeness"),
     "reconciliation-health": ("reconciliation_health", False, "Reconciliation health"),
     "autopilot-health": ("autopilot_health", True, "Autopilot health"),

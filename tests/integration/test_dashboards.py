@@ -239,6 +239,119 @@ class TestPolicyOverrides:
         assert "corrected tax line" in result["recent"][0]["reason"]
 
 
+class TestSodViolations:
+    """The one report here whose empty state is good news — and the reason it
+    is worth having. A control that has never fired looks, from outside,
+    exactly like a control that was never wired up."""
+
+    def test_it_separates_a_self_approval_from_a_clerical_block(
+        self, db, tenant, make_user
+    ):
+        """Both are refusals; only one is a segregation failure. Merged into a
+        single number, a rise in missing vendor links would read as a rise in
+        attempted self-dealing."""
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 5000,
+                           InvoiceState.PENDING_APPROVAL, vendor=vendor)
+
+        _audit(db, tenant.id, manager, invoice.id, "approval_blocked", _now(),
+               after_value={"reason": "sod_self_approval"})
+        _audit(db, tenant.id, manager, invoice.id, "approval_blocked", _now(),
+               after_value={"reason": "no_vendor_link"})
+
+        result = DashboardService(db).sod_violations(admin)
+
+        assert result["total_blocked"] == 2
+        assert result["sod_blocked"] == 1
+        assert result["other_blocked"] == 1
+
+    def test_it_names_who_was_refused(self, db, tenant, make_user):
+        admin = make_user(UserRole.ADMIN)
+        manager = make_user(UserRole.MANAGER)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 5000,
+                           InvoiceState.PENDING_APPROVAL, vendor=vendor)
+
+        _audit(db, tenant.id, manager, invoice.id, "approval_blocked", _now(),
+               after_value={"reason": "sod_self_approval"})
+
+        result = DashboardService(db).sod_violations(admin)
+
+        person = result["by_person"][0]
+        assert person["who"] == manager["email"]
+        assert person["sod_count"] == 1
+        assert result["recent"][0]["label"] == "Tried to approve their own record"
+
+    def test_every_kind_of_refusal_is_collected_not_just_invoices(
+        self, db, tenant, make_user
+    ):
+        """The filter matches the "_blocked" suffix rather than a list of known
+        actions, so a refusal added to a new module appears here without
+        anybody remembering to register it. That is the whole failure mode a
+        hand-maintained list has."""
+        admin = make_user(UserRole.ADMIN)
+        cfo = make_user(UserRole.CFO)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 5000,
+                           InvoiceState.APPROVED, vendor=vendor)
+
+        for action, reason in [
+            ("release_blocked", "self_release"),
+            ("reconciliation_blocked", "self_reconciliation"),
+            ("vendor_activation_blocked", "sod_self_activation"),
+            ("bank_change_approval_blocked", "self_approval"),
+            # Invented on purpose: a module that does not exist yet.
+            ("shipment_dispatch_blocked", "self_dispatch"),
+        ]:
+            _audit(db, tenant.id, cfo, invoice.id, action, _now(),
+                   after_value={"reason": reason})
+
+        result = DashboardService(db).sod_violations(admin)
+
+        assert result["total_blocked"] == 5
+        # The four known ones classify as SoD; the invented reason is reported
+        # as itself rather than dropped or guessed at.
+        assert result["sod_blocked"] == 4
+        reasons = {r["reason"] for r in result["by_reason"]}
+        assert "self_dispatch" in reasons
+
+    def test_an_ordinary_approval_is_not_a_refusal(self, db, tenant, make_user):
+        """The report must not turn normal work into a security finding."""
+        admin = make_user(UserRole.ADMIN)
+        vendor = _vendor(db, tenant.id)
+        invoice = _invoice(db, tenant.id, admin["id"], 5000,
+                           InvoiceState.APPROVED, vendor=vendor)
+        _audit(db, tenant.id, admin, invoice.id, "approved", _now())
+
+        assert DashboardService(db).sod_violations(admin)["total_blocked"] == 0
+
+    def test_nothing_refused_is_reported_as_nothing_refused(
+        self, db, tenant, make_user
+    ):
+        admin = make_user(UserRole.ADMIN)
+
+        result = DashboardService(db).sod_violations(admin)
+
+        assert result["total_blocked"] == 0
+        assert result["by_person"] == []
+        assert result["by_reason"] == []
+
+    def test_it_reads_with_audit_view_not_the_dashboard_permission(
+        self, db, tenant, make_user
+    ):
+        """A manager can open every invoice this aggregates and still must not
+        read "who tried to do something they were not allowed to"."""
+        manager = make_user(UserRole.MANAGER)
+        with pytest.raises(PermissionError):
+            DashboardService(db).sod_violations(manager)
+
+    def test_an_auditor_can_read_it(self, db, tenant, make_user):
+        auditor = make_user(UserRole.AUDITOR)
+        assert DashboardService(db).sod_violations(auditor)["total_blocked"] == 0
+
+
 class TestEvidenceCompleteness:
     def test_it_counts_invoices_with_nothing_behind_them(self, db, tenant, make_user):
         admin = make_user(UserRole.ADMIN)
