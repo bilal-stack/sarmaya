@@ -196,8 +196,28 @@ class Settings(BaseSettings):
     #: and have to be said separately.
     TEST_APP_DATABASE_URL: str = ""
 
-    # File Storage
+    # --- File storage --------------------------------------------------------
+    # Where uploads go. "local" writes to UPLOAD_DIR and is the default so that
+    # `docker compose up` needs nothing configured; "s3" writes to any
+    # S3-compatible bucket (Neon Object Storage, Cloudflare R2, MinIO, S3).
+    #
+    # A deployment should use "s3". Hosted platforms give an ephemeral
+    # filesystem, so a local upload survives until the next restart — and an
+    # evidence pack records the SHA-256 of every attachment it references, so
+    # files vanishing turns a sealed audit document into hashes pointing at
+    # nothing. The pack still verifies and is still useless.
+    #
+    # Changing this does NOT strand existing files: each file row records the
+    # backend that wrote it, and reads dispatch on that rather than on this.
+    STORAGE_BACKEND: str = "local"
     UPLOAD_DIR: str = "./uploads"
+
+    #: Required when STORAGE_BACKEND is "s3".
+    STORAGE_BUCKET: str = ""
+    #: Empty means real AWS S3. Neon, R2 and MinIO each supply their own.
+    STORAGE_ENDPOINT_URL: str = ""
+    #: Falls back to AWS_REGION when unset.
+    STORAGE_REGION: str = ""
     MAX_FILE_SIZE_MB: int = 10
     
     # OCR Configuration

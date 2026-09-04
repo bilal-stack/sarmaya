@@ -25,3 +25,10 @@ ruff>=0.6,<1
 # on the asyncio event loop instead. CI regenerates and diffs, so a lock built
 # on the wrong platform fails the run rather than shipping.
 pip-tools>=7.4,<8
+
+# In-process S3 for the object-storage tests. The storage backend is written
+# against the S3 API rather than a vendor SDK, so it is worth exercising
+# against a real implementation of that API — a hand-rolled boto3 stub would
+# test the stub. Dev-only, and not in requirements.lock, which is compiled
+# from requirements.txt alone.
+moto[s3]>=5.0,<6
