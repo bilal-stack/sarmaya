@@ -229,6 +229,62 @@ def spend_analytics(
         _raise_for(e)
 
 
+@router.get("/rfq-cycle-time")
+def rfq_cycle_time(
+    days: int = Query(180, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """How long sourcing takes, stage by stage, and what it saved.
+
+    180 days by default rather than the 90 the operational reports use: a
+    sourcing cycle runs in weeks, so a shorter window often holds only one or
+    two completed ones.
+
+    Reads with requisitions.view, not sourcing.manage — the permission to run
+    an RFQ is not the permission to read how long RFQs took, and gating on it
+    would exclude the procurement lead this report is for.
+    """
+    try:
+        return DashboardService(db).rfq_cycle_time(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/inventory-turns")
+def inventory_turns(
+    days: int = Query(365, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """How many times the stock turned over, and what could not be valued.
+
+    Reads with inventory.view. Annualised, so a 90-day window and a year are
+    directly comparable.
+    """
+    try:
+        return DashboardService(db).inventory_turns(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/p2p-cycle-time")
+def p2p_cycle_time(
+    days: int = Query(180, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Requisition to payment, hop by hop.
+
+    The only report that follows a purchase across all five modules; it works
+    because every record in the chain carries the same correlation id.
+    """
+    try:
+        return DashboardService(db).p2p_cycle_time(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 @router.get("/evidence")
 def evidence_completeness(
     current_user: dict = Depends(get_current_user),
