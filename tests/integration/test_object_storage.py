@@ -213,7 +213,17 @@ class TestConfiguration:
             backend_for("s3")
         reset_cache()
 
-    def test_local_is_the_default(self, monkeypatch):
-        """`docker compose up` must need nothing configured."""
-        reset_cache()
-        assert storage.backend_for(settings.STORAGE_BACKEND).name == "local"
+    def test_local_is_the_default(self):
+        """`docker compose up` must need nothing configured.
+
+        Read off the field's declared default rather than `settings`, because
+        `settings` carries whatever the developer happens to have in `.env` —
+        so the original version of this test failed on any machine configured
+        for object storage, which is a correct configuration. It was asserting
+        "this machine is not using s3" while claiming to assert "s3 is not
+        required".
+        """
+        from app.core.config import Settings
+
+        assert Settings.model_fields["STORAGE_BACKEND"].default == "local"
+        assert Settings.model_fields["STORAGE_BUCKET"].default == ""
