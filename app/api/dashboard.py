@@ -196,6 +196,39 @@ def sod_violations(
         _raise_for(e)
 
 
+@router.get("/ap-aging")
+def ap_aging(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What we owe, how late it is, and which stage is holding it.
+
+    A point-in-time balance, so no `days` parameter: what is owed is owed
+    regardless of the window somebody is looking at.
+    """
+    try:
+        return DashboardService(db).ap_aging(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/spend-analytics")
+def spend_analytics(
+    days: int = Query(365, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Where the money went, by vendor, GL account and cost centre.
+
+    A year by default rather than the 90 days the operational reports use —
+    spend is read against a budget cycle, not a work queue.
+    """
+    try:
+        return DashboardService(db).spend_analytics(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 @router.get("/evidence")
 def evidence_completeness(
     current_user: dict = Depends(get_current_user),
