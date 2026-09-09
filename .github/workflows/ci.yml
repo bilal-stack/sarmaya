@@ -84,6 +84,13 @@ jobs:
         # and there is no reason to wait for the slow answer to get the fast one.
         run: ruff check .
 
+      - name: Typecheck
+        # Scoped to the packages that are clean today; the scope lives in
+        # pyproject.toml under [tool.mypy] and the comment there explains why
+        # it is not yet all of app/. Enforced here so it cannot rot, and so
+        # widening it is a one-line change somebody can actually make.
+        run: mypy
+
       - name: Check the lockfile matches requirements.txt
         # The Dockerfile installs requirements.lock, so a change to
         # requirements.txt that never reached the lock would not affect the

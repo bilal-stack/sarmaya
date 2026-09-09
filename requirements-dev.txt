@@ -32,3 +32,12 @@ pip-tools>=7.4,<8
 # test the stub. Dev-only, and not in requirements.lock, which is compiled
 # from requirements.txt alone.
 moto[s3]>=5.0,<6
+
+# Static typing, run in CI. Scoped in pyproject.toml to the packages that pass
+# today rather than all of app/, because this codebase declares columns as
+# `Column(...)` rather than `Mapped[...]` and mypy therefore sees a
+# `Column[Decimal]` everywhere the runtime has a `Decimal`. See the comment on
+# [tool.mypy] for what it would take to widen it.
+#
+#   mypy            # uses the scope and settings from pyproject.toml
+mypy>=1.11,<3
