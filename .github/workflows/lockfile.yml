@@ -1,0 +1,66 @@
+name: Regenerate the lockfile
+
+# Dispatch-only, and deliberately not automatic on Dependabot pull requests.
+#
+# The gap this closes is real: Dependabot bumps requirements.txt, nothing
+# regenerates requirements.lock, and CI's lockfile check then fails on every
+# weekly bump. The obvious fix — a workflow that pushes a regenerated lock onto
+# the Dependabot branch — is the one not taken here. A pull request that exists
+# because a dependency changed is exactly the pull request whose branch should
+# not receive an automated write from a token with contents: write, and GitHub
+# gives Dependabot runs a read-only token for that reason rather than by
+# oversight.
+#
+# So a person triggers this, naming the branch. It runs pip-compile in the same
+# Linux image the Dockerfile uses and pushes one commit. That keeps the fix to
+# one click without ever letting a dependency bump grant itself write access.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to regenerate the lockfile on (e.g. dependabot/pip/...)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    # The lock MUST be built on Linux, which is what the image and CI use.
+    # pip-compile resolves for the platform it runs on, and the difference is
+    # not cosmetic: a lock built on Windows omits uvloop, which uvicorn uses on
+    # Linux, and adds colorama, which only exists there. The container pins the
+    # same Python the Dockerfile installs, so the resolution matches what ships.
+    container: python:3.14-slim
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          # A PAT is not needed: the default token can push to a branch in this
+          # repository, and this workflow only ever runs because a person asked.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install pip-tools
+        run: pip install --quiet pip-tools
+
+      - name: Regenerate
+        run: |
+          pip-compile --quiet --strip-extras --no-header \
+            --output-file=requirements.lock requirements.txt
+
+      - name: Commit if anything changed
+        run: |
+          if git diff --quiet -- requirements.lock; then
+            echo "requirements.lock already matches requirements.txt. Nothing to do."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements.lock
+          git commit -m "Regenerate requirements.lock
+
+          Built on Linux in python:3.14-slim, matching the image, because
+          pip-compile resolves for the platform it runs on."
+          git push origin HEAD:${{ inputs.branch }}
