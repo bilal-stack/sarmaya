@@ -2,7 +2,10 @@
 # Deliberately narrow. The point is to catch new mistakes mechanically, not to
 # reformat a working codebase — a first run that demands three hundred edits is
 # a linter people turn off.
-target-version = "py312"
+# Matches the Dockerfile, CI and the development venv. It said py312 while all
+# three had moved to 3.14, which quietly narrowed what ruff would flag — it
+# holds back rules and fixes that depend on the target being new enough.
+target-version = "py314"
 line-length = 100
 
 exclude = [
@@ -40,3 +43,29 @@ ignore = [
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
+
+# --- mypy --------------------------------------------------------------------
+# A gate that starts where the code already is, and can only widen.
+#
+# Running mypy across all of app/ reports 626 errors, and almost none of them
+# are bugs: this codebase declares columns as `Column(...)` rather than with
+# SQLAlchemy 2.0's `Mapped[...]` annotations, so mypy sees `Column[Decimal]`
+# everywhere a `Decimal` is used at runtime. Silencing that would mean
+# suppressing so much that the check stopped checking, and fixing it means
+# migrating every model — a real piece of work, and not this one.
+#
+# So the gate covers the packages that are genuinely clean today. It is
+# enforced in CI, which means it cannot rot, and the way to extend it is to
+# clean a package and add it to `files` below. Adding app/repositories turned
+# up a `Row | None` being indexed without a guard, which is the kind of thing
+# this is for.
+[tool.mypy]
+python_version = "3.14"
+files = ["app/core", "app/utils", "app/schemas", "app/repositories"]
+# Transitive imports are checked by whichever run owns them, not by this one —
+# without this, errors from every service leak into a check scoped to four
+# packages and the gate becomes unpassable for reasons outside its scope.
+follow_imports = "silent"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true

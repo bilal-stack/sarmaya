@@ -10,3 +10,34 @@
 -r requirements.txt
 
 ruff>=0.6,<1
+
+# Regenerates requirements.lock. MUST be run on Linux, which is what the image
+# and CI actually use:
+#
+#   docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c \
+#     "pip install -q pip-tools && pip-compile --strip-extras --no-header \
+#      --output-file=requirements.lock requirements.txt"
+#
+# Not on your own machine unless that machine is Linux. pip-compile resolves
+# for the platform it runs on, and the difference is not cosmetic: a lock built
+# on Windows omits uvloop, which uvicorn uses on Linux, and adds colorama,
+# which only exists there. The image would come up either way and quietly run
+# on the asyncio event loop instead. CI regenerates and diffs, so a lock built
+# on the wrong platform fails the run rather than shipping.
+pip-tools>=7.4,<8
+
+# In-process S3 for the object-storage tests. The storage backend is written
+# against the S3 API rather than a vendor SDK, so it is worth exercising
+# against a real implementation of that API — a hand-rolled boto3 stub would
+# test the stub. Dev-only, and not in requirements.lock, which is compiled
+# from requirements.txt alone.
+moto[s3]>=5.0,<6
+
+# Static typing, run in CI. Scoped in pyproject.toml to the packages that pass
+# today rather than all of app/, because this codebase declares columns as
+# `Column(...)` rather than `Mapped[...]` and mypy therefore sees a
+# `Column[Decimal]` everywhere the runtime has a `Decimal`. See the comment on
+# [tool.mypy] for what it would take to widen it.
+#
+#   mypy            # uses the scope and settings from pyproject.toml
+mypy>=1.11,<3
