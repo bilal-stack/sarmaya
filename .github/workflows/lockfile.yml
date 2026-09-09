@@ -35,7 +35,7 @@ jobs:
     # same Python the Dockerfile installs, so the resolution matches what ships.
     container: python:3.14-slim
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch }}
           # A PAT is not needed: the default token can push to a branch in this
