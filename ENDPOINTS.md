@@ -644,6 +644,22 @@ GET /api/v1/audit/chain/{correlation_id}               # whole transaction story
 POST /api/v1/audit/evidence-pack/{correlation_id}      # generate sealed audit bundle (SHA-256 pack_hash)
 GET  /api/v1/audit/evidence-pack/{correlation_id}      # preview the bundle without recording
 GET  /api/v1/audit/evidence-packs?correlation_id=      # packs generated: when, by whom, with what seal
+
+# The other kind of pack. The one above answers "what happened to this
+# invoice"; this answers "did this control operate", across every record it
+# touched in a window — which is the question an auditor opens with.
+GET  /api/v1/audit/controls                            # what can be evidenced, and what each control is
+POST /api/v1/audit/pack?period_start=&period_end=&control=
+     # control= narrows it to one; omit for all of them. Both dates inclusive.
+     # Reports three numbers per control — applied, blocked, overridden — with
+     # the blocks and overrides sampled and ordinary applications only counted:
+     # an auditor reads the exceptions, and a quarter of approvals would bury
+     # the five records that matter.
+     # An EMPTY result is sealed here rather than refused, the opposite of the
+     # chain pack above. "Nothing was refused this quarter" is a finding over a
+     # well-formed scope; an empty chain pack is a lookup that failed. See
+     # app/services/audit_pack.py.
+     # audit.view only.
 ```
 
 ### Decision Inbox
@@ -907,7 +923,11 @@ Two details that matter more than the formats:
 ```bash
 GET /api/v1/dashboard/{report}/export?format=csv&table=&days=
     # report: control-room | bottlenecks | exceptions | policy-overrides |
-    #         evidence | reconciliation-health | autopilot-health
+    #         evidence | reconciliation-health | autopilot-health |
+    #         sod-violations | invoice-throughput | payment-run-status |
+    #         duplicate-anomaly | stock-accuracy | supplier-performance |
+    #         receipt-to-invoice | hiring-pipeline | payroll-variance |
+    #         expense-exceptions
     # format: csv (one table) | html (whole report) | json
     # table:  which table for csv; defaults to the report's largest
     # Gated exactly like the report's own endpoint - the file can never be a
@@ -1422,3 +1442,46 @@ python -m scripts.dispatch_integration_posts   # every 5 minutes
 It reports on the System Health page like the other scheduled jobs
 (`JOB_INTEGRATION_POSTS`). Without it running, entries queue and never reach the
 client's books.
+
+### AP / Treasury reports (added 2026-08)
+
+The Build Book's AP/Treasury persona. Bank reconciliation breaks were already
+shipped as `reconciliation-health`; these are the other three.
+
+```bash
+GET /api/v1/dashboard/invoice-throughput?days=
+    # Capture to paid, measured from the audit trail rather than a stored
+    # duration - the trail is what happened, and a duration column is only as
+    # right as the code that last wrote it. Median as well as mean, because one
+    # invoice that sat three weeks drags an average somewhere no real invoice
+    # ever was.
+    # Rework is the half nobody counts: an invoice rejected, corrected and
+    # re-approved shows up in a state count as one approval. Reported by reason,
+    # which is the only form of the figure anybody can act on.
+    # match_rate_pct is deliberately NULL. Three-way match is computed on demand
+    # and never stored, so there is no record of what an invoice matched when it
+    # was approved; a rate recomputed today against goods receipts that have
+    # since changed would be a different number wearing the same name.
+
+GET /api/v1/dashboard/payment-run-status?days=
+    # Requires payments.view, NOT the dashboard permission - a manager and an
+    # approver can open every invoice this touches and cannot open a payment
+    # run, so they must not read run values here either.
+    # by_state, plus the two things treasury actually chases:
+    #   awaiting_bank_file          - released, nothing handed to the bank yet
+    #   unreconciled_after_release  - the file went out and the money never
+    #                                 appeared on a statement, aged
+    # "failed" and "reissued" are reported as ABSENT rather than zero. Sarmaya
+    # never moves money, so a bank-side failure is not observable here, and a
+    # zero would be read as "none failed" rather than "we cannot see".
+
+GET /api/v1/dashboard/duplicate-anomaly?days=
+    # Duplicates flagged, and what happened to each: stopped (cancelled or
+    # rejected), still held, or paid anyway with an acknowledgement.
+    # value_held_back is named for what it is. It counts the amount the flag
+    # actually held back - it does NOT claim every one of those would have been
+    # paid twice, because some are legitimate re-issues somebody chose not to
+    # pursue. That is the honest version of "prevented losses" and the only one
+    # that survives being asked about.
+    # Watchlist hits by category and severity, open split from acknowledged.
+```

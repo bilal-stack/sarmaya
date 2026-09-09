@@ -245,12 +245,13 @@ def map_vendor(
 def list_posts(
     provider: str,
     status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(200, ge=1, le=1000),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
     try:
         return [_post_dict(p) for p in JournalPostingService(db).list_posts(
-            current_user, status_filter, provider,
+            current_user, status_filter, provider, limit,
         )]
     except (ValueError, PermissionError) as e:
         _raise_for(e)

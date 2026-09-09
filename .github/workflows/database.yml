@@ -1,0 +1,130 @@
+name: Database
+
+# The two operations that have to happen against the deployed database and
+# have nowhere else to run on Render's free tier: it has no pre-deploy command
+# and no shell, both being paid features. So they run here.
+#
+# Manual dispatch only, never on push. Both are deliberate acts:
+#
+#   migrate           changes the schema of a live database
+#   bootstrap-tenant  creates the first administrator, an account that can
+#                     approve and release payments
+#
+# Neither belongs on a trigger that fires because somebody merged something.
+#
+# ORDERING, which this arrangement does not enforce for you. A pre-deploy
+# command runs after the build and before the new instance takes traffic. This
+# does not. Run `migrate` and let it finish BEFORE Render deploys code that
+# expects the new schema — otherwise the old code meets the new schema, or
+# worse, the new code meets the old one.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: What to run
+        required: true
+        type: choice
+        options: [migrate, bootstrap-tenant, verify]
+
+concurrency:
+  # Never two schema changes at once, whatever else is happening.
+  group: database-operations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: inputs.operation == 'migrate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - name: Show what would change
+        env: &db_env
+          # The owner, and the direct (unpooled) endpoint: Alembic runs DDL,
+          # which does not belong on a transaction-mode pooler.
+          ADMIN_DATABASE_URL: ${{ secrets.ADMIN_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          DEBUG: 'false'
+        run: |
+          echo "Current revision:"
+          alembic current
+          echo
+          echo "Head revision:"
+          alembic heads
+      - name: Apply
+        env: *db_env
+        run: alembic upgrade head
+      - name: Confirm
+        env: *db_env
+        run: alembic current
+
+  bootstrap-tenant:
+    if: inputs.operation == 'bootstrap-tenant'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - name: Create the first tenant and administrator
+        # Every value comes from secrets rather than workflow inputs, because
+        # dispatch inputs are shown in the run's UI and recorded in its log —
+        # which is the wrong place for the password of an account that can
+        # release payments.
+        #
+        # The script refuses to run against a database that already has users,
+        # so a second dispatch is a no-op rather than a second administrator.
+        env:
+          ADMIN_DATABASE_URL: ${{ secrets.ADMIN_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          DEBUG: 'false'
+          BOOTSTRAP_TENANT_NAME: ${{ vars.BOOTSTRAP_TENANT_NAME }}
+          BOOTSTRAP_TENANT_SLUG: ${{ vars.BOOTSTRAP_TENANT_SLUG }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ vars.BOOTSTRAP_ADMIN_EMAIL }}
+          BOOTSTRAP_ADMIN_NAME: ${{ vars.BOOTSTRAP_ADMIN_NAME }}
+          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+        run: python -m scripts.bootstrap_tenant
+      - name: Reminder
+        run: |
+          echo "Sign in and change that password now."
+          echo "It was set from a repository secret, so it is known to anyone"
+          echo "who can read repository settings."
+
+  verify:
+    if: inputs.operation == 'verify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - name: Check the deployment
+        # Fails on the conditions that are invisible from the outside: the app
+        # connecting as a role that can bypass RLS, DEBUG left on,
+        # self-registration open, a table with no row-level security policy.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ADMIN_DATABASE_URL: ${{ secrets.ADMIN_DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          DEBUG: 'false'
+        run: |
+          python -m scripts.verify_deployment \
+            "${{ vars.API_URL }}" \
+            --database-url "${{ secrets.DATABASE_URL }}" \
+            --origin "${{ vars.CORS_ORIGINS }}"

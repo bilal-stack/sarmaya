@@ -80,6 +80,11 @@ def _date(value: str, fmt: str) -> Optional[date]:
 
 # --- CAMT.053 ---------------------------------------------------------------
 
+#: Matched before parsing, not after: by the time ElementTree has read a DTD it
+#: has already done the expanding. Case-insensitive because the declaration is
+#: `<!DOCTYPE` by the spec but nothing stops a hostile file shouting it.
+_DOCTYPE = re.compile(r"<!DOCTYPE", re.IGNORECASE)
+
 def parse_camt053(content: str) -> ParsedStatement:
     """ISO 20022 bank-to-customer statement.
 
@@ -87,6 +92,31 @@ def parse_camt053(content: str) -> ParsedStatement:
     matched on local name rather than a hardcoded namespace — otherwise a bank
     upgrading its schema silently produces an empty statement.
     """
+    # A statement is a file somebody uploaded, so it is untrusted input, and
+    # `xml.etree` does expand internal entities. Measured on this interpreter:
+    # 481 bytes of nested entity definitions expand to 300,000 characters, a
+    # 625x amplification, and the upload size cap is no help because the point
+    # of the attack is that the file is small.
+    #
+    # It is not unbounded — modern libexpat refuses past a certain
+    # amplification factor ("limit on input amplification factor breached"),
+    # which stops the classic billion-laughs outright. So this guard is
+    # defence in depth rather than the only thing standing in the way, and it
+    # is worth having for two reasons: that limit is a property of whichever
+    # libexpat the base image ships, so relying on it alone makes a security
+    # property depend on a version nobody is tracking; and it turns a
+    # confusing "no statement found" into a message that says what was wrong
+    # with the file.
+    #
+    # Free to enforce: entity expansion needs a DTD, and a CAMT.053 statement
+    # from a real bank has no reason to carry one.
+    if _DOCTYPE.search(content):
+        raise StatementParseError(
+            "The file declares a DOCTYPE, which a bank statement does not "
+            "need and which can be used to make a parser consume unbounded "
+            "memory. Export the statement again without one."
+        )
+
     try:
         root = ElementTree.fromstring(content)
     except ElementTree.ParseError as exc:

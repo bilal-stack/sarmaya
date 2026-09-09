@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple, cast
 from datetime import date, timedelta
 from uuid import UUID
 from app.models.invoice import Invoice
@@ -118,7 +118,12 @@ class InvoiceRepository:
         blocking next action. Tenant scoping is handled by RLS.
         Returns [(invoice, vendor_or_None), ...].
         """
-        return (
+        # SQLAlchemy types a two-entity query as Row[tuple[Invoice, Vendor]],
+        # which is tuple-like at runtime but not the same static type — and
+        # the outer join means the vendor really can be None. The annotation
+        # describes what a caller actually receives; the cast tells mypy that.
+        return cast(
+            List[Tuple[Invoice, Optional[Vendor]]],
             self.db.query(Invoice, Vendor)
             .outerjoin(Vendor, Invoice.vendor_id == Vendor.id)
             .filter(Invoice.current_state == InvoiceState.PENDING_APPROVAL.value)
@@ -175,9 +180,15 @@ class InvoiceRepository:
             func.sum(Invoice.total_amount)
         ).filter(Invoice.invoice_date >= month_start).first()
         
+        # An aggregate query always returns one row, so `.first()` is not
+        # really optional here — but the type says it is, and indexing None
+        # would be a TypeError rather than a zero. Cheap to be certain.
+        if result is None:
+            return 0, 0.0
+
         count = result[0] or 0
         total = money_to_float(result[1])
-        
+
         return count, total
     
     def create(self, invoice: Invoice) -> Invoice:
