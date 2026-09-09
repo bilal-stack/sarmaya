@@ -39,8 +39,6 @@ PyPDF2==3.0.1
 # HTTP client
 httpx>=0.28,<1.0
 
-# Email (async SMTP for notifications)
-aiosmtplib>=3.0,<4
 
 # OCR providers
 requests>=2.32  # For OCR.space API
