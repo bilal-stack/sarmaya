@@ -110,8 +110,18 @@ jobs:
             --output-file=requirements.lock requirements.txt
           if ! diff -u requirements.lock.committed requirements.lock; then
             echo
-            echo "requirements.lock is out of date. Regenerate it with:"
-            echo "  pip-compile --strip-extras --no-header --output-file=requirements.lock requirements.txt"
+            echo "requirements.lock is out of date."
+            echo
+            echo "On a Dependabot PR this is expected: the bump changes"
+            echo "requirements.txt and nothing regenerates the lock. Run the"
+            echo "'Regenerate the lockfile' workflow against this branch."
+            echo
+            echo "By hand, ON LINUX ONLY -- pip-compile resolves for the"
+            echo "platform it runs on, and a lock built on Windows omits"
+            echo "uvloop and adds colorama:"
+            echo "  docker run --rm -v \"\$PWD:/w\" -w /w python:3.14-slim sh -c \\"
+            echo "    \"pip install -q pip-tools && pip-compile --strip-extras \\"
+            echo "     --no-header --output-file=requirements.lock requirements.txt\""
             exit 1
           fi
 
