@@ -84,6 +84,47 @@ jobs:
         # and there is no reason to wait for the slow answer to get the fast one.
         run: ruff check .
 
+      - name: Typecheck
+        # Scoped to the packages that are clean today; the scope lives in
+        # pyproject.toml under [tool.mypy] and the comment there explains why
+        # it is not yet all of app/. Enforced here so it cannot rot, and so
+        # widening it is a one-line change somebody can actually make.
+        run: mypy
+
+      - name: Check the lockfile matches requirements.txt
+        # The Dockerfile installs requirements.lock, so a change to
+        # requirements.txt that never reached the lock would not affect the
+        # image at all — the dependency would appear to be added and quietly
+        # not be. Regenerating and diffing is the only thing that catches it.
+        #
+        # `--no-header` on both sides, and it is load-bearing. pip-compile
+        # otherwise records its own invocation in a comment at the top, and
+        # that line varies with how it was called — a run that resolved
+        # entirely from the existing pins writes `--no-index` into it. This
+        # check failed on exactly that once: every package pin identical, one
+        # comment different. A check that fails for a reason unrelated to what
+        # it is checking gets muted, and takes the real signal with it.
+        run: |
+          cp requirements.lock requirements.lock.committed
+          pip-compile --quiet --strip-extras --no-header \
+            --output-file=requirements.lock requirements.txt
+          if ! diff -u requirements.lock.committed requirements.lock; then
+            echo
+            echo "requirements.lock is out of date."
+            echo
+            echo "On a Dependabot PR this is expected: the bump changes"
+            echo "requirements.txt and nothing regenerates the lock. Run the"
+            echo "'Regenerate the lockfile' workflow against this branch."
+            echo
+            echo "By hand, ON LINUX ONLY -- pip-compile resolves for the"
+            echo "platform it runs on, and a lock built on Windows omits"
+            echo "uvloop and adds colorama:"
+            echo "  docker run --rm -v \"\$PWD:/w\" -w /w python:3.14-slim sh -c \\"
+            echo "    \"pip install -q pip-tools && pip-compile --strip-extras \\"
+            echo "     --no-header --output-file=requirements.lock requirements.txt\""
+            exit 1
+          fi
+
       - name: Check the migrations apply to an empty database
         # The suite builds its schema with create_all, not Alembic, so a broken
         # migration passes every test and fails on deploy instead. This is the

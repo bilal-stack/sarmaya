@@ -9,7 +9,6 @@ verifies that a tenant-scoped session can only see/insert its own rows.
 Setup data is created with the admin connection (which bypasses RLS, so it can
 seed multiple tenants); the assertions run on the app connection.
 """
-import os
 import uuid
 
 import pytest
@@ -23,27 +22,11 @@ from app.models.tenant import Tenant
 from app.models.vendor import Vendor
 from app.core.enums import VendorStatus
 
+from tests.integration.conftest import app_role_url_for_test_db
+
 pytestmark = pytest.mark.integration
 
 
-def _swap_to_test_db(url: str) -> str:
-    """Point the least-privilege role's URL at whichever database the suite is
-    running against.
-
-    The database name is taken from TEST_DATABASE_URL when it is set, so this
-    module follows the rest of the suite — running the tests against a database
-    built by `alembic upgrade head` is how the migrations get proven, and these
-    two tests silently read from a different database until this honoured it.
-    The credentials stay those of `os_app`: the whole point here is connecting
-    as the role that cannot bypass RLS.
-    """
-    head, _, db = url.rpartition("/")
-    override = os.getenv("TEST_DATABASE_URL")
-    if override:
-        db = override.rpartition("/")[2]
-    else:
-        db = f"{db}_test"
-    return f"{head}/{db}"
 
 
 def _ensure_vendor_rls(admin_conn) -> None:
@@ -70,7 +53,7 @@ def _ensure_vendor_rls(admin_conn) -> None:
 def rls(db_engine):
     """Seeds two tenants (A, B) each with one vendor via the admin connection,
     yields the ids plus an os_app-bound session factory, then cleans up."""
-    app_url = _swap_to_test_db(settings.DATABASE_URL)
+    app_url = app_role_url_for_test_db(settings.DATABASE_URL)
     app_engine = create_engine(app_url, pool_pre_ping=True)
 
     tenant_a = uuid.uuid4()

@@ -27,12 +27,16 @@ import sys
 
 from sqlalchemy import text
 
+from app.core.config import settings
 from app.core.database import SessionLocal, set_tenant_context
+from app.core.logging_config import configure_logging
 from app.core.roles import ADMIN
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+# Same configuration the API uses: readable lines in development, one JSON
+# object per line in production. These jobs run unattended on a schedule,
+# so their output is read in a platform log viewer far more often than by
+# a person at a terminal.
+configure_logging(debug=settings.DEBUG)
 logger = logging.getLogger("dispatch_integration_posts")
 
 
