@@ -28,12 +28,6 @@ permissions:
 jobs:
   regenerate:
     runs-on: ubuntu-latest
-    # The lock MUST be built on Linux, which is what the image and CI use.
-    # pip-compile resolves for the platform it runs on, and the difference is
-    # not cosmetic: a lock built on Windows omits uvloop, which uvicorn uses on
-    # Linux, and adds colorama, which only exists there. The container pins the
-    # same Python the Dockerfile installs, so the resolution matches what ships.
-    container: python:3.14-slim
     steps:
       - uses: actions/checkout@v7
         with:
@@ -42,13 +36,25 @@ jobs:
           # repository, and this workflow only ever runs because a person asked.
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install pip-tools
-        run: pip install --quiet pip-tools
-
-      - name: Regenerate
+      - name: Regenerate, in the image the Dockerfile uses
+        # The container is scoped to this one step rather than the whole job,
+        # and that is not a style choice: python:3.14-slim ships no git, so a
+        # job running inside it cannot commit what it just produced. The first
+        # version of this workflow did exactly that and died with
+        # "git: not found". The runner has git; the container has the right
+        # Python. Each does the half it can.
+        #
+        # The lock MUST be built on Linux, which is what the image and CI use.
+        # pip-compile resolves for the platform it runs on, and the difference
+        # is not cosmetic: a lock built on Windows omits uvloop, which uvicorn
+        # uses on Linux, and adds colorama, which only exists there.
         run: |
-          pip-compile --quiet --strip-extras --no-header \
-            --output-file=requirements.lock requirements.txt
+          docker run --rm -v "$PWD:/w" -w /w python:3.14-slim sh -c \
+            "pip install --quiet pip-tools && \
+             pip-compile --quiet --strip-extras --no-header \
+               --output-file=requirements.lock requirements.txt"
+          # docker wrote it as root; hand it back so git can stage it.
+          sudo chown "$(id -u):$(id -g)" requirements.lock
 
       - name: Commit if anything changed
         run: |
