@@ -18,6 +18,7 @@ from app.schemas.correlation import TransactionChain
 from app.services.correlation import CorrelationService
 from app.schemas.evidence import EvidencePackResponse, EvidencePackRecord
 from app.services.evidence_pack import EvidencePackService
+from app.services.audit_pack import AuditPackService
 from app.services.export_service import canonical_json, to_html
 
 router = APIRouter(prefix="/audit", tags=["Audit"])
@@ -213,6 +214,57 @@ def get_transaction_chain(
         return CorrelationService(db).get_chain(correlation_id, current_user)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/controls")
+def list_controls(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """The controls this system can evidence, and what each one is.
+
+    Read before asking for a control pack — the identifiers are the ones
+    `/audit/pack` accepts.
+    """
+    try:
+        return AuditPackService(db).list_controls(current_user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post("/pack")
+def generate_audit_pack(
+    period_start: date = Query(..., description="First day covered, inclusive."),
+    period_end: date = Query(..., description="Last day covered, inclusive."),
+    control: Optional[str] = Query(
+        None, description="Narrow the pack to one control. Omit for all of them.",
+    ),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """One-click audit pack for a period, optionally for a single control.
+
+    The other pack (`/evidence-pack/{correlation_id}`) answers "what happened
+    to this invoice". This answers "did this control operate", across every
+    record it touched in the window — which is the question an auditor opens
+    with. Sealed with the same SHA-256 hash so either kind can be re-verified
+    from its exported document.
+
+    An empty result is sealed here rather than refused, which is the opposite
+    of the chain pack's behaviour and deliberately so: "nothing was refused
+    this quarter" is a finding, where an empty chain pack is a lookup that
+    failed. See the service's module docstring.
+    """
+    try:
+        return AuditPackService(db).generate(
+            period_start, period_end, current_user, control,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        # A backwards period, or a control nobody evidences. Both are the
+        # caller asking for something incoherent rather than something absent.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post("/evidence-pack/{correlation_id}", response_model=EvidencePackResponse)

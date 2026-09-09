@@ -1,0 +1,132 @@
+name: Scheduled jobs
+
+# The three background jobs, run here because Render's free tier does not
+# include cron services — only web services, static sites and Postgres. The
+# definitions still exist in render.yaml, commented out: moving them back is
+# uncommenting them and paying, with no code change.
+#
+# WHAT DEPENDS ON THESE. Nothing about the app looks wrong when they are not
+# running, which is the whole problem:
+#
+#   dispatch_notifications    no email is ever delivered — approvals, SLA
+#                             escalations, watchlist alerts, all queued forever
+#   run_workflow_timers       no SLA is ever escalated and no reminder sent
+#   dispatch_integration_posts  journal entries never reach the client's books
+#
+# Check /ai-tools/system after any change here. A job that stopped shows as a
+# stale timestamp there, and that page exists precisely because none of these
+# failures announce themselves.
+#
+# HONEST LIMITS OF THIS APPROACH, versus a real cron:
+#
+#   * GitHub's shortest interval is 5 minutes. dispatch_notifications wants one
+#     minute; here it gets five.
+#   * Scheduling is best-effort. GitHub's own documentation says runs can be
+#     delayed under load and that "some queued jobs may be dropped", worst at
+#     the top of the hour — so the schedules below deliberately avoid :00.
+#
+# Neither is fatal, because none of these jobs lose work when a run is skipped:
+# the queue is still there and the next run drains it. They are latency
+# guarantees, not correctness ones. If the per-minute cadence ever matters,
+# that is the moment to pay for a real scheduler.
+on:
+  schedule:
+    # Offset from the hour boundary on GitHub's own advice about load.
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'   # notifications
+    - cron: '4,9,14,19,24,29,34,39,44,49,54,59 * * * *'   # integration posts
+    - cron: '17 * * * *'                                   # workflow timers
+  # So a human can drain the queue immediately rather than waiting for a slot.
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Which job to run
+        required: true
+        default: all
+        type: choice
+        options: [all, notifications, integration-posts, workflow-timers]
+
+# Never two drains of the same queue at once. Each job is safe to run
+# concurrently with itself — a sent message is not picked up twice, and a
+# posted entry is not posted twice — but overlapping runs achieve nothing and
+# make the logs harder to read.
+concurrency:
+  group: scheduled-jobs
+  cancel-in-progress: false
+
+jobs:
+  notifications:
+    # `github.event.schedule` is the cron line that fired, which is how one
+    # workflow serves three cadences without three near-identical files.
+    if: >-
+      github.event.schedule == '2,7,12,17,22,27,32,37,42,47,52,57 * * * *' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.job == 'all' || inputs.job == 'notifications'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - run: python -m scripts.dispatch_notifications --quiet
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          DEBUG: 'false'
+          SMTP_ENABLED: ${{ vars.SMTP_ENABLED }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM_EMAIL: ${{ vars.SMTP_FROM_EMAIL }}
+
+  integration-posts:
+    if: >-
+      github.event.schedule == '4,9,14,19,24,29,34,39,44,49,54,59 * * * *' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.job == 'all' || inputs.job == 'integration-posts'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - run: python -m scripts.dispatch_integration_posts --quiet
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          DEBUG: 'false'
+          # Absent, the drain is a no-op rather than an error: a tenant with no
+          # accounting system connected queues nothing in the first place.
+          QBO_CLIENT_ID: ${{ secrets.QBO_CLIENT_ID }}
+          QBO_CLIENT_SECRET: ${{ secrets.QBO_CLIENT_SECRET }}
+          QBO_ENVIRONMENT: ${{ vars.QBO_ENVIRONMENT }}
+          QBO_REDIRECT_URI: ${{ vars.QBO_REDIRECT_URI }}
+
+  workflow-timers:
+    if: >-
+      github.event.schedule == '17 * * * *' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.job == 'all' || inputs.job == 'workflow-timers'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.lock
+      - run: python -m scripts.run_workflow_timers --quiet
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          DEBUG: 'false'

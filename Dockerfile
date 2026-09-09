@@ -3,7 +3,12 @@
 # Kept deliberately plain: a single stage, the platform's own Python base, and
 # no build tooling beyond what psycopg2-binary needs. Nothing here is specific
 # to one host, so the same image runs on Render, Fly, Railway or a VM.
-FROM python:3.12-slim
+# 3.14, matching CI, the development venv, and the interpreter requirements.lock
+# was resolved against. It used to be 3.12, which worked by luck: pip-compile
+# emits markers for the version it resolves on, so a lock built under 3.14 that
+# happened to need a 3.13-only wheel would have failed here and nowhere else.
+# requirements.txt's own note says the ranges were widened for 3.14 wheels.
+FROM python:3.14-slim
 
 # Python housekeeping: no .pyc files to bloat the layer, unbuffered output so
 # logs appear in the platform's log viewer as they happen rather than when the
@@ -15,8 +20,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Requirements first, so a code change does not reinstall the world.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+#
+# The lock, not requirements.txt: the ranges there are deliberately wide (see
+# the note at the top of that file), which means two builds a month apart can
+# resolve different transitive versions with nothing recording what changed.
+# requirements.lock pins all of it, and CI fails if the two have drifted apart.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 

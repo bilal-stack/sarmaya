@@ -298,6 +298,54 @@ class TestTheEndpoints:
             f"{role.value}: screen {screen.status_code}, export {export.status_code}"
         )
 
+    @pytest.mark.parametrize("role", [
+        UserRole.ADMIN, UserRole.CFO, UserRole.MANAGER,
+        UserRole.AP_CLERK, UserRole.AUDITOR,
+    ])
+    def test_the_sod_report_is_gated_the_same_way(
+        self, db, tenant, client, as_user, make_user, role
+    ):
+        """Worth its own case rather than folding into the one above: this is
+        the only dashboard gated on audit.view instead of invoices.view, so it
+        is the only one where a caller can hold the dashboard permission and
+        still be refused. A second gate that drifted would show up here first
+        — as a manager reading, in a downloadable file, which of their
+        colleagues had been stopped from approving their own invoices."""
+        as_user(make_user(role))
+
+        screen = client.get("/api/v1/dashboard/sod-violations")
+        export = client.get("/api/v1/dashboard/sod-violations/export")
+
+        assert export.status_code == screen.status_code, (
+            f"{role.value}: screen {screen.status_code}, export {export.status_code}"
+        )
+        if role in (UserRole.MANAGER, UserRole.AP_CLERK):
+            assert screen.status_code == 403, (
+                f"{role.value} could read who was refused"
+            )
+
+    @pytest.mark.parametrize("role", [
+        UserRole.ADMIN, UserRole.CFO, UserRole.MANAGER,
+        UserRole.AP_CLERK, UserRole.AUDITOR,
+    ])
+    def test_the_payment_run_report_is_gated_the_same_way(
+        self, db, tenant, client, as_user, make_user, role
+    ):
+        """The second report with a gate of its own: payments.view, because a
+        manager and an approver can open every invoice it touches and cannot
+        open a payment run. Without this, the export would be a way to read
+        run values and bank-file state the screen refuses them."""
+        as_user(make_user(role))
+
+        screen = client.get("/api/v1/dashboard/payment-run-status")
+        export = client.get("/api/v1/dashboard/payment-run-status/export")
+
+        assert export.status_code == screen.status_code, (
+            f"{role.value}: screen {screen.status_code}, export {export.status_code}"
+        )
+        if role is UserRole.MANAGER:
+            assert screen.status_code == 403, "a manager read payment run values"
+
 
 class TestTheEvidencePackExport:
     """The auditor's deliverable, end to end through the API."""
