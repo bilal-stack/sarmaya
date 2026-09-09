@@ -50,7 +50,15 @@ def log_audit(
     if correlation_id is None:
         correlation_id = resolve_correlation_id(db, object_type, object_id)
 
-    # Get user email and role if user exists
+    # Get user email and role if user exists.
+    #
+    # Note for anyone optimising this: `Session.get` looks like the obvious
+    # improvement, since this runs in loops and re-reads the same acting user
+    # once per audit entry. It does not help here. `_exclude_soft_deleted` in
+    # app/core/database.py attaches `with_loader_criteria` to every SELECT, and
+    # SQLAlchemy disables get()'s identity-map shortcut whenever loader
+    # criteria may apply — the criteria could exclude a row that is in the map.
+    # Measured: warm `db.get` calls still emit one SELECT each.
     user = db.query(User).filter(User.id == user_id).first()
     user_email = user.email if user else None
     user_role = user.role if user else None

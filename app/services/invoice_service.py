@@ -15,6 +15,7 @@ from app.services.policy import explain_approval_routing
 from app.services.policy_eval import record_approval_routing_eval
 from app.services.correlation import new_correlation_id
 from app.services.audit import log_audit
+from app.services.storage import local_path as storage_local_path
 from app.services.soft_delete import withdraw
 from app.services import sod
 from app.services.delegation import resolve_authority, resolve_permission
@@ -1010,13 +1011,22 @@ class InvoiceService:
     ) -> Dict[str, Any]:
         # Extract data using OCR (tenant context lets the AI enhancement be
         # recorded in the AI action log with provenance).
+        #
+        # Through `local_path` because every OCR provider takes a path and
+        # opens it. On local storage that yields the file already on disk and
+        # copies nothing; on object storage it downloads to a temporary file
+        # and removes it when the block ends, so the provider code is the same
+        # either way.
         try:
-            ocr_result = extract_invoice_data_ocr(
-                stored_path,
-                db=self.db,
-                tenant_id=current_user["tenant_id"],
-                user_id=current_user["id"],
-            )
+            with storage_local_path(
+                stored_path, file_record.storage_type or "local"
+            ) as ocr_path:
+                ocr_result = extract_invoice_data_ocr(
+                    ocr_path,
+                    db=self.db,
+                    tenant_id=current_user["tenant_id"],
+                    user_id=current_user["id"],
+                )
         except Exception as e:
             raise RuntimeError(f"OCR extraction failed: {str(e)}")
 

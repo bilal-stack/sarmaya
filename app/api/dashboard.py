@@ -133,6 +133,158 @@ def policy_overrides(
         _raise_for(e)
 
 
+@router.get("/invoice-throughput")
+def invoice_throughput(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Capture to paid, and what sends work backwards.
+
+    `match_rate_pct` is deliberately null — see the service docstring.
+    """
+    try:
+        return DashboardService(db).invoice_throughput(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/payment-run-status")
+def payment_run_status(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Where every payment run is, and what is stuck behind it.
+
+    Gated on payments.view rather than the dashboard permission: a manager
+    can open every invoice this touches and still cannot see a payment run.
+    """
+    try:
+        return DashboardService(db).payment_run_status(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/duplicate-anomaly")
+def duplicate_and_anomaly(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Duplicates caught, what happened to them, and the watchlist."""
+    try:
+        return DashboardService(db).duplicate_and_anomaly(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/sod-violations")
+def sod_violations(
+    days: int = Query(90, ge=1, le=365),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Attempts the controls refused, and who made them.
+
+    Gated on audit.view rather than the dashboard permission — it names a
+    person and an action they were refused. See the service docstring.
+    """
+    try:
+        return DashboardService(db).sod_violations(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/ap-aging")
+def ap_aging(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """What we owe, how late it is, and which stage is holding it.
+
+    A point-in-time balance, so no `days` parameter: what is owed is owed
+    regardless of the window somebody is looking at.
+    """
+    try:
+        return DashboardService(db).ap_aging(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/spend-analytics")
+def spend_analytics(
+    days: int = Query(365, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Where the money went, by vendor, GL account and cost centre.
+
+    A year by default rather than the 90 days the operational reports use —
+    spend is read against a budget cycle, not a work queue.
+    """
+    try:
+        return DashboardService(db).spend_analytics(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/rfq-cycle-time")
+def rfq_cycle_time(
+    days: int = Query(180, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """How long sourcing takes, stage by stage, and what it saved.
+
+    180 days by default rather than the 90 the operational reports use: a
+    sourcing cycle runs in weeks, so a shorter window often holds only one or
+    two completed ones.
+
+    Reads with requisitions.view, not sourcing.manage — the permission to run
+    an RFQ is not the permission to read how long RFQs took, and gating on it
+    would exclude the procurement lead this report is for.
+    """
+    try:
+        return DashboardService(db).rfq_cycle_time(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/inventory-turns")
+def inventory_turns(
+    days: int = Query(365, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """How many times the stock turned over, and what could not be valued.
+
+    Reads with inventory.view. Annualised, so a 90-day window and a year are
+    directly comparable.
+    """
+    try:
+        return DashboardService(db).inventory_turns(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/p2p-cycle-time")
+def p2p_cycle_time(
+    days: int = Query(180, ge=1, le=1095),
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Requisition to payment, hop by hop.
+
+    The only report that follows a purchase across all five modules; it works
+    because every record in the chain carries the same correlation id.
+    """
+    try:
+        return DashboardService(db).p2p_cycle_time(current_user, days=days)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
 @router.get("/evidence")
 def evidence_completeness(
     current_user: dict = Depends(get_current_user),

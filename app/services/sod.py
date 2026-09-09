@@ -1,15 +1,29 @@
 """Segregation of Duties (SoD) checks.
 
-Build Book non-negotiable (maker-checker, lines 190-193): the person who makes a
-request must not be the one who approves it. Two rules are enforced today:
+Build Book non-negotiable (maker-checker, lines 190-193): the person who makes
+a request must not be the one who approves it.
 
-  * you cannot approve an invoice you created;
-  * you cannot activate a vendor you created.
+The named rules below are the ones with enough reasoning behind them to be
+worth a function. They are not the whole surface: about half the separations
+this system enforces call `_same_person` directly from the service that owns
+the record — expense claims, headcount requests, stock adjustments, vendor
+returns and payroll changes all do. `app/services/matrices.py` holds the full
+list as a grid, along with which roles hold both halves of each.
 
-Admins are treated as the Build Book's "unless explicitly allowed" carve-out and
-are exempt. Finer-grained configuration (per-rule toggles, amount thresholds, and
-is a documented follow-up. The vendor-bank-change rule is implemented
-below.
+**The admin carve-out.** `has_permission` returns True for admin
+unconditionally, so an admin holds both halves of every separation here. Four
+rules additionally decline to fire on an admin at all — the two approval rules
+and the two vendor rules — as the Build Book's "unless explicitly allowed"
+exception, so a one-person demo tenant still functions. Their cost is bounded:
+a wrongly approved invoice still meets every downstream control.
+
+Nothing on the money path carries that exemption. Release, reconciliation and
+both bank-change rules apply to admins, because the carve-out that keeps a
+one-person tenant working would keep a one-person fraud working. Each rule
+below says which it is and why.
+
+Finer-grained configuration — per-rule toggles, amount thresholds — is a
+documented follow-up.
 """
 from app.core.roles import ADMIN
 

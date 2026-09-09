@@ -395,7 +395,7 @@ class JournalPostingService:
 
     def list_posts(
         self, current_user: dict, status: Optional[str] = None,
-        provider: Optional[str] = None,
+        provider: Optional[str] = None, limit: int = 200,
     ):
         if not has_permission(current_user["role"], PERM_VIEW_INTEGRATIONS):
             raise PermissionError(
@@ -413,7 +413,16 @@ class JournalPostingService:
                 IntegrationConnection,
                 IntegrationJournalPost.connection_id == IntegrationConnection.id,
             ).filter(IntegrationConnection.provider == provider)
-        return query.order_by(IntegrationJournalPost.created_at.desc()).all()
+        # Bounded, because this table only ever grows: one row per payment
+        # released and per claim paid, kept forever as the reconciliation
+        # anchor. Unbounded, the queue view got slower every month it worked
+        # correctly. Newest first, so the cap drops the settled history rather
+        # than the thing somebody opened the page to deal with.
+        return (
+            query.order_by(IntegrationJournalPost.created_at.desc())
+            .limit(limit)
+            .all()
+        )
 
 
 def _request_to_json(request: JournalEntryRequest) -> dict:

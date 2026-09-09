@@ -260,3 +260,82 @@ class TestTheIndexesAreUsed:
         # and timing tests above at volume; this documents what is being
         # planned so a change in it is visible in the diff.
         assert "audit_logs" in plan
+
+
+class TestReleasingAPaymentDoesNotQueryPerInvoice:
+    """The money path had no query budget at all — the smoke tests above cover
+    dashboards, which are read-only and were the thing that had been slow.
+
+    Releasing a run is the opposite case and a worse one to get wrong: it holds
+    a transaction open while it works, so a query per line is not just slow, it
+    is lock duration on `invoices` and `payments` growing with the size of the
+    run. A treasury user settling two hundred invoices at month end is the
+    normal case, not the stress case.
+    """
+
+    def _run(self, db, tenant, make_user, invoice_count):
+        from app.core.enums import PaymentState, VendorStatus
+        from app.models.vendor import Vendor
+        from app.schemas.payment import PaymentCreate
+        from app.services.config_provisioning import ConfigProvisioningService
+        from app.services.payment_service import PaymentService
+
+        admin = make_user(UserRole.ADMIN)
+        ConfigProvisioningService(db).initialize_defaults(admin)
+        clerk = make_user(UserRole.AP_CLERK)
+        cfo = make_user(UserRole.CFO)
+
+        vendor = Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="Perf Vendor",
+            status=VendorStatus.ACTIVE, bank_account_number="0123456789",
+        )
+        db.add(vendor)
+        db.flush()
+
+        invoices = []
+        for _ in range(invoice_count):
+            invoice = Invoice(
+                id=uuid.uuid4(), tenant_id=tenant.id, vendor_id=vendor.id,
+                vendor_name=vendor.legal_name,
+                invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+                invoice_date=date(2026, 8, 1), total_amount=Decimal("100"),
+                current_state=InvoiceState.APPROVED, created_by=clerk["id"],
+            )
+            db.add(invoice)
+            invoices.append(invoice)
+        db.flush()
+
+        service = PaymentService(db)
+        payment = service.prepare_payment(
+            [i.id for i in invoices],
+            PaymentCreate(invoice_ids=[i.id for i in invoices]),
+            clerk,
+        )
+        service.submit_for_release(payment.id, clerk)
+        return service, payment, cfo, PaymentState
+
+    def test_it_stays_within_a_per_invoice_budget(self, db, tenant, make_user):
+        """A ceiling, not a claim that this is fast.
+
+        Measured: releasing a 24-invoice run issues ~300 statements, about
+        twelve per invoice. Most of that is the audit trail doing its job —
+        every settled invoice gets its own entry, and each entry re-reads the
+        invoice to inherit its correlation id and reads the previous entry to
+        extend the hash chain. That is the cost of the guarantee, not waste,
+        and reducing it means changing the chaining itself.
+
+        What this stops is the number growing. Anything that pushes past the
+        budget has added a new per-line read to a loop that already holds the
+        release transaction open, and lock duration on `invoices` and
+        `payments` grows with it.
+        """
+        service, payment, cfo, PaymentState = self._run(db, tenant, make_user, 24)
+        with counting_queries(db) as counted:
+            released = service.release_payment(payment.id, cfo)
+
+        assert released.current_state == PaymentState.RELEASED
+        per_invoice = counted["n"] / 24
+        assert per_invoice < 16, (
+            f"{counted['n']} statements to release 24 invoices "
+            f"({per_invoice:.1f} each) — a new per-line query has appeared"
+        )

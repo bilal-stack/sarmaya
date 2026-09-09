@@ -18,6 +18,7 @@ so the suite stays green in environments without Postgres.
 """
 import os
 import uuid
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 
@@ -30,14 +31,56 @@ from app.core.enums import UserRole
 
 
 def _resolve_test_db_url() -> str:
-    url = os.getenv("TEST_DATABASE_URL")
+    from app.core.config import settings
+
+    # The process environment first, then `.env` via settings. Reading only
+    # os.getenv meant a TEST_DATABASE_URL written into `.env` was invisible —
+    # pydantic loads `.env` into settings, not into the environment — so the
+    # suite silently fell through to deriving one instead of using it.
+    url = os.getenv("TEST_DATABASE_URL") or settings.TEST_DATABASE_URL
     if url:
         return url
+
+    # Suffix the database NAME with _test so we never touch the dev DB.
+    #
+    # Parsed rather than split on the last "/". A hosted connection string
+    # carries query parameters — Neon's ends `?channel_binding=require&
+    # sslmode=require` — and rpartition put the suffix on the end of the last
+    # parameter, producing `sslmode=require_test` and a database name that was
+    # never changed. That URL cannot connect, and an unreachable test database
+    # makes this suite *skip* rather than fail: 997 tests reported green having
+    # run nothing. Silent, and exactly the failure the regression checklist
+    # warns about.
+    parts = urlsplit(settings.ADMIN_DATABASE_URL)
+    return urlunsplit(parts._replace(path=f"{parts.path.rstrip('/')}_test"))
+
+
+def app_role_url_for_test_db(url: str) -> str:
+    """`url`'s credentials and host, pointed at the database the suite uses.
+
+    The RLS tests connect as `os_app` — the role that cannot bypass RLS, which
+    is the entire point of them — but they must read the same database the rest
+    of the suite built. So the credentials come from the given URL and only the
+    database name is replaced.
+
+    Lived in three test modules as three copies of the same rpartition, each
+    carrying the same two faults: it ignored a TEST_DATABASE_URL set in `.env`
+    rather than exported, and it split on the last "/", which mangles any URL
+    with query parameters. One copy, parsed properly.
+    """
     from app.core.config import settings
-    base = settings.ADMIN_DATABASE_URL
-    # Suffix the database name with _test so we never touch the dev DB.
-    head, _, db_name = base.rpartition("/")
-    return f"{head}/{db_name}_test"
+
+    explicit = (
+        os.getenv("TEST_APP_DATABASE_URL") or settings.TEST_APP_DATABASE_URL
+    )
+    if explicit:
+        return explicit
+
+    # Fallback for the common case, where the app database and the test
+    # database live on the same server: keep `url`'s credentials and host, and
+    # change only the database name.
+    target = urlsplit(_resolve_test_db_url())
+    return urlunsplit(urlsplit(url)._replace(path=target.path))
 
 
 @pytest.fixture(scope="session")

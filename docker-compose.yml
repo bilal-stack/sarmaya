@@ -1,0 +1,128 @@
+# A working Postgres and API pair, for somebody who has just cloned this.
+#
+#   docker compose up --build
+#   -> http://localhost:8000/docs, with a demo tenant already seeded
+#
+# Development only. Every value here is a local default chosen so the stack
+# comes up with no .env at all — which is the entire point, and also exactly
+# why none of it is safe anywhere else. The compose file sets DEBUG=true and a
+# throwaway SECRET_KEY; a deployment gets neither (see render.yaml and the
+# README's deploy section).
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sarmaya
+    ports:
+      # Exposed so you can point psql, or the test suite, at it from the host.
+      - "5432:5432"
+    volumes:
+      - sarmaya_db:/var/lib/postgresql/data
+    healthcheck:
+      # The API waits on this rather than on the container merely existing:
+      # Postgres accepts connections several seconds after the process starts,
+      # and without the wait the first migration races it and fails.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sarmaya"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Migrations as their own one-shot service, not as part of the API's start
+  # command. Two API instances starting together would both try to migrate,
+  # and a failed migration should stop the stack coming up rather than
+  # crash-loop a container — the same reasoning the Dockerfile's CMD gives for
+  # leaving them out of it.
+  migrate:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ADMIN_DATABASE_URL: postgresql://postgres:postgres@db:5432/sarmaya
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/sarmaya
+      SECRET_KEY: local-development-only-not-a-real-secret-key
+      DEBUG: "true"
+      # Migration 002 seeds a demo tenant only when asked, because those
+      # accounts share a password published in this repository. Asking is
+      # correct here and nowhere else.
+      SEED_DEMO_DATA: "true"
+    command: ["sh", "-c", "alembic upgrade head"]
+
+  api:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # Both point at the same role here. In a real deployment they must not:
+      # DATABASE_URL is a non-superuser, non-BYPASSRLS role so row-level
+      # security is actually enforced, and ADMIN_DATABASE_URL is the owner and
+      # is used only by Alembic. See the README.
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/sarmaya
+      ADMIN_DATABASE_URL: postgresql://postgres:postgres@db:5432/sarmaya
+      SECRET_KEY: local-development-only-not-a-real-secret-key
+      DEBUG: "true"
+      CORS_ORIGINS: http://localhost:9002,http://127.0.0.1:9002
+      PORT: "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      # Uploads survive a rebuild. Not a bind mount of the source: the image
+      # runs as a non-root user that deliberately cannot write to its own code.
+      - sarmaya_uploads:/app/uploads
+
+  # The three schedulers, off by default. Nothing in the app delivers a
+  # notification, escalates an SLA or posts to an accounting system without
+  # them, and leaving them out of the default `up` would teach a new engineer
+  # a version of this system that quietly does not work.
+  #
+  #   docker compose --profile jobs up
+  #
+  # A loop rather than cron, because a cron daemon in a container is a second
+  # process to supervise for no benefit at this scale.
+  notifications:
+    build: .
+    profiles: ["jobs"]
+    depends_on:
+      api:
+        condition: service_started
+    environment: &job_env
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/sarmaya
+      ADMIN_DATABASE_URL: postgresql://postgres:postgres@db:5432/sarmaya
+      SECRET_KEY: local-development-only-not-a-real-secret-key
+      DEBUG: "true"
+    command:
+      - "sh"
+      - "-c"
+      - "while true; do python -m scripts.dispatch_notifications --quiet; sleep 60; done"
+
+  workflow-timers:
+    build: .
+    profiles: ["jobs"]
+    depends_on:
+      api:
+        condition: service_started
+    environment: *job_env
+    command:
+      - "sh"
+      - "-c"
+      - "while true; do python -m scripts.run_workflow_timers --quiet; sleep 3600; done"
+
+  integration-posts:
+    build: .
+    profiles: ["jobs"]
+    depends_on:
+      api:
+        condition: service_started
+    environment: *job_env
+    command:
+      - "sh"
+      - "-c"
+      - "while true; do python -m scripts.dispatch_integration_posts --quiet; sleep 300; done"
+
+volumes:
+  sarmaya_db:
+  sarmaya_uploads:

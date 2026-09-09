@@ -23,15 +23,38 @@
 ---
 
 ## How to run (development)
+
+### The short way
+
+Needs nothing installed but Docker:
+
+```bash
+docker compose up --build
+```
+
+Postgres, every migration, a seeded demo tenant and the API on
+<http://localhost:8000/docs>. The three schedulers are off by default —
+nothing delivers a notification, escalates an SLA or posts to an accounting
+system without them — so add `--profile jobs` when you are working on any of
+that.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the test suite, the dependency
+lockfile, and the conventions that are load-bearing rather than stylistic.
+
+### By hand
+
 1. Activate venv:
    - Windows PowerShell:
      ```
-     .\env\Scripts\Activate
+     .\.venv\Scripts\Activate
      ```
 2. Install requirements:
    ```
-   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
    ```
+   That includes the runtime requirements plus ruff and pytest. The Docker
+   image installs `requirements.lock` instead, which pins exact versions —
+   see CONTRIBUTING.md before changing either.
 3. Set env vars (example):
    - Windows (PowerShell):
      ```
@@ -40,7 +63,6 @@
      ```
 4. Run migrations:
    ```
-   cd c:\python\os
    alembic upgrade head
    ```
 5. Start server:
