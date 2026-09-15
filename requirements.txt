@@ -48,4 +48,4 @@ boto3>=1.35     # For AWS Textract (future)
 pytest>=8.3,<9
 pytest-asyncio>=0.24,<0.25
 black>=24.10
-ruff>=0.8
+ruff>=0.16.7

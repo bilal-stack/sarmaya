@@ -9,7 +9,7 @@
 # is enabled, what is ignored, and why.
 -r requirements.txt
 
-ruff>=0.6,<1
+ruff>=0.16.7,<1
 
 # Regenerates requirements.lock. MUST be run on Linux, which is what the image
 # and CI actually use:
