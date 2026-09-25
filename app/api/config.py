@@ -10,6 +10,7 @@ from app.schemas.policy import (
     ApprovalPolicyResponse,
     PolicySimulationRequest,
     PolicySimulationResult,
+    MatchToleranceUpdate,
 )
 from app.schemas.workflow import WorkflowStateResponse, WorkflowTransitionsUpdate, WorkflowSlaUpdate
 from app.services.policy_service import ApprovalPolicyService
@@ -147,6 +148,40 @@ def restore_config_version(
 # ============================================
 # APPROVAL POLICIES (approval routing matrix)
 # ============================================
+
+@router.get("/match-tolerance")
+def get_match_tolerance_config(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """How far an invoice may differ from the goods received and still match."""
+    from app.services.match_tolerance_service import MatchToleranceService
+
+    try:
+        return MatchToleranceService(db).get(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.put("/match-tolerance")
+def set_match_tolerance_config(
+    payload: MatchToleranceUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Change it. Versioned and audited like every other policy change —
+    widening this far enough turns three-way matching into a formality that
+    passes everything, so it is not a quiet settings write."""
+    from app.services.match_tolerance_service import MatchToleranceService
+
+    try:
+        return MatchToleranceService(db).set(
+            payload.amount_percent, payload.quantity_percent,
+            current_user, payload.reason,
+        )
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
 
 @router.get("/approval-policies", response_model=List[ApprovalPolicyResponse])
 def list_approval_policies(
