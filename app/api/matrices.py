@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db_session
-from app.services.matrices import approval_matrix, sod_matrix
+from app.services.matrices import (
+    approval_matrix, sod_matrix, vendor_risk_matrix,
+)
 
 router = APIRouter(prefix="/matrices", tags=["matrices"])
 
@@ -43,5 +45,22 @@ def sod(current_user: dict = Depends(get_current_user)):
     """
     try:
         return sod_matrix(current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/vendor-risk")
+def vendor_risk(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Tier against factor, with a count of vendors in each cell.
+
+    Buildable only since risk_score started being computed — before that it
+    was an Integer nothing assigned, and a grid over it would have had to
+    invent the scoring rule and the bands it was drawing.
+    """
+    try:
+        return vendor_risk_matrix(db, current_user)
     except (ValueError, PermissionError) as e:
         _raise_for(e)
