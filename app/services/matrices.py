@@ -436,3 +436,72 @@ def sod_matrix(current_user: dict) -> Dict:
             r["rule"] for r in rows if not r["ordinary_roles_holding_both"]
         ],
     }
+
+
+# --- 3. Vendor risk matrix ---------------------------------------------------
+
+def vendor_risk_matrix(db: Session, current_user: dict) -> Dict:
+    """Tier against factor: which vendors sit where, and what put them there.
+
+    The third of the Build Book's five, and for most of this project it was
+    unbuildable for a specific reason worth keeping on the record: `risk_score`
+    was an Integer column that nothing ever assigned, so a matrix over it would
+    have had to invent both the scoring rule and the bands. That is the failure
+    this module exists to avoid, and it is why this arrived last.
+
+    It is buildable now because `vendor_risk.py` computes the score from
+    measured facts and returns the factors that produced it. So the grid has
+    two real axes — tier down the side, factor across — and the cells are
+    counts of vendors, not estimates.
+
+    What the grid shows that the vendor list does not: **which factor is
+    carrying each tier**. Ten high-risk vendors that are all high for the same
+    reason is one problem with one fix. Ten that are high for ten different
+    reasons is ten problems. A sorted list of scores cannot tell those apart.
+    """
+    _require_audit(current_user)
+
+    from app.models.vendor import Vendor
+    from app.services.vendor_risk import TIERS, VendorRiskService
+
+    service = VendorRiskService(db)
+    scored = [service.score(v) for v in db.query(Vendor).all()]
+
+    tier_names = [name for _floor, name in TIERS]
+    # Every factor the scorer can emit, taken from what it actually produced
+    # rather than from a hardcoded list that could drift away from it.
+    factor_codes = sorted({
+        f["code"] for result in scored for f in result["factors"]
+    })
+
+    cells: Dict[str, Dict[str, int]] = {
+        tier: {code: 0 for code in factor_codes} for tier in tier_names
+    }
+    totals = {tier: 0 for tier in tier_names}
+    for result in scored:
+        tier = result["tier"]
+        totals[tier] += 1
+        for factor in result["factors"]:
+            cells[tier][factor["code"]] += 1
+
+    # A factor nothing currently trips. Reported rather than omitted: a control
+    # that never fires is either watching something that does not happen or is
+    # not watching, and a grid that hides the empty column cannot show which.
+    never_seen = [
+        code for code in factor_codes
+        if sum(cells[t][code] for t in tier_names) == 0
+    ]
+
+    return {
+        "tiers": tier_names,
+        "factors": factor_codes,
+        "cells": cells,
+        "vendors_per_tier": totals,
+        "vendor_count": len(scored),
+        "never_triggered": never_seen,
+        #: The same disclosure vendor_risk.py makes, carried up so a reader of
+        #: the grid is told what the grid does not cover.
+        "unscored_dimensions": (
+            scored[0]["unscored_dimensions"] if scored else []
+        ),
+    }

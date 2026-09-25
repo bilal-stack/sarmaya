@@ -26,6 +26,7 @@ from app.core.roles import (
 TYPE_APPROVAL_POLICY = "approval_policy"
 TYPE_AUTOPILOT = "autopilot"
 TYPE_WORKFLOW = "workflow"
+TYPE_MATCH_TOLERANCE = "match_tolerance"
 
 # Live-table identifiers (kept local to avoid importing the config services,
 # which import this module). Must match policy_service / autopilot_service /
@@ -40,6 +41,9 @@ _VIEW_PERMISSION = {
     TYPE_APPROVAL_POLICY: PERM_MANAGE_POLICIES,
     TYPE_AUTOPILOT: PERM_MANAGE_POLICIES,
     TYPE_WORKFLOW: PERM_MANAGE_WORKFLOW,
+    # Same gate as the other policy types: whoever may change the
+    # tolerance may read how it got there.
+    TYPE_MATCH_TOLERANCE: PERM_MANAGE_POLICIES,
 }
 
 

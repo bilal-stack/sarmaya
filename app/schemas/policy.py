@@ -131,3 +131,18 @@ class PolicySimulationResult(BaseModel):
     net_by_role: Dict[str, int]
     changes: List[SimulationChange]
     autopilot_eligible: Optional[Dict[str, Any]] = None
+
+
+class MatchToleranceUpdate(BaseModel):
+    """How far an invoice may differ from what arrived and still match.
+
+    Bounds are enforced in the service rather than only here, because the
+    ceiling is a governance decision with a reason attached — see MAX_PERCENT
+    in match_tolerance_service.py — and a schema that silently clamped would
+    hide the refusal instead of explaining it.
+    """
+    amount_percent: float
+    quantity_percent: float
+    #: Optional, and recorded on both the version and the audit row. Loosening
+    #: a control is the change somebody will ask about later.
+    reason: Optional[str] = None
