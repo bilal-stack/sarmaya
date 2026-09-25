@@ -328,3 +328,87 @@ class TestPermissions:
         assert client.get("/api/v1/matrices/approval").status_code == 200
         body = client.get("/api/v1/matrices/sod").json()
         assert len(body["rules"]) == len(SOD_RULES)
+
+
+# --- 3. Vendor risk ----------------------------------------------------------
+
+class TestTheVendorRiskMatrix:
+    """The third matrix, and the one that was unbuildable until risk_score was
+    computed. Before that it would have had to invent both the scoring rule and
+    the bands it was drawing, which is the failure matrices.py exists to
+    avoid."""
+
+    def test_it_counts_vendors_into_tier_and_factor(self, db, tenant, make_user):
+        """The cell is a count of vendors, not an estimate of anything."""
+        from app.core.enums import VendorStatus
+        from app.models.vendor import Vendor
+        from app.services.matrices import vendor_risk_matrix
+
+        db.add(Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="Blocked Co",
+            status=VendorStatus.BLOCKED, tax_id="T1", bank_account_number="1",
+        ))
+        db.add(Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="Clean Co",
+            status=VendorStatus.ACTIVE, tax_id="T2", bank_account_number="2",
+        ))
+        db.flush()
+
+        matrix = vendor_risk_matrix(db, _auditor(tenant))
+
+        assert matrix["vendor_count"] == 2
+        # Blocked is 40, which lands in medium; a clean vendor is 0, so low.
+        assert matrix["cells"]["medium"]["blocked"] == 1
+        assert matrix["vendors_per_tier"]["low"] >= 1
+
+    def test_a_factor_nothing_trips_is_reported_not_omitted(
+        self, db, tenant, make_user
+    ):
+        """A control that never fires is either watching something that does
+        not happen or is not watching, and a grid that hides the empty column
+        cannot show which."""
+        from app.core.enums import VendorStatus
+        from app.models.vendor import Vendor
+        from app.services.matrices import vendor_risk_matrix
+
+        # One vendor, one factor. Every other factor is therefore untriggered,
+        # and none of them should silently vanish from the grid.
+        db.add(Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="No Tax Co",
+            status=VendorStatus.ACTIVE, tax_id=None, bank_account_number="1",
+        ))
+        db.flush()
+
+        matrix = vendor_risk_matrix(db, _auditor(tenant))
+
+        assert "no_tax_id" in matrix["factors"]
+        assert "no_tax_id" not in matrix["never_triggered"]
+
+    def test_it_carries_the_same_disclosure_the_score_makes(
+        self, db, tenant, make_user
+    ):
+        """A reader of the grid should be told what the grid does not cover,
+        without having to go and read the scorer."""
+        from app.core.enums import VendorStatus
+        from app.models.vendor import Vendor
+        from app.services.matrices import vendor_risk_matrix
+
+        db.add(Vendor(
+            id=uuid.uuid4(), tenant_id=tenant.id, legal_name="Any Co",
+            status=VendorStatus.ACTIVE, tax_id="T", bank_account_number="1",
+        ))
+        db.flush()
+
+        codes = {
+            d["code"]
+            for d in vendor_risk_matrix(db, _auditor(tenant))["unscored_dimensions"]
+        }
+
+        assert "sanctions_screening" in codes
+
+    def test_a_clerk_cannot_read_it(self, db, tenant):
+        from app.services.matrices import vendor_risk_matrix
+
+        clerk = {"id": str(uuid.uuid4()), "role": "ap_clerk", "tenant_id": tenant.id}
+        with pytest.raises(PermissionError):
+            vendor_risk_matrix(db, clerk)
