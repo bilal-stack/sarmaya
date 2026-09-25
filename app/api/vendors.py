@@ -100,6 +100,42 @@ def list_bank_changes(
         _raise_for(e)
 
 
+@router.get("/{vendor_id}/risk")
+def vendor_risk(
+    vendor_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """The risk score, the factors behind it, and what it does not cover.
+
+    Declared before /{vendor_id} would swallow it, same as the literal paths
+    above. Reads with vendors.view: it says nothing a person who can open the
+    vendor cannot already piece together from its record.
+    """
+    from app.services.vendor_risk import VendorRiskService
+
+    vendor = VendorService(db).get_vendor(vendor_id, current_user)
+    if not vendor:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vendor not found")
+    return VendorRiskService(db).score(vendor)
+
+
+@router.post("/{vendor_id}/risk/refresh")
+def refresh_vendor_risk(
+    vendor_id: UUID,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Recompute and store. The stored value is what list views sort on, so
+    it has to be refreshable without waiting for whatever writes it next."""
+    from app.services.vendor_risk import VendorRiskService
+
+    result = VendorRiskService(db).refresh(vendor_id)
+    if result is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Vendor not found")
+    return result
+
+
 @router.get("/{vendor_id}", response_model=VendorResponse)
 def get_vendor(
     vendor_id: UUID,
