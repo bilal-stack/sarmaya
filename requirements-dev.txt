@@ -11,6 +11,14 @@
 
 ruff>=0.6,<1
 
+# The test runner. It lived in requirements.txt under a comment reading
+# "optional—remove from production", which nobody had acted on — so the
+# Dockerfile, which installs requirements.lock, shipped pytest into every
+# image. CI installs this file, so moving it here changes nothing about what
+# runs and takes it out of what ships.
+pytest>=8.3,<9
+pytest-asyncio>=0.24,<0.25
+
 # Regenerates requirements.lock. MUST be run on Linux, which is what the image
 # and CI actually use:
 #

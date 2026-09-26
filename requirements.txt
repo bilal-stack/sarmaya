@@ -43,9 +43,3 @@ httpx>=0.28,<1.0
 # OCR providers
 requests>=2.32  # For OCR.space API
 boto3>=1.43.93     # For AWS Textract (future)
-
-# Dev / Testing (optional—remove from production)
-pytest>=8.3,<9
-pytest-asyncio>=0.24,<0.25
-black>=24.10
-ruff>=0.8
