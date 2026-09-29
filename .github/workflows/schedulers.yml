@@ -30,11 +30,32 @@ name: Scheduled jobs
 # guarantees, not correctness ones. If the per-minute cadence ever matters,
 # that is the moment to pay for a real scheduler.
 on:
-  schedule:
-    # Offset from the hour boundary on GitHub's own advice about load.
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'   # notifications
-    - cron: '4,9,14,19,24,29,34,39,44,49,54,59 * * * *'   # integration posts
-    - cron: '17 * * * *'                                   # workflow timers
+  # SCHEDULE DISABLED (2026-09-29), and the reason is not that the jobs are
+  # wrong. Every scheduled run has failed: 200 of the last 200, zero
+  # successes, back to at least 2026-09-15. The repository has no Actions
+  # secrets, and it has none because nothing is deployed for them to point
+  # at, so every job died constructing Settings() before it reached a queue.
+  # The traceback blamed whichever field parsed first — SMTP_ENABLED as a
+  # bool, or SECRET_KEY's length — which reads like a config bug and is not
+  # one.
+  #
+  # A cron that has never once succeeded is worse than no cron. It teaches
+  # you to delete its failure mail, so the run that finally matters looks
+  # exactly like the two hundred that did not. That is the opposite of what
+  # this file is for, per the note above: these failures do not announce
+  # themselves, so the announcement has to mean something.
+  #
+  # TO RE-ENABLE: set DATABASE_URL and SECRET_KEY as repository secrets (plus
+  # SMTP_* for notifications), then uncomment the three crons below. Nothing
+  # else changes. Two things catch it if nobody does: item 1 of
+  # docs/REGRESSION_CHECKLIST.md is 'the scheduled jobs are actually
+  # installed', and /ai-tools/system reads a job that has never run as `down`.
+  #
+  # schedule:
+  #   # Offset from the hour boundary on GitHub's own advice about load.
+  #   - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'   # notifications
+  #   - cron: '4,9,14,19,24,29,34,39,44,49,54,59 * * * *'   # integration posts
+  #   - cron: '17 * * * *'                                   # workflow timers
   # So a human can drain the queue immediately rather than waiting for a slot.
   workflow_dispatch:
     inputs:
