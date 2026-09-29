@@ -27,7 +27,7 @@ anthropic>=0.40  # Claude provider
 google-genai>=1.0  # Gemini provider
 
 # Utilities / Settings
-python-dotenv>=1.0
+python-dotenv>=1.2.3
 pydantic>=2.13.5,<3
 pydantic-settings>=2.15.0,<3
 email-validator>=2.2,<3
