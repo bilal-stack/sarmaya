@@ -32,7 +32,7 @@ pytest-asyncio>=0.24,<0.25
 # which only exists there. The image would come up either way and quietly run
 # on the asyncio event loop instead. CI regenerates and diffs, so a lock built
 # on the wrong platform fails the run rather than shipping.
-pip-tools>=7.4,<8
+pip-tools>=7.6.1,<8
 
 # In-process S3 for the object-storage tests. The storage backend is written
 # against the S3 API rather than a vendor SDK, so it is worth exercising
