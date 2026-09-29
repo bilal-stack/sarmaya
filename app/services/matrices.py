@@ -21,12 +21,23 @@ control review actually asks. Three findings only appear in grid form:
 None of those are visible reading the rules one at a time, which is how rules
 are normally read.
 
-Two of the five Build Book matrices are here. Tolerance, vendor risk and
-evidence are not, because the rules they would display do not exist yet: match
-tolerance is two numbers for the whole tenant with no category or vendor axis,
-vendor risk is an integer score with no tiers, and evidence requirements are
-measured but never declared. Drawing those would mean inventing the rules in
-the drawing, which is the failure this module exists to avoid.
+Each matrix has its own finding, and the findings are the point rather than
+the grids:
+
+  * approval — a band nothing routes, and a rule that can never fire;
+  * segregation of duties — how much actually stands in the way of each
+    separation, which for four of them is nothing at all once the actor is an
+    admin;
+  * vendor risk — which factors the score does not look at;
+  * evidence — whether a requirement binds every caller or only an HTTP route.
+
+Four of the five Build Book matrices are here. Tolerance is not, and the reason
+is the same one that governs the rest of this module: the matching engine
+applies one pair of percentages to every line of every invoice, with no
+category or vendor axis to draw. A grid over it would have to invent the axes
+in the drawing, which is exactly the failure this file exists to avoid. That
+absence is stated on the tolerance settings screen rather than left to be
+inferred from a missing page.
 """
 from typing import Dict, List, Optional
 
@@ -504,4 +515,256 @@ def vendor_risk_matrix(db: Session, current_user: dict) -> Dict:
         "unscored_dimensions": (
             scored[0]["unscored_dimensions"] if scored else []
         ),
+    }
+# --- 4. Evidence matrix ------------------------------------------------------
+
+#: Where a requirement is enforced, which is what decides who it binds.
+#: Ordered weakest first.
+#:
+#: The distinction is not pedantry. A rule in a request schema refuses an HTTP
+#: caller and nothing else: another service, a script, a scheduled job or a
+#: test calls the method directly and the schema is never constructed. A rule
+#: in the service binds every caller there is.
+LAYER_SCHEMA = "api_schema"
+LAYER_SERVICE = "service"
+
+#: The moment evidence is demanded. A rule can sit on more than one gate, and
+#: the expense receipt does, which is the reason this is an axis rather than a
+#: field.
+GATE_RAISE = "raise"
+GATE_SUBMIT = "submit"
+GATE_APPROVE = "approve"
+GATE_REJECT = "reject"
+GATE_RECORD = "record"
+GATE_FILL = "fill"
+GATE_SKIP = "skip"
+
+#: Every requirement in the system that exists to make somebody produce
+#: something, compiled from the call sites that enforce it — the same way
+#: SOD_RULES is, and for the same reason: read one at a time these look like
+#: ordinary input validation, and the shape of the control only appears when
+#: they are next to each other.
+#:
+#: What is deliberately NOT here: required fields that are not evidence. A
+#: headcount request needs an annual cost and a job title, and an adjustment
+#: needs at least one line, but those are the record being complete rather
+#: than somebody being made to show their working. Including them would pad
+#: the grid and make the rows that are controls harder to find.
+EVIDENCE_RULES: List[Dict] = [
+    {
+        "rule": "rejection_reason",
+        "artifact": "A written reason, non-blank after stripping",
+        "required_when": "Any rejection, unconditionally",
+        "gates": [GATE_REJECT],
+        "waiver": None,
+        # Ten workflows, one control, two depths. This row is the reason the
+        # matrix exists: every one of these refuses a blank reason over HTTP,
+        # so nothing here is a hole in the API — but only six of them refuse
+        # one when the method is called directly.
+        "workflows": [
+            {"workflow": "invoice", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/invoice_service.py"},
+            {"workflow": "expense_claim", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/expense_service.py"},
+            {"workflow": "headcount_request", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/headcount_service.py"},
+            {"workflow": "inventory_adjustment", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/inventory_adjustment_service.py"},
+            {"workflow": "payroll_change", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/payroll_change_service.py"},
+            {"workflow": "vendor_return", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/vendor_return_service.py"},
+            {"workflow": "payment", "layer": LAYER_SCHEMA,
+             "enforced_at": "app/schemas/payment.py"},
+            {"workflow": "purchase_order", "layer": LAYER_SCHEMA,
+             "enforced_at": "app/schemas/purchase_order.py"},
+            {"workflow": "requisition", "layer": LAYER_SCHEMA,
+             "enforced_at": "app/schemas/requisition.py"},
+            {"workflow": "vendor_bank_change", "layer": LAYER_SCHEMA,
+             "enforced_at": "app/schemas/vendor_bank_change.py"},
+        ],
+    },
+    {
+        "rule": "expense_receipt",
+        "artifact": "A file attached to the claim",
+        "required_when": (
+            "The category is one of travel, accommodation, entertainment or "
+            "equipment, or the claim totals more than 1000"
+        ),
+        # The only rule demanded twice. Refused at submit so the claimant
+        # finds out while they still have the receipt, and again at approve so
+        # attaching nothing and waiting does not work.
+        "gates": [GATE_SUBMIT, GATE_APPROVE],
+        "waiver": {
+            "at": GATE_APPROVE,
+            "needs": "A written reason",
+            "recorded_as": (
+                "policy_override_reason on the claim, the comment on the "
+                "audit row, and policy_override in its after_value"
+            ),
+            "held_by": PERM_APPROVE_EXPENSE,
+        },
+        "workflows": [
+            {"workflow": "expense_claim", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/expense_service.py"},
+        ],
+    },
+    {
+        "rule": "invoice_duplicate_override_reason",
+        "artifact": "A written reason",
+        "required_when": (
+            "The invoice carries an unacknowledged potential-duplicate flag"
+        ),
+        "gates": [GATE_APPROVE],
+        "waiver": None,
+        "workflows": [
+            {"workflow": "invoice", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/invoice_service.py"},
+        ],
+    },
+    {
+        "rule": "headcount_background_check",
+        "artifact": "A cleared background check on the employee record",
+        "required_when": "The request was raised as a sensitive role",
+        # Checked when somebody is placed in the role, which is the first
+        # point at which the question has an answer.
+        "gates": [GATE_FILL],
+        "waiver": None,
+        "workflows": [
+            {"workflow": "headcount_request", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/headcount_service.py"},
+        ],
+    },
+    {
+        "rule": "quality_rejection_reason_code",
+        "artifact": "A reason code from a closed set",
+        "required_when": "A quality check rejects any quantity at all",
+        "gates": [GATE_RECORD],
+        "waiver": None,
+        "workflows": [
+            {"workflow": "quality_check", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/quality_check_service.py"},
+        ],
+    },
+    {
+        "rule": "quality_rejection_note",
+        "artifact": "Free text describing what was wrong",
+        "required_when": "A quality check rejects any quantity at all",
+        # Separate from the code on purpose: the code says the category and
+        # the note is the evidence. One does not substitute for the other.
+        "gates": [GATE_RECORD],
+        "waiver": None,
+        "workflows": [
+            {"workflow": "quality_check", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/quality_check_service.py"},
+        ],
+    },
+    {
+        "rule": "inventory_adjustment_reason_code",
+        "artifact": "A reason code from a closed set",
+        "required_when": "Every adjustment, at the point it is raised",
+        "gates": [GATE_RAISE],
+        "waiver": None,
+        "workflows": [
+            {"workflow": "inventory_adjustment", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/inventory_adjustment_service.py"},
+        ],
+    },
+    {
+        "rule": "onboarding_skip_note",
+        "artifact": "A note",
+        "required_when": (
+            "A task is marked not applicable or blocked rather than done"
+        ),
+        "gates": [GATE_SKIP],
+        "waiver": None,
+        "workflows": [
+            {"workflow": "onboarding", "layer": LAYER_SERVICE,
+             "enforced_at": "app/services/onboarding_service.py"},
+        ],
+    },
+]
+
+#: Asked for by the Build Book and enforced by nothing. Declared here rather
+#: than left as an absence, because an evidence matrix listing only what is
+#: enforced reads as though the list were complete.
+#:
+#: Photographs are the case. Files attach to a quality check through the
+#: ordinary store and the evidence pack collects them by correlation_id, so a
+#: photograph taken is a photograph kept — but no path anywhere refuses a
+#: damage or shortage rejection for having none. The word does not appear in
+#: app/ outside two comments saying exactly that.
+EVIDENCE_ASKED_FOR_BUT_NOT_REQUIRED: List[Dict] = [
+    {
+        "requirement": "photograph_on_damage_or_shortage",
+        "asked_by": "build-book.txt line 459",
+        "status": "attachable, collected if attached, never demanded",
+        "would_be_enforced_at": "app/services/quality_check_service.py",
+    },
+]
+
+
+def evidence_matrix(current_user: dict) -> Dict:
+    """What the system makes somebody produce, when, and who the rule binds.
+
+    Takes no db session, for the same reason sod_matrix does not: every answer
+    here is a function of the rules in code, identical for every tenant.
+    Nothing reads a record.
+
+    The finding is the layer. Ten workflows refuse a blank rejection reason,
+    and all ten refuse it over HTTP, so an API client sees one consistent
+    control. Four of them enforce it only in the request schema, so the same
+    control evaporates the moment the method is called from anywhere that is
+    not a route — another service, a scheduled job, a migration, a test. That
+    is invisible reading either layer on its own, which is the whole reason
+    for putting them side by side.
+    """
+    _require_audit(current_user)
+
+    rows = []
+    for rule in EVIDENCE_RULES:
+        layers = {w["layer"] for w in rule["workflows"]}
+        rows.append({
+            **rule,
+            #: The weakest layer any workflow enforces this at, because a
+            #: control is as binding as its loosest application.
+            "weakest_layer": (
+                LAYER_SCHEMA if LAYER_SCHEMA in layers else LAYER_SERVICE
+            ),
+            "enforced_at_mixed_depths": len(layers) > 1,
+            "waivable": rule["waiver"] is not None,
+        })
+
+    return {
+        "gates": [
+            GATE_RAISE, GATE_SUBMIT, GATE_APPROVE, GATE_REJECT,
+            GATE_RECORD, GATE_FILL, GATE_SKIP,
+        ],
+        "rules": rows,
+        # Binds every caller, not only a route. The stronger position, and
+        # what the other list should look like.
+        "bound_at_the_service": [
+            r["rule"] for r in rows if r["weakest_layer"] == LAYER_SERVICE
+        ],
+        # Enforced in a request schema and nowhere deeper: refused over HTTP,
+        # not refused when the method is called directly. Named per workflow
+        # rather than per rule, because for rejection_reason it is true of
+        # four workflows out of ten, and naming the rule alone would say the
+        # control is missing when it is mostly present.
+        "bound_only_at_the_api": [
+            {"rule": r["rule"], "workflow": w["workflow"],
+             "enforced_at": w["enforced_at"]}
+            for r in rows for w in r["workflows"]
+            if w["layer"] == LAYER_SCHEMA
+        ],
+        # A permission holder can step past it, and the step is itself
+        # evidenced. Not a weakness — a waiver on the record is the point —
+        # but it is the row a control review asks about first.
+        "waivable_with_a_recorded_reason": [
+            {"rule": r["rule"], "at": r["waiver"]["at"],
+             "recorded_as": r["waiver"]["recorded_as"]}
+            for r in rows if r["waiver"]
+        ],
+        # Stated rather than implied by an absent row.
+        "asked_for_but_not_required": EVIDENCE_ASKED_FOR_BUT_NOT_REQUIRED,
     }

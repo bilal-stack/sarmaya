@@ -15,18 +15,26 @@ The rest test the findings themselves: a gap is detected when one exists, an
 unreachable rule is detected when one exists, and the SoD table describes the
 code as it is rather than as its own docstrings describe it.
 """
+import ast
 import os
+import tokenize
 import uuid
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from app.core.enums import UserRole
 from app.core.roles import ADMIN, ROLE_PERMISSIONS, has_permission
 from app.models.policy import Policy
 from app.services import sod
+from app.schemas.payment import RejectPaymentRequest
+from app.schemas.purchase_order import RejectRequest
+from app.schemas.requisition import RejectRequisitionRequest
+from app.schemas.vendor_bank_change import RejectBankChangeRequest
 from app.services.matrices import (
-    BARRIER_NONE, BARRIER_PERMISSIONS, BARRIER_RUNTIME, SOD_RULES,
-    approval_matrix, sod_matrix,
+    BARRIER_NONE, BARRIER_PERMISSIONS, BARRIER_RUNTIME, EVIDENCE_RULES,
+    LAYER_SCHEMA, LAYER_SERVICE, SOD_RULES,
+    approval_matrix, evidence_matrix, sod_matrix,
 )
 from app.services.policy import evaluate_approval_role
 
@@ -51,6 +59,24 @@ def _policy(db, tenant_id, name, priority, threshold, operator, role):
 def _auditor(tenant):
     return {"id": str(uuid.uuid4()), "role": "auditor", "tenant_id": tenant.id}
 
+
+def _reject_method_source(path: str) -> str:
+    """The source of the first reject method in a service, so a guard in some
+    neighbouring method cannot be mistaken for one on the rejection path.
+
+    Bounded by ast rather than by indentation. reject_invoice declares its
+    arguments over five lines and closes the signature at the same indent as
+    the `def`, which is enough to fool any indentation walk into returning the
+    signature alone — and a signature mentioning `reason` looks exactly like a
+    method that checks it.
+    """
+    with open(path, encoding="utf-8") as handle:
+        source = handle.read()
+    lines = source.splitlines(keepends=True)
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("reject"):
+            return "".join(lines[node.lineno - 1:node.end_lineno])
+    raise AssertionError(f"no reject method in {path}")
 
 @pytest.fixture
 def two_band(db, tenant):
@@ -412,3 +438,207 @@ class TestTheVendorRiskMatrix:
         clerk = {"id": str(uuid.uuid4()), "role": "ap_clerk", "tenant_id": tenant.id}
         with pytest.raises(PermissionError):
             vendor_risk_matrix(db, clerk)
+
+class TestTheEvidenceTableDescribesTheCode:
+    """Same risk as the SoD table, same answer. A hand-written list of what the
+    system demands drifts from the code that demands it, and the drift is
+    silent because nothing errors — the grid just keeps rendering a control
+    that moved.
+
+    The layer claim is the one worth checking hardest, because it is the one a
+    reader would act on: it says whether a rule binds every caller or only a
+    route.
+    """
+
+    def test_every_workflow_names_a_file_that_exists(self):
+        for rule in EVIDENCE_RULES:
+            for workflow in rule["workflows"]:
+                path = workflow["enforced_at"]
+                assert os.path.exists(path), (
+                    f"{rule['rule']}/{workflow['workflow']} points at {path}"
+                )
+
+    def test_rule_names_are_unique(self):
+        names = [r["rule"] for r in EVIDENCE_RULES]
+        assert len(names) == len(set(names))
+
+    def test_every_layer_is_one_of_the_two(self):
+        """A typo here would classify a schema-only rule as service-enforced,
+        which is the direction that reads as safer than it is."""
+        for rule in EVIDENCE_RULES:
+            for workflow in rule["workflows"]:
+                assert workflow["layer"] in (LAYER_SCHEMA, LAYER_SERVICE)
+
+    def test_every_gate_a_rule_names_is_a_gate_the_matrix_publishes(self, tenant):
+        """Otherwise a rule sits on an axis the grid has no column for, and
+        the cell is simply not drawn."""
+        published = set(evidence_matrix(_auditor(tenant))["gates"])
+        for rule in EVIDENCE_RULES:
+            for gate in rule["gates"]:
+                assert gate in published, f"{rule['rule']} sits on {gate!r}"
+
+    def test_a_waiver_names_a_real_permission(self):
+        known = {p for perms in ROLE_PERMISSIONS.values() for p in perms}
+        for rule in EVIDENCE_RULES:
+            waiver = rule["waiver"]
+            if waiver:
+                assert waiver["held_by"] in known, rule["rule"]
+
+    def test_a_service_enforced_rejection_really_guards_the_reason(self):
+        """The six that claim the service enforces it. Checked against the
+        source of the reject method rather than its docstring, the same way the
+        SoD table is checked against the file that calls into sod.py."""
+        for rule in EVIDENCE_RULES:
+            if rule["rule"] != "rejection_reason":
+                continue
+            for workflow in rule["workflows"]:
+                if workflow["layer"] != LAYER_SERVICE:
+                    continue
+                body = _reject_method_source(workflow["enforced_at"])
+                assert "reason" in body and (
+                    "not reason" in body or "reason.strip()" in body
+                ), (
+                    f"{workflow['workflow']} is declared service-enforced but "
+                    f"its reject method never looks at the reason"
+                )
+
+    def test_a_schema_enforced_rejection_really_guards_it_in_the_schema(self):
+        for rule in EVIDENCE_RULES:
+            if rule["rule"] != "rejection_reason":
+                continue
+            for workflow in rule["workflows"]:
+                if workflow["layer"] != LAYER_SCHEMA:
+                    continue
+                with open(workflow["enforced_at"], encoding="utf-8") as handle:
+                    source = handle.read()
+                assert "_reason_required" in source, workflow["workflow"]
+
+    def test_the_schema_only_ones_really_are_only_in_the_schema(self):
+        """The negative half, and the half that makes the finding mean
+        something. If somebody adds a service-level guard to one of these four,
+        this fails and the row gets reclassified — which is the correct
+        outcome, because the control would have got stronger and the matrix
+        would be understating it."""
+        service_files = {
+            "payment": "app/services/payment_service.py",
+            "purchase_order": "app/services/purchase_order_service.py",
+            "requisition": "app/services/requisition_service.py",
+            "vendor_bank_change": "app/services/vendor_bank_service.py",
+        }
+        for workflow, path in service_files.items():
+            body = _reject_method_source(path)
+            assert "not reason" not in body and "reason.strip()" not in body, (
+                f"{workflow} now guards the reason in the service. Move it to "
+                f"LAYER_SERVICE in EVIDENCE_RULES."
+            )
+
+
+class TestTheLayerFindingIsTrue:
+    def test_the_four_schema_only_workflows_are_named(self, tenant):
+        named = {
+            entry["workflow"]
+            for entry in evidence_matrix(_auditor(tenant))["bound_only_at_the_api"]
+        }
+
+        assert named == {
+            "payment", "purchase_order", "requisition", "vendor_bank_change",
+        }
+
+    def test_the_rejection_reason_row_is_flagged_as_mixed_depth(self, tenant):
+        """Ten workflows, one control, two depths. The flag is what stops a
+        reader concluding from `bound_at_the_service` that the rule is uniform."""
+        rows = evidence_matrix(_auditor(tenant))["rules"]
+        row = next(r for r in rows if r["rule"] == "rejection_reason")
+
+        assert row["enforced_at_mixed_depths"] is True
+        assert row["weakest_layer"] == LAYER_SCHEMA
+
+    def test_a_single_workflow_rule_is_not_flagged_as_mixed(self, tenant):
+        rows = evidence_matrix(_auditor(tenant))["rules"]
+        row = next(r for r in rows if r["rule"] == "expense_receipt")
+
+        assert row["enforced_at_mixed_depths"] is False
+        assert row["weakest_layer"] == LAYER_SERVICE
+
+    def test_every_schema_only_reject_request_refuses_a_blank_reason(self):
+        """All four refuse over HTTP. This is the half that stops the finding
+        being read as 'four workflows accept a blank rejection reason', which
+        would be false and would send somebody looking for a hole in the API."""
+        for model in (
+            RejectPaymentRequest, RejectRequest,
+            RejectRequisitionRequest, RejectBankChangeRequest,
+        ):
+            for blank in ("", "   ", "\t\n"):
+                with pytest.raises(PydanticValidationError):
+                    model(reason=blank)
+
+    def test_a_real_reason_passes_and_is_stripped(self):
+        assert RejectBankChangeRequest(
+            reason="  Vendor could not confirm by phone.  "
+        ).reason == "Vendor could not confirm by phone."
+
+
+class TestWhatIsAskedForAndNotRequired:
+    def test_the_photograph_gap_is_declared(self, tenant):
+        declared = {
+            entry["requirement"]
+            for entry in evidence_matrix(_auditor(tenant))["asked_for_but_not_required"]
+        }
+
+        assert "photograph_on_damage_or_shortage" in declared
+
+    def test_nothing_in_the_app_actually_demands_a_photograph(self):
+        """Pins the gap so it cannot close quietly. If somebody makes a
+        photograph mandatory, this fails and the declaration has to move into
+        EVIDENCE_RULES — where it would belong, because then it is a control.
+
+        Tokenised rather than grepped, because the word does appear in app/:
+        twice, in a module docstring and a comment, both saying the requirement
+        is absent. A line-based search cannot tell those from enforcement, and
+        one of them is a docstring continuation line that no cheap prefix test
+        would catch.
+        """
+        enforcing = []
+        for root, _dirs, files in os.walk("app"):
+            if "__pycache__" in root:
+                continue
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(root, name)
+                with open(path, "rb") as handle:
+                    for token in tokenize.tokenize(handle.readline):
+                        if token.type in (tokenize.COMMENT, tokenize.STRING):
+                            continue
+                        if "photo" in token.string.lower():
+                            enforcing.append(f"{path}:{token.start[0]}")
+
+        assert not enforcing, (
+            f"photographs are now referred to in code, not just prose: "
+            f"{enforcing}. If that is a requirement, it is an EVIDENCE_RULES "
+            f"row rather than a declared gap."
+        )
+
+
+class TestTheEvidenceMatrixPermissions:
+    def test_a_clerk_cannot_read_it(self, db, tenant):
+        clerk = {
+            "id": str(uuid.uuid4()), "role": "ap_clerk", "tenant_id": tenant.id,
+        }
+
+        with pytest.raises(PermissionError):
+            evidence_matrix(clerk)
+
+    def test_an_auditor_can(self, tenant):
+        assert evidence_matrix(_auditor(tenant))["rules"]
+
+    def test_the_api_refuses_a_clerk_and_serves_an_auditor(
+        self, client, as_user, make_user
+    ):
+        as_user(make_user(UserRole.AP_CLERK))
+        assert client.get("/api/v1/matrices/evidence").status_code == 403
+
+        as_user(make_user(UserRole.AUDITOR))
+        response = client.get("/api/v1/matrices/evidence")
+        assert response.status_code == 200
+        assert response.json()["bound_only_at_the_api"]

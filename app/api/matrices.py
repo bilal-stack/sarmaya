@@ -1,4 +1,5 @@
-"""The control matrices: approval routing and segregation of duties as grids.
+"""The control matrices: approval routing, segregation of duties, vendor
+risk and evidence requirements, each as a grid.
 
 Read-only, and gated on audit.view rather than a dashboard permission. These
 describe the shape of the controls rather than any record — which is exactly
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db_session
 from app.services.matrices import (
-    approval_matrix, sod_matrix, vendor_risk_matrix,
+    approval_matrix, evidence_matrix, sod_matrix, vendor_risk_matrix,
 )
 
 router = APIRouter(prefix="/matrices", tags=["matrices"])
@@ -62,5 +63,18 @@ def vendor_risk(
     """
     try:
         return vendor_risk_matrix(db, current_user)
+    except (ValueError, PermissionError) as e:
+        _raise_for(e)
+
+
+@router.get("/evidence")
+def evidence(current_user: dict = Depends(get_current_user)):
+    """What must be produced, at which gate, and how deep the rule goes.
+
+    Takes no db session for the same reason /sod does not: the answer is the
+    rules in code, which are the same for every tenant.
+    """
+    try:
+        return evidence_matrix(current_user)
     except (ValueError, PermissionError) as e:
         _raise_for(e)
