@@ -968,6 +968,80 @@ python -m scripts.dispatch_notifications   # every minute
 python -m scripts.run_workflow_timers      # hourly
 ```
 
+## Control matrices (`/matrices`)
+
+Build Book, Global Matrices. The rules as a grid rather than as a list. Every
+one is a **view** — no rule is defined behind these routes and nothing here
+decides anything, because a matrix carrying its own copy of the rules would
+eventually disagree with the engine enforcing them.
+
+All four are gated on `audit.view` rather than a dashboard permission. They
+describe the shape of the controls rather than any record, which is precisely
+what somebody looking for a way around them would want, so the audience that
+reads the audit trail is the right audience here.
+
+A list answers "what rules exist". These answer "what is **not** covered",
+which is the question a control review actually asks — so read each one's
+findings first and the grid second.
+
+```bash
+GET /api/v1/matrices/approval      # role x amount
+    # rules: every configured band, with what actually routes at each
+    # uncovered_bands: an amount no rule matches, where routing falls through
+    #                  to a split written in code that nobody configured and
+    #                  nobody can see from the policy screen
+    # unreachable_rules: a rule a higher-priority rule always matches first —
+    #                    somebody wrote a control and it does nothing
+
+GET /api/v1/matrices/sod           # separation x barrier (takes no db session)
+    # rules: every separation, with the roles that hold both halves
+    # weakest_barrier: none | runtime_check | permissions
+    # unblocked_for_admin: admin holds both halves AND the rule waives itself,
+    #                      so one person can do both with nothing in the way.
+    #                      Deliberate (a one-person demo tenant has to work)
+    #                      and bounded, but stated rather than inferred from
+    #                      two files that have to be read together.
+    # depends_on_the_runtime_check: an ordinary role holds both halves, so the
+    #                      check is that role's entire separation
+    # separated_by_permissions: no ordinary role can hold both. The stronger
+    #                      position — it does not depend on a check firing.
+    # NOT a partition: the first is about admin, the others about everybody
+    # else, so a rule appears in the first and one of the others.
+
+GET /api/v1/matrices/vendor-risk   # tier x factor, with vendors counted per cell
+    # unscored_dimensions: what the score does not look at, carried from the
+    #                      score itself rather than restated here
+
+GET /api/v1/matrices/evidence      # requirement x gate (takes no db session)
+    # What the system makes somebody produce, when, and who the rule binds.
+    # rules: each requirement, its artifact, what triggers it, the gates it
+    #        sits on, and whether it can be waived
+    # bound_at_the_service: binds every caller
+    # bound_only_at_the_api: enforced in a request schema and nowhere deeper.
+    #        THE FINDING. Ten workflows refuse a blank rejection reason and all
+    #        ten refuse it over HTTP, so an API client sees one consistent
+    #        control — but four enforce it only in the schema, so the control
+    #        evaporates the moment the method is called from anywhere that is
+    #        not a route: another service, a scheduled job, a migration, a
+    #        test. Named per workflow, not per rule, because naming the rule
+    #        alone would read as "the control is missing" when it is mostly
+    #        present.
+    # waivable_with_a_recorded_reason: a permission holder can step past it and
+    #        the step is itself evidenced. Only the expense receipt, at approve.
+    # asked_for_but_not_required: asked for by the Build Book, enforced by
+    #        nothing. Photographs on damage or shortage are the case — they
+    #        attach, and the evidence pack collects them, but no path refuses a
+    #        rejection for having none. Declared, because a matrix listing only
+    #        what is enforced reads as though the list were complete.
+```
+
+**Match tolerance has no matrix, deliberately.** It is the fifth the Build Book
+asks for, and the matching engine applies one pair of percentages to every line
+of every invoice — there is no category or vendor axis to draw. Drawing one
+would mean inventing the axes. The absence is stated on the tolerance settings
+screen (`GET/PUT /api/v1/config/match-tolerance`, `axes: null`) rather than
+left to be inferred from a page that does not exist.
+
 ## Procure-to-Pay (added 2026-08)
 
 The full chain: order → receive → match → approve → pay → reconcile. Each step
