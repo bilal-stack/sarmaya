@@ -353,6 +353,17 @@ class SystemHealthService:
                 "No AI provider key is configured - AI features fall back to "
                 "their deterministic paths."
             )
+        # Whether this process is actually reporting, not whether a setting is
+        # present: the page answers "what is happening", and a DSN that never
+        # initialised reports exactly as much as no DSN at all.
+        from app.core.error_tracking import is_enabled
+        if not is_enabled():
+            notes.append(
+                "Error tracking is off (SENTRY_DSN is not set) - an unhandled "
+                "exception is written to the server log and reported nowhere "
+                "else. Set SENTRY_DSN to be told about one rather than having "
+                "to go and look."
+            )
         return notes
 
 

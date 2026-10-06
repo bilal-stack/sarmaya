@@ -97,6 +97,10 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
           DEBUG: 'false'
+          # A job that fails for one tenant logs it and moves on, so this is
+          # the only way that failure reaches anybody. Unset, it is "" and off.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production
           SMTP_ENABLED: ${{ vars.SMTP_ENABLED }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ vars.SMTP_PORT }}
@@ -124,6 +128,10 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
           DEBUG: 'false'
+          # A job that fails for one tenant logs it and moves on, so this is
+          # the only way that failure reaches anybody. Unset, it is "" and off.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production
           # Absent, the drain is a no-op rather than an error: a tenant with no
           # accounting system connected queues nothing in the first place.
           QBO_CLIENT_ID: ${{ secrets.QBO_CLIENT_ID }}
@@ -151,3 +159,7 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
           DEBUG: 'false'
+          # A job that fails for one tenant logs it and moves on, so this is
+          # the only way that failure reaches anybody. Unset, it is "" and off.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: production

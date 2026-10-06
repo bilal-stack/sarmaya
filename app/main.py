@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.logging_config import (
     configure_logging, new_request_id, request_id_var,
 )
+from app.core.error_tracking import init_error_tracking, tag_request
 
 # Configure logging once, at import, so module-level `logger` calls actually
 # surface. Without this the root logger has no handler under uvicorn and
@@ -18,6 +19,12 @@ from app.core.logging_config import (
 # Readable lines in development, one JSON object per line in production, and
 # every record carries the request id. See app/core/logging_config.py.
 configure_logging(debug=settings.DEBUG)
+
+# After logging, so the "error tracking on" line is formatted like every other
+# line; before the app exists, so the framework integration is in place for the
+# first request rather than patched in underneath a live one. A no-op unless
+# SENTRY_DSN is set.
+init_error_tracking(component="api")
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +105,14 @@ async def request_id_middleware(request: Request, call_next):
     """
     request_id = request.headers.get("X-Request-ID") or new_request_id()
     token = request_id_var.set(request_id)
+    # Also on the request's own state, which outlives this function. The 500
+    # handler runs in Starlette's outermost layer, *after* the finally below
+    # has reset the ContextVar — so it cannot read the id from there, and
+    # used to mint a fresh one instead.
+    request.state.request_id = request_id
+    # The same id on the error report as on the log lines and the client's
+    # error payload. Set here, not read later: see tag_request for why.
+    tag_request(request_id)
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
@@ -119,28 +134,47 @@ async def internal_exception_handler(request: Request, exc: Exception):
     without leaking internals. Full traceback is logged server-side with a correlation id.
     """
     # The id the middleware already put on every log line this request
-    # produced. Previously this handler minted its own, which meant the id in
-    # the client's error payload matched exactly one log entry — this one —
-    # and nothing that led up to it. The fallback covers a failure early
-    # enough that the middleware never ran.
-    correlation_id = request_id_var.get() or str(uuid.uuid4())
+    # produced, read from request.state because by the time this handler runs
+    # the middleware has already reset its ContextVar.
+    #
+    # That was a live bug until this was written: this line read only the
+    # ContextVar, which is always None here, so every 500 minted a fresh id —
+    # and the id a client quoted from its error payload matched no log line
+    # at all, not even this one. The fallbacks cover a failure early enough
+    # that the middleware never ran.
+    correlation_id = (
+        getattr(request.state, "request_id", None)
+        or request_id_var.get()
+        or str(uuid.uuid4())
+    )
 
     # Timestamp in UTC ISO format
     ts = utc_now().isoformat()
 
-    # Log full exception + request info server-side (safe)
+    # Log full exception + request info server-side (safe). The id is set back
+    # on the ContextVar for the duration, so this record carries request_id
+    # like every other line from the request and the log filter finds it.
+    #
+    # The client address is a structured field, not part of the message. In
+    # the JSON logs it is still a field you can filter on; but a message is
+    # free text that leaves the process with an error report, and the address
+    # is precisely what error tracking is configured to withhold. Under the
+    # key `ip_address`, Sentry's own scrubber removes it.
+    token = request_id_var.set(correlation_id)
     try:
         logger.exception(
-            "Unhandled exception occurred: correlation_id=%s method=%s path=%s client=%s exc=%s",
+            "Unhandled exception occurred: correlation_id=%s method=%s path=%s exc=%s",
             correlation_id,
             request.method,
             request.url.path,
-            request.client.host if request.client else None,
             repr(exc),
+            extra={"ip_address": request.client.host if request.client else None},
         )
     except Exception:
         # ensure logging errors don't break the handler
         logger.error("Failed to log exception details for correlation_id=%s", correlation_id)
+    finally:
+        request_id_var.reset(token)
 
     # Minimal, non-sensitive payload for clients
     payload = {
@@ -161,4 +195,10 @@ async def internal_exception_handler(request: Request, exc: Exception):
             "message": str(exc)[:512],  # truncate to avoid huge leaks
         }
 
-    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=payload)
+    # The header too: the middleware sets it on every other response, but this
+    # one is built after the middleware has already unwound.
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=payload,
+        headers={"X-Request-ID": correlation_id},
+    )
