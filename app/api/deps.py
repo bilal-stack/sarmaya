@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Generator
 
 from app.core.database import get_db, set_tenant_context, set_org_scope
+from app.core.error_tracking import tag_user
 from app.core.security import decode_access_token
 from app.models.user import User
 
@@ -53,6 +54,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked",
         )
+
+    # Who an error report is about, by id only — never the email. A no-op
+    # unless error tracking is on.
+    tag_user(str(user.id), str(user.tenant_id))
 
     # Read identity (role, email, active) live from the user row rather than
     # trusting the token claims. A JWT is valid for hours, so a role change or

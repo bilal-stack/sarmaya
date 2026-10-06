@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
 from pydantic import field_validator, model_validator
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 import json
 
 # Point to .env at project root (c:\python\os\.env)
@@ -253,6 +253,81 @@ class Settings(BaseSettings):
     #: callback route redirects here rather than returning JSON, since its
     #: caller at that point is a browser mid-navigation, not a fetch client.
     FRONTEND_URL: str = "http://localhost:9002"
+
+    # --- Error tracking ------------------------------------------------------
+    #: Off unless set, and that is the safe direction rather than a convenience:
+    #: an unset DSN means nothing leaves the process, and a deployment that has
+    #: not chosen a tracker sends nobody its stack traces. What is sent when it
+    #: IS set — and what is scrubbed first — is app/core/error_tracking.py.
+    #:
+    #: A DSN identifies a project; it is not a secret in the sense SECRET_KEY
+    #: is, since browser SDKs ship it in the bundle. It still comes from the
+    #: environment, because which project a deployment reports to is
+    #: deployment configuration, not code.
+    SENTRY_DSN: Optional[str] = None
+    #: Defaults to "development" with DEBUG on and "production" otherwise, so
+    #: a laptop's errors never land in production's issue list unannounced.
+    SENTRY_ENVIRONMENT: Optional[str] = None
+    #: Usually the git SHA. Lets Sentry say "first seen in this release".
+    SENTRY_RELEASE: Optional[str] = None
+    #: Errors only by default. Performance tracing is a separate quota on the
+    #: free plan, and an AP system's useful signal is "what broke", not "what
+    #: was slow" — turn this up deliberately, not by default.
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+
+    @field_validator(
+        "SENTRY_DSN", "SENTRY_ENVIRONMENT", "SENTRY_RELEASE", mode="before",
+    )
+    @classmethod
+    def _blank_means_unset(cls, v):
+        """An empty string is "not configured", not a value.
+
+        CI and hosting dashboards pass an unset secret through as "". That is
+        exactly how every scheduled job in schedulers.yml died: SMTP_ENABLED=""
+        cannot parse as a bool. A DSN of "" must mean "off", and a sample rate
+        of "" must mean the default, not a refusal to start.
+        """
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("SENTRY_DSN", mode="after")
+    @classmethod
+    def _dsn_is_a_dsn(cls, v):
+        """Refuse something that is not a DSN, and say what one looks like.
+
+        Left to the SDK, a malformed value fails at import with "Unsupported
+        scheme ''", which tells nobody what to fix. The easy mistakes are
+        pasting the project id, the org slug, or one part of the key — values
+        that sit next to the DSN on Sentry's setup page.
+        """
+        if v is None:
+            return v
+        from sentry_sdk.utils import BadDsn, Dsn
+        try:
+            Dsn(v)
+        except BadDsn as exc:
+            raise ValueError(
+                f"SENTRY_DSN is not a DSN ({exc}). It is a URL of the form "
+                "https://<public-key>@o<org-id>.ingest.<region>.sentry.io/<project-id> "
+                "- in Sentry: Settings, Projects, <project>, Client Keys (DSN)."
+            ) from None
+        return v
+
+    @field_validator("SENTRY_TRACES_SAMPLE_RATE", mode="before")
+    @classmethod
+    def _blank_rate_is_off(cls, v):
+        # Same reasoning as above; the default here is a number, not None.
+        if isinstance(v, str) and not v.strip():
+            return 0.0
+        return v
+
+    @field_validator("SENTRY_TRACES_SAMPLE_RATE", mode="after")
+    @classmethod
+    def _rate_is_a_fraction(cls, v):
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("SENTRY_TRACES_SAMPLE_RATE must be between 0 and 1")
+        return v
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

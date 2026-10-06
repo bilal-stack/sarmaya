@@ -237,6 +237,23 @@ class TestTheNotificationQueue:
         assert "held rather than failed" in report["notifications"]["detail"]
         assert any("SMTP_ENABLED" in n for n in report["notes"])
 
+    def test_error_tracking_being_off_is_stated(self, db, tenant, make_user):
+        """Off is the default, and it is not a fault - but somebody looking
+        at a green console should not assume errors are being reported."""
+        report = SystemHealthService(db).report(make_user(UserRole.ADMIN))
+
+        assert any("SENTRY_DSN" in n for n in report["notes"])
+
+    def test_the_note_goes_once_error_tracking_is_on(
+        self, db, tenant, make_user, monkeypatch
+    ):
+        from app.core import error_tracking
+        monkeypatch.setattr(error_tracking, "is_enabled", lambda: True)
+
+        report = SystemHealthService(db).report(make_user(UserRole.ADMIN))
+
+        assert not any("SENTRY_DSN" in n for n in report["notes"])
+
     def test_given_up_messages_are_degraded_once_delivery_is_on(
         self, db, tenant, make_user, monkeypatch
     ):

@@ -135,3 +135,72 @@ class TestTheRequestId:
         two = client.get("/api/v1/dashboard/stats").headers["X-Request-ID"]
 
         assert one != two
+class TestTheIdOnAFailure:
+    """The 500 path, which this file's docstring is about and nothing tested.
+
+    The handler for an unhandled exception runs in Starlette's outermost
+    layer, after the request-id middleware's `finally` has already reset the
+    ContextVar. It read the id only from there, found None, and minted a fresh
+    one — so the id a client quoted from its error payload matched no log line
+    at all. The opposite of what the docstring above says was fixed.
+    """
+
+    @pytest.fixture
+    def failing(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.main import internal_exception_handler, request_id_middleware
+
+        # The real middleware and the real handler, on an app of their own, so
+        # a deliberately failing route never joins the application's routes.
+        app = FastAPI()
+        app.middleware("http")(request_id_middleware)
+        app.add_exception_handler(Exception, internal_exception_handler)
+
+        @app.get("/fails")
+        def fails():
+            raise RuntimeError("deliberate")
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_the_payload_carries_the_requests_own_id(self, failing):
+        response = failing.get("/fails", headers={"X-Request-ID": "quoted-by-client"})
+
+        assert response.status_code == 500
+        assert response.json()["error"]["correlation_id"] == "quoted-by-client"
+
+    def test_the_header_comes_back_on_a_failure_too(self, failing):
+        """Every other response gets it from the middleware. This one is built
+        after the middleware has unwound, so it has to set its own."""
+        response = failing.get("/fails", headers={"X-Request-ID": "on-the-500"})
+
+        assert response.headers.get("X-Request-ID") == "on-the-500"
+
+    def test_a_minted_id_matches_between_payload_and_header(self, failing):
+        response = failing.get("/fails")
+
+        assert response.json()["error"]["correlation_id"] == response.headers["X-Request-ID"]
+
+    def test_the_exception_log_line_carries_the_id(self, failing, caplog):
+        """The record a person searches for. It used to be the one line from
+        the request that the id did not find."""
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            failing.get("/fails", headers={"X-Request-ID": "find-me"})
+
+        records = [r for r in caplog.records if r.name == "app.main"]
+        assert records, "the handler logged nothing"
+        assert records[-1].request_id == "find-me"
+        assert "find-me" in records[-1].getMessage()
+
+    def test_the_client_address_is_a_field_not_part_of_the_message(
+        self, failing, caplog
+    ):
+        """Still filterable in the JSON logs; no longer free text that leaves
+        the process inside an error report."""
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            failing.get("/fails")
+
+        record = [r for r in caplog.records if r.name == "app.main"][-1]
+        assert record.ip_address == "testclient"
+        assert "testclient" not in record.getMessage()

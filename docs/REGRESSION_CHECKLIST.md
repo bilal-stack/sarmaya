@@ -99,6 +99,13 @@ vendor API fails for reasons that have nothing to do with the change.
 - [ ] **QuickBooks, second run**: run the drain again. The same entry must not
       post twice. The `DocNumber` check is the only thing standing between a
       lost response and a duplicated expense in somebody's ledger.
+- [ ] **Sentry** [first deploy, and after any change to SENTRY_DSN]: run
+      `python -m scripts.sentry_check` in the deployed environment and find
+      `RuntimeError: Sentry check` in the project's Issues, tagged
+      `component=check`. The suite proves what a report contains against a
+      transport that writes to a list; only a real send proves the key, the
+      project and the network path. Then open the event and confirm it
+      carries no request body and no frame variables. Resolve it.
 
 ## 5. Browser-level behaviour
 

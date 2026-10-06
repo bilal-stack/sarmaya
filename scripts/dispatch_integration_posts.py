@@ -29,6 +29,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import SessionLocal, set_tenant_context
+from app.core.error_tracking import init_error_tracking
 from app.core.logging_config import configure_logging
 from app.core.roles import ADMIN
 
@@ -37,6 +38,10 @@ from app.core.roles import ADMIN
 # so their output is read in a platform log viewer far more often than by
 # a person at a terminal.
 configure_logging(debug=settings.DEBUG)
+# A job that fails for one tenant logs it and carries on to the next, so the
+# failure never surfaces as a crash. The logging integration turns that
+# logger.exception into a report. A no-op unless SENTRY_DSN is set.
+init_error_tracking(component="job:dispatch_integration_posts")
 logger = logging.getLogger("dispatch_integration_posts")
 
 
