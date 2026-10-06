@@ -48,4 +48,4 @@ moto[s3]>=5.0,<6
 # [tool.mypy] for what it would take to widen it.
 #
 #   mypy            # uses the scope and settings from pyproject.toml
-mypy>=1.11,<3
+mypy>=2.4.0,<3
