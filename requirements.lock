@@ -169,7 +169,7 @@ pypdf2==3.0.1
     # via -r requirements.txt
 python-dateutil==2.9.0.post0
     # via botocore
-python-dotenv==1.2.3
+python-dotenv==1.2.4
     # via
     #   -r requirements.txt
     #   pydantic-settings
