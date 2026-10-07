@@ -9,7 +9,7 @@
 # is enabled, what is ignored, and why.
 -r requirements.txt
 
-ruff>=0.6,<1
+ruff>=0.16.10,<1
 
 # The test runner. It lived in requirements.txt under a comment reading
 # "optional—remove from production", which nobody had acted on — so the
