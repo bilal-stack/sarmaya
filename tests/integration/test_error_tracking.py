@@ -305,6 +305,21 @@ class TestTheScheduledJobs:
         assert event["tags"]["component"] == "job:run_workflow_timers"
         assert event["exception"]["values"][0]["type"] == "ValueError"
 
+    def test_a_failed_delivery_does_not_report_its_recipient(self, sentry_events):
+        """The exact line that leaked. The notification service logs a failed
+        SMTP send as an error — so it becomes an event — with the recipient's
+        address as a parameter. The report should still say what failed."""
+        log = logging.getLogger("app.services.notification_service")
+        try:
+            raise ConnectionRefusedError("smtp down")
+        except ConnectionRefusedError:
+            log.exception("SMTP delivery to %s failed", "a.person@example.com")
+
+        event = _only_event(sentry_events)
+        blob = json.dumps(event, default=str)
+        assert "a.person@example.com" not in blob
+        assert "SMTP delivery to" in event["logentry"]["formatted"]
+
     @pytest.mark.parametrize("job", [
         "dispatch_notifications", "run_workflow_timers", "dispatch_integration_posts",
     ])
@@ -365,6 +380,9 @@ class TestTheScrubber:
         "client_secret", "access_token", "api_key", "apikey",
         # Plurals, which a whole-word match would otherwise let through.
         "tokens", "secrets", "passwords",
+        # Personal data. Every one of these exists in a model or schema here.
+        "email", "work_email", "user_email", "to_email", "full_name", "phone",
+        "ip_address",
     ])
     def test_every_real_sensitive_field_is_caught(self, key):
         assert is_sensitive_key(key), key
@@ -374,6 +392,8 @@ class TestTheScrubber:
         # must match as a word or the migrations table goes too.
         "alembic_version", "routing_reason", "explain_approval_routing",
         "employee_number", "correlation_id", "invoice_number", "amount",
+        # A vendor's or company's name is what makes a report useful.
+        "name", "legal_name", "vendor_name",
     ])
     def test_ordinary_fields_survive(self, key):
         assert not is_sensitive_key(key), key
@@ -395,6 +415,11 @@ class TestTheScrubber:
         scrubbed = scrub_text(text)
         assert str(SALARY) not in scrubbed
         assert '"employee_number": "E-1"' in scrubbed
+
+    def test_an_email_with_no_key_at_all_is_caught_by_shape(self):
+        assert scrub_text(
+            "SMTP delivery to a.person+ap@example.co.uk failed"
+        ) == f"SMTP delivery to {REDACTED} failed"
 
     def test_an_iban_with_no_key_at_all_is_caught_by_shape(self):
         assert scrub_text(f"pay to {SECOND_IBAN} today") == f"pay to {REDACTED} today"
