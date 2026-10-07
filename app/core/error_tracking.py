@@ -54,6 +54,13 @@ REDACTED = "[Filtered]"
 SENSITIVE_WORDS = frozenset({
     "iban", "swift", "bic", "salary", "totp", "otp", "password", "passwd",
     "secret", "token",
+    # Personal data. Missing until the frontend's version of this module was
+    # tested against what a real browser session sent, where a logged user
+    # object carried its email and name out intact. The same gap was here:
+    # the notification service logs "SMTP delivery to <address> failed" as an
+    # error, which is an event, with the recipient in it. Bare `name` is
+    # deliberately absent — here it is nearly always a vendor's or company's.
+    "email", "phone", "ip",
 })
 
 #: Multi-word fragments, matched as substrings of the normalised key. Each is
@@ -62,6 +69,7 @@ SENSITIVE_PHRASES = (
     "account_number", "bank_account", "national_id", "tax_id",
     "recovery_code", "mfa_secret", "routing_number", "sort_code",
     "api_key", "apikey", "private_key",
+    "full_name", "first_name", "last_name",
 )
 
 #: An IBAN by shape: country code, two check digits, 11–30 alphanumerics. The
@@ -71,6 +79,10 @@ SENSITIVE_PHRASES = (
 IBAN_PATTERN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b")
 
 _SPLIT = re.compile(r"[_\-.\s]+")
+
+#: An email address by shape, for one that arrives with no key at all — the
+#: recipient in a delivery-failure message, say.
+EMAIL_PATTERN = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 
 #: `name=value` or `"name": value` inside free text: a pydantic repr in a log
 #: line, a dict printed into an exception message, JSON in a bytes literal.
@@ -102,7 +114,9 @@ def scrub_text(text: str) -> str:
             return f"{match.group('key')}{match.group('sep')}{REDACTED}"
         return match.group(0)
 
-    return IBAN_PATTERN.sub(REDACTED, _KEY_VALUE.sub(_redact, text))
+    text = _KEY_VALUE.sub(_redact, text)
+    text = EMAIL_PATTERN.sub(REDACTED, text)
+    return IBAN_PATTERN.sub(REDACTED, text)
 
 
 def scrub(value: Any) -> Any:
