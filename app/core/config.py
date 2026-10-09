@@ -112,9 +112,6 @@ class Settings(BaseSettings):
     #: Seconds. Short on purpose: this is on the request path.
     SMTP_TIMEOUT: int = 5
     
-    # AI Services
-    GOOGLE_CLOUD_VISION_CREDENTIALS: str = ""
-    
     # AI Configuration
     AI_PROVIDER: str = "openai"  # 'openai', 'claude', 'gemini', 'grok'
     AI_ENHANCED_OCR: bool = True  # Use AI to enhance OCR results

@@ -20,7 +20,6 @@ passlib[bcrypt]>=1.7.4,<2
 pyotp>=2.9,<3
 
 # AI / OCR
-google-cloud-vision>=3.16.0,<4
 google-cloud-documentai>=3.15.0,<4  # Document AI
 openai>=1.50
 anthropic>=0.40  # Claude provider
@@ -31,9 +30,6 @@ python-dotenv>=1.2.4
 pydantic>=2.13.5,<3
 pydantic-settings>=2.15.0,<3
 email-validator>=2.2,<3
-
-# File handling
-PyPDF2==3.0.1
 
 # HTTP client
 httpx>=0.28.1,<1.0
