@@ -42,7 +42,7 @@ httpx>=0.28.1,<1.0
 
 # OCR providers
 requests>=2.34.2  # For OCR.space API
-boto3>=1.43.93     # For AWS Textract (future)
+boto3>=1.43.108     # For AWS Textract (future)
 
 # Error tracking. Inert unless SENTRY_DSN is set; what it sends, and what it is
 # stopped from sending, is app/core/error_tracking.py.
