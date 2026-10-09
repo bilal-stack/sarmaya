@@ -65,7 +65,7 @@ google-auth==2.57.0
     #   google-genai
 google-cloud-documentai==3.15.0
     # via -r requirements.txt
-google-cloud-vision==3.15.0
+google-cloud-vision==3.16.0
     # via -r requirements.txt
 google-genai==2.28.0
     # via -r requirements.txt
