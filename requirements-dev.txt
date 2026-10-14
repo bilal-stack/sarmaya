@@ -17,7 +17,7 @@ ruff>=0.16.10,<1
 # image. CI installs this file, so moving it here changes nothing about what
 # runs and takes it out of what ships.
 pytest>=8.3,<9
-pytest-asyncio>=0.24,<0.25
+pytest-asyncio>=1.4.0,<1.5
 
 # Regenerates requirements.lock. MUST be run on Linux, which is what the image
 # and CI actually use:
